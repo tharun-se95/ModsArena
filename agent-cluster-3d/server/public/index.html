@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Cluster</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: words on the left (what is happening, what needs a look, the
+     moments so far), the tabletop in the middle, sessions on the right.
+     Warm paper and ink, one clay accent; status colors stay separate.
+     The office floor's colors are tokens too, with a dark set below.
+     The scene reads its colors from these tokens too (table.js). */
+  :root {
+    --bg: #f4f0e8;
+    --paper: #fbf9f4;
+    --ink: #1f1d1a;
+    --muted: #6d665d;
+    --line: #e2dbcf;
+    --accent: #b85c3c;
+    --ok: #5f8a68;
+    --warn: #b9832c;
+    --crit: #b4483a;
+    /* The scene's own materials */
+    --scene: #f1ece3;
+    --floor: #e9e2d6;
+    --thread: #8a8277;
+    --clay: #c46a48;
+    /* Critters, beads and books */
+    --coral: #ec7a5c; --teal: #2fa59a; --mustard: #e9ad35; --lilac: #9a7ae0;
+    --sky: #4b9be0; --leaf: #5fb35a; --pink: #e872a0;
+    /* The rooms: wooden floors, a wall color each, warm lamps */
+    --wood: #e6cfae; --wood-dark: #8a6446; --trim: #fbf6ec; --glow: #ffcf7a; --window: #bfe3f7; --gem: #f2c14e;
+    --room-a: #f6d8c6; --room-b: #cfe9dd; --room-c: #dcdaf5; --room-d: #f5e4b0; --room-e: #f3d0dc; --room-f: #cfe2f3;
+    /* The office around the rooms: carpet, outer walls, desks and the coffee corner */
+    --night: #23345e; --dawn: #f7c59c; --dusk: #d993a6;
+    --carpet: #c9d3cf; --outer-wall: #efe9df; --desk: #f1e6d4; --tile: #f4efe6; --counter: #8fb8b0; --fridge: #f7f5f0;
+    --serif: "Source Serif 4", "Iowan Old Style", Georgia, serif;
+    --sans: "Geist", -apple-system, "Segoe UI", system-ui, sans-serif;
+    --mono: "Geist Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1c1b19; --paper: #24221f; --ink: #ece7df; --muted: #a39b90; --line: #3a3631;
+      --accent: #d98463; --ok: #8bb592; --warn: #d6a454; --crit: #e07a6a;
+      --scene: #1e1d1a; --floor: #26231f; --thread: #8d867b; --clay: #d98463;
+      --coral: #f08a6e; --teal: #4cc0b4; --mustard: #f0bb4f; --lilac: #ac90ea; --sky: #66aeea; --leaf: #7cc677; --pink: #ee8ab0;
+      --wood: #6b5442; --wood-dark: #3f2f24; --trim: #5e564c; --glow: #ffc266; --window: #3f6f96; --gem: #f5c95a;
+      --room-a: #5a443a; --room-b: #36504a; --room-c: #45425e; --room-d: #594f33; --room-e: #573f4b; --room-f: #364b5c;
+      --night: #121a33; --dawn: #a8705a; --dusk: #7a4f66;
+      --carpet: #343c3a; --outer-wall: #3b3732; --desk: #7a6552; --tile: #4a4540; --counter: #3e5f5a; --fridge: #b9b4ab;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1c1b19; --paper: #24221f; --ink: #ece7df; --muted: #a39b90; --line: #3a3631;
+    --accent: #d98463; --ok: #8bb592; --warn: #d6a454; --crit: #e07a6a;
+    --scene: #1e1d1a; --floor: #26231f; --thread: #8d867b; --clay: #d98463;
+    --coral: #f08a6e; --teal: #4cc0b4; --mustard: #f0bb4f; --lilac: #ac90ea; --sky: #66aeea; --leaf: #7cc677; --pink: #ee8ab0;
+    --wood: #6b5442; --wood-dark: #3f2f24; --trim: #5e564c; --glow: #ffc266; --window: #3f6f96; --gem: #f5c95a;
+    --room-a: #5a443a; --room-b: #36504a; --room-c: #45425e; --room-d: #594f33; --room-e: #573f4b; --room-f: #364b5c;
+    --night: #121a33; --dawn: #a8705a; --dusk: #7a4f66;
+    --carpet: #343c3a; --outer-wall: #3b3732; --desk: #7a6552; --tile: #4a4540; --counter: #3e5f5a; --fridge: #b9b4ab;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.55 var(--sans); }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+
+  /* The office fills the window. Everything else floats over it as an
+     office object: a top bar, a pinned notice card (right now, with sticky
+     notes for what needs a look), a receipt tape of moments, and the
+     directory of sessions, which turns into a clipboard for the one you
+     pick. table.js frames the office in the space they leave free. */
+  .app { position: fixed; inset: 0; }
+  .stage-wrap { position: absolute; inset: 0; background: var(--scene); overflow: hidden; }
+  #stage { position: absolute; inset: 0; }
+  #stage canvas { display: block; }
+  .labels { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+  .hud { position: absolute; z-index: 5; }
+  .paper { background: color-mix(in srgb, var(--paper) 90%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid color-mix(in srgb, var(--line) 80%, transparent); border-radius: 14px; box-shadow: 0 10px 30px rgba(40, 30, 20, 0.12), 0 1px 2px rgba(40, 30, 20, 0.08); }
+
+  .topbar { top: 12px; left: 16px; right: 16px; display: flex; align-items: center; gap: 12px; pointer-events: none; }
+  .topbar > * { pointer-events: auto; }
+  .brand { display: inline-flex; align-items: center; gap: 10px; padding: 6px 14px 6px 10px; border-radius: 999px; }
+  .mark { width: 20px; height: 20px; }
+  .word { font: 600 16px var(--serif); letter-spacing: -0.01em; }
+  .controls { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; padding: 4px 6px; border-radius: 999px; }
+  .status { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; padding: 3px 8px; }
+  .status i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 20%, transparent); }
+
+  .left { top: 64px; left: 16px; bottom: 16px; width: 290px; display: flex; flex-direction: column; gap: 12px; pointer-events: none; }
+  .left > * { pointer-events: auto; }
+  .board { position: relative; padding: 18px 16px 14px; flex: none; max-height: 58%; overflow-y: auto; }
+  .board::before { content: ""; position: absolute; top: 8px; left: 50%; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--crit); box-shadow: 0 2px 2px rgba(0, 0, 0, 0.25), inset -2px -2px 0 rgba(0, 0, 0, 0.15); }
+  .eyebrow { font: 500 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+  #now p { margin: 0 0 6px; font: 400 16.5px/1.42 var(--serif); text-wrap: pretty; }
+  #now p + p { font-size: 13.5px; color: var(--muted); }
+  ul { list-style: none; margin: 0; padding: 0; }
+  #look { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  #look:empty { display: none; }
+  #look li { width: calc(50% - 4px); }
+  #look li:only-child { width: 100%; }
+  #look button, #look li > span { display: block; width: 100%; height: 100%; padding: 8px 9px 9px; font: 12px/1.35 var(--sans); color: #3b3226; background: #fbe7a1; box-shadow: 0 3px 6px rgba(60, 40, 10, 0.18); border-radius: 2px 2px 8px 2px; transform: rotate(-1.2deg); transition: transform 0.15s; }
+  #look li:nth-child(even) button { transform: rotate(1.4deg); }
+  #look button { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+  #look li.bad button { background: #f8cdd6; }
+  #look li.calm span { background: color-mix(in srgb, var(--leaf) 30%, #fffbe9); transform: rotate(-0.6deg); }
+  #look button:hover { transform: rotate(0) translateY(-2px); }
+  #look .dot { display: none; }
+
+  .tape { position: relative; margin-top: auto; flex: 0 1 auto; min-height: 0; overflow-y: auto; padding: 12px 14px 10px; border-radius: 4px 4px 14px 14px; border-top: 2px dashed color-mix(in srgb, var(--muted) 45%, transparent); }
+  #moments li { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-top: 1px dashed var(--line); font-size: 12px; line-height: 1.38; }
+  #moments li:first-child { border-top: 0; }
+  #moments li:nth-child(n+5) { opacity: 0.75; }
+  #moments li:nth-child(n+8) { opacity: 0.5; }
+  #moments li time { color: var(--muted); font: 11px var(--mono); white-space: nowrap; }
+  #moments li.bad span { color: var(--crit); }
+  #moments li.note span { color: var(--accent); }
+
+  #side { top: 64px; right: 16px; width: 320px; max-height: calc(100% - 80px); overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 6px; }
+  #side.clipboard { padding-top: 26px; border-top: 0; margin-top: 10px; }
+  #side.clipboard::before { content: ""; position: sticky; top: -26px; align-self: center; flex: none; width: 92px; height: 18px; margin: -36px 0 6px; border-radius: 6px 6px 10px 10px; background: linear-gradient(#a59a8c, #7d7266); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25); z-index: 1; }
+  .sideh { display: flex; align-items: baseline; justify-content: space-between; font: 600 15px var(--serif); margin: 0 0 4px; }
+  .sideh small { font: 500 10.5px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  .room { display: flex; align-items: center; gap: 8px; margin: 10px 0 2px; font: 600 12.5px var(--serif); color: var(--muted); }
+  .room i { width: 12px; height: 12px; border-radius: 3px; border: 1px solid color-mix(in srgb, var(--ink) 15%, transparent); }
+  .room-a { background: var(--room-a); } .room-b { background: var(--room-b); } .room-c { background: var(--room-c); } .room-d { background: var(--room-d); } .room-e { background: var(--room-e); } .room-f { background: var(--room-f); }
+  .entry { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 2px 8px; padding: 7px 8px; border-radius: 10px; transition: background 0.15s; }
+  .entry:hover, .entry.on { background: color-mix(in srgb, var(--line) 55%, transparent); }
+  .entry .dot { margin: 0; }
+  .entry .ename { font: 500 13px/1.3 var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .entry .estate { grid-column: 2 / 4; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .entry.past { opacity: 0.62; }
+  .entry .meter { grid-column: 2 / 4; height: 3px; }
+  .pct { font: 500 12px var(--mono); }
+  .entry .pct { font-size: 11px; }
+  .pct.ok { color: var(--ok); } .pct.warn { color: var(--warn); } .pct.crit { color: var(--crit); }
+
+  .hint { position: absolute; z-index: 5; left: 50%; bottom: 14px; transform: translateX(-50%); font-size: 11.5px; color: var(--muted); padding: 4px 12px; border-radius: 999px; white-space: nowrap; }
+
+  .tag { pointer-events: auto; cursor: pointer; white-space: nowrap; font-size: 10.5px; }
+  .tag.project { display: inline-flex; align-items: baseline; padding: 1px 8px; border-radius: 6px; background: color-mix(in srgb, var(--paper) 72%, transparent); backdrop-filter: blur(3px); }
+  .tag .pname { font: 600 11.5px var(--serif); color: color-mix(in srgb, var(--ink) 80%, transparent); letter-spacing: 0.01em; }
+  .tag.session { display: inline-flex; gap: 5px; align-items: baseline; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--paper) 62%, transparent); backdrop-filter: blur(3px); color: color-mix(in srgb, var(--ink) 78%, transparent); }
+  .tag.session.selected { background: var(--paper); color: var(--ink); box-shadow: 0 0 0 1.5px var(--accent); }
+  .tag .sname { font-weight: 500; max-width: 96px; overflow: hidden; text-overflow: ellipsis; }
+  .tag .pct { font-size: 9.5px; }
+
+  .meter { display: block; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+  .meter span { display: block; height: 100%; border-radius: inherit; }
+  .meter .ok { background: var(--ok); } .meter .warn { background: var(--warn); } .meter .crit { background: var(--crit); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; flex: none; }
+  .dot.crit { background: var(--crit); }
+  .dot.coral { background: var(--coral); } .dot.teal { background: var(--teal); } .dot.mustard { background: var(--mustard); } .dot.lilac { background: var(--lilac); }
+  .dot.sky { background: var(--sky); } .dot.leaf { background: var(--leaf); } .dot.pink { background: var(--pink); }
+  .back { color: var(--muted); font-size: 12.5px; }
+  .back:hover { color: var(--accent); }
+  .dtitle { font: 600 19px/1.25 var(--serif); margin: 4px 0 0; text-wrap: balance; }
+  .dtitle .dot { width: 10px; height: 10px; vertical-align: middle; }
+  .dmeta { margin: 0; color: var(--muted); font-size: 12.5px; }
+  .dgauge { display: flex; gap: 10px; align-items: baseline; margin-top: 6px; }
+  .dgauge .big { font: 500 26px var(--mono); }
+  .dgauge .big.ok { color: var(--ok); } .dgauge .big.warn { color: var(--warn); } .dgauge .big.crit { color: var(--crit); }
+  .dgauge span:last-child { color: var(--muted); font-size: 12.5px; }
+  #side h3 { font: 500 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 12px 0 2px; }
+  .line { margin: 0; font-size: 12.5px; display: flex; align-items: center; flex-wrap: wrap; }
+  .line.mono { font: 12px var(--mono); }
+  .line.bad { color: var(--crit); }
+  .muted { color: var(--muted); }
+  .line .muted { margin-left: 6px; }
+
+  [hidden] { display: none !important; }
+  .status.down i { background: var(--crit); box-shadow: 0 0 0 4px color-mix(in srgb, var(--crit) 20%, transparent); }
+  .sound { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; padding: 3px 8px; border-radius: 999px; }
+  .sound:hover { color: var(--ink); background: color-mix(in srgb, var(--line) 50%, transparent); }
+  .sound svg { width: 16px; height: 16px; }
+  .sound[aria-pressed="true"] .cross, .sound[aria-pressed="false"] .waves { display: none; }
+  .toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; cursor: pointer; padding: 3px 8px; }
+  .toggle input { accent-color: var(--accent); margin: 0; }
+  .tag.project { pointer-events: auto; cursor: pointer; }
+  .tag.project.focused { box-shadow: 0 0 0 1.5px var(--accent); }
+  .tag.project.coffee { pointer-events: none; }
+  .tag.project.focused .pname { color: var(--accent); }
+  .tag .pmore { margin-left: 6px; font-size: 10px; color: var(--muted); }
+  .tag.session.past { opacity: 0.6; }
+  .tag.session.crowded .sname { display: none; }
+  .tag.session.covered, .tag.project.covered { visibility: hidden; }
+  .tag.session.past .sname { font-weight: 400; }
+
+  /* The hover bubble over a critter, and the flags that float over one.
+     The bubble sits above every label (the label layer is one stacking
+     context at z-index 1), below the panels. */
+  .bubble { position: absolute; z-index: 3; pointer-events: none; transform: translate(-50%, calc(-100% - 10px)); max-width: 240px; padding: 8px 11px; border-radius: 12px; background: var(--paper); border: 1px solid var(--line); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16); font-size: 11.5px; line-height: 1.38; }
+  .bubble::after { content: ""; position: absolute; left: 50%; bottom: -6px; width: 10px; height: 10px; background: var(--paper); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); transform: translateX(-50%) rotate(45deg); }
+  .bubble b { display: block; font: 600 12.5px/1.3 var(--serif); }
+  .bubble b .dot { width: 7px; height: 7px; margin-right: 6px; vertical-align: 1px; }
+  .bubble p { margin: 1px 0 0; color: var(--muted); }
+  .bubble dl { margin: 5px 0 0; display: grid; gap: 1px; }
+  .bubble dl div { display: flex; gap: 8px; }
+  .bubble dt { color: var(--muted); min-width: 56px; }
+  .bubble dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; font-family: var(--mono); font-size: 10.5px; }
+  .flag { pointer-events: none; opacity: 0; transition: opacity 0.3s; }
+  .flag.on { opacity: 1; }
+  .flag.zzz { font: 600 12px var(--serif); color: var(--muted); }
+  .flag.zzz i { display: inline-block; font-style: normal; animation: zzz 2.4s ease-in-out infinite; }
+  .flag.zzz i:nth-child(2) { font-size: 10px; animation-delay: 0.4s; }
+  .flag.zzz i:nth-child(3) { font-size: 8px; animation-delay: 0.8s; }
+  @keyframes zzz { 0% { transform: translate(0, 4px); opacity: 0; } 30% { opacity: 1; } 100% { transform: translate(6px, -14px); opacity: 0; } }
+  .flag.oops { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--crit); color: #fff; font: 700 11px var(--sans); transform: scale(0.6); transition: opacity 0.2s, transform 0.2s; }
+  .flag.oops.on { transform: scale(1); }
+  .flag.oops.small { width: 13px; height: 13px; font-size: 9px; }
+
+  /* Dark mode: the sticky notes dim a little. */
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) #look button, :root:not([data-theme="light"]) #look li > span { filter: brightness(0.86); } }
+  :root[data-theme="dark"] #look button, :root[data-theme="dark"] #look li > span { filter: brightness(0.86); }
+
+  /* Narrow screens: the notice card shrinks to a strip under the top bar,
+     the tape goes away, and the directory becomes a sheet at the bottom. */
+  @media (max-width: 900px) {
+    .left { right: 16px; width: auto; bottom: auto; }
+    .board { max-height: 132px; padding: 14px 14px 10px; }
+    .board::before { display: none; }
+    #now p { font-size: 14.5px; }
+    #now p + p, .tape { display: none; }
+    #look li { width: auto; flex: 1 1 140px; }
+    #side { top: auto; bottom: 12px; left: 12px; right: 12px; width: auto; max-height: 36%; }
+    .hint { display: none; }
+    .word { font-size: 15px; }
+    .controls .toggle span, .controls .sound span { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { .flag.zzz i { animation: none; } #look button { transition: none; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <main class="stage-wrap">
+    <div id="stage" aria-label="Your sessions in an office: each project is a room, each session a colorful critter at its own desk, its subagents stand behind it, and small beads rise with each tool call"></div>
+
+    <header class="hud topbar">
+      <span class="brand paper">
+        <svg class="mark" viewBox="0 0 22 22" aria-hidden="true"><circle cx="11" cy="11" r="4.2" fill="var(--accent)"/><circle cx="11" cy="11" r="8.6" fill="none" stroke="var(--line)" stroke-width="1.6"/><circle cx="18.2" cy="6.4" r="2" fill="var(--ink)"/></svg>
+        <span class="word">Agent Cluster</span>
+      </span>
+      <span class="controls paper">
+        <button class="sound" id="sound" type="button" aria-pressed="true" title="Office sounds">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8h3l4-3.5v11L6 12H3z" fill="currentColor"/><path class="waves" d="M13 7.5a3.5 3.5 0 0 1 0 5M15 5.5a6.4 6.4 0 0 1 0 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path class="cross" d="M13.5 8l4 4m0-4l-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <span>Sound on</span>
+        </button>
+        <label class="toggle" title="Show past sessions"><input type="checkbox" id="show-past" checked> <span>Past sessions</span></label>
+        <span class="status" id="conn"><i></i><span>Connecting…</span></span>
+      </span>
+    </header>
+
+    <div class="hud left">
+      <section class="board paper" aria-label="Right now">
+        <p class="eyebrow">Right now</p>
+        <div id="now"></div>
+        <ul id="look" aria-label="Needs a look"></ul>
+      </section>
+      <section class="tape paper" aria-label="Moments">
+        <p class="eyebrow">Moments</p>
+        <ul id="moments"></ul>
+      </section>
+    </div>
+
+    <aside class="hud paper" id="side" aria-live="polite"></aside>
+    <span class="hint paper">Drag to look around &middot; hover a critter to see what it&rsquo;s doing &middot; click a room&rsquo;s sign to zoom in</span>
+  </main>
+</div>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>
