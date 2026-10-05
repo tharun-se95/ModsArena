@@ -64,61 +64,6 @@ graph.scene().background = new THREE.Color('#05060d')
 graph.scene().add(new THREE.AmbientLight(0x8899bb, 1.2))
 graph.cameraPosition({ z: 520 })
 
-// ---------------------------------------------------------------------------
-// View mode. 3D: look at the layout head-on and orbit freely. 2.5D: a fixed
-// camera tilted down onto the layout as onto a floor, with a grid under it;
-// drag pans and scroll zooms, so the picture never turns over.
-
-const TILT = (55 * Math.PI) / 180 // from straight on toward looking down
-const MODE_KEY = 'agent-cluster-3d:view-mode'
-let mode = '3d'
-try {
-  if (localStorage.getItem(MODE_KEY) === '2.5d') mode = '2.5d'
-} catch {
-  // No storage (a private window, a preview): stay with the default.
-}
-
-// The floor is sized to the structure on each framing, so it ends just past
-// the content instead of running off to the horizon.
-let floor = makeFloor(1200)
-function makeFloor(size) {
-  const cells = Math.max(8, Math.round(size / 60))
-  const grid = new THREE.GridHelper(cells * 60, cells, 0x2a4566, 0x16243a)
-  grid.rotation.x = Math.PI / 2
-  grid.material.transparent = true
-  grid.material.opacity = 0.7
-  grid.material.depthWrite = false
-  graph.scene().add(grid)
-  return grid
-}
-
-function cameraFor(target, distance) {
-  if (mode === '3d') return { x: target.x, y: target.y, z: target.z + distance }
-  return { x: target.x, y: target.y - distance * Math.sin(TILT), z: target.z + distance * Math.cos(TILT) }
-}
-
-function setMode(next) {
-  mode = next
-  try {
-    localStorage.setItem(MODE_KEY, mode)
-  } catch {
-    // Remembering is a convenience only.
-  }
-  const controls = graph.controls()
-  const flat = mode === '2.5d'
-  controls.enableRotate = !flat
-  controls.screenSpacePanning = true
-  controls.mouseButtons = flat
-    ? { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }
-    : { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }
-  controls.touches = flat
-    ? { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_PAN }
-    : { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }
-  floor.visible = flat
-  for (const b of document.querySelectorAll('[data-mode]')) b.setAttribute('aria-pressed', String(b.dataset.mode === mode))
-  frame()
-}
-
 function isLinkActive(l) {
   const target = model.nodes.get(model.idOf(l.target))
   return target?.status === 'active' && !target.past
@@ -136,8 +81,7 @@ const projectOf = n => (n.kind === 'project' ? n.projectId : model.nodes.get(mod
 
 // Look at a node head-on from in front; everything lies near the z = 0 plane.
 function lookAt(n, distance) {
-  const target = { x: n.fx ?? n.x, y: n.fy ?? n.y, z: n.fz ?? n.z }
-  graph.cameraPosition(cameraFor(target, distance), target, 1000)
+  graph.cameraPosition({ x: n.fx ?? n.x, y: n.fy ?? n.y, z: (n.fz ?? n.z) + distance }, { x: n.fx ?? n.x, y: n.fy ?? n.y, z: n.fz ?? n.z }, 1000)
 }
 
 function select(n) {
@@ -214,14 +158,7 @@ function frame(ms = 900) {
   const aspect = stage.clientWidth / Math.max(1, stage.clientHeight)
   const distance = Math.max(h, w / aspect) / 2 / Math.tan(fov / 2)
   const c = { x: (lo[0] + hi[0]) / 2, y: (lo[1] + hi[1]) / 2, z: 0 }
-  // Tilted, the layout's depth is foreshortened, so it can come a little closer.
-  graph.cameraPosition(cameraFor(c, mode === '3d' ? distance : distance * 0.92), c, ms)
-  const visible = floor.visible
-  graph.scene().remove(floor)
-  floor.geometry.dispose()
-  floor = makeFloor(Math.max(w, h) + 300)
-  floor.visible = visible
-  floor.position.set(c.x, c.y, -12)
+  graph.cameraPosition({ ...c, z: distance }, c, ms)
 }
 
 let framedStructure = ''
@@ -243,13 +180,9 @@ document.getElementById('show-past').addEventListener('change', e => {
 })
 document.getElementById('detail-close').addEventListener('click', () => hud.showDetail(null, pick))
 document.getElementById('back').addEventListener('click', () => setFilter(''))
-for (const b of document.querySelectorAll('[data-mode]')) b.addEventListener('click', () => setMode(b.dataset.mode))
 addEventListener('keydown', e => {
-  if (e.target.closest?.('input, select, textarea')) return
   if (e.key === 'Escape' && projectFilter) setFilter('')
-  if (e.key === 'v') setMode(mode === '3d' ? '2.5d' : '3d')
 })
-setMode(mode)
 
 // On a narrow screen the panels stack above and below the view, so the
 // canvas takes exactly the gap between them instead of hiding under them.

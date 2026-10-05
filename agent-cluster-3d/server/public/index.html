@@ -41,11 +41,7 @@
     .stats b { font-size: 19px; font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; }
     .stats span { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); }
     .view { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 14px; color: #fff; }
-    .seg { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; flex: none; }
-    .seg button { background: #0b1020; border: 0; padding: 2px 9px; font-size: 12px; color: var(--dim); cursor: pointer; }
-    .seg button + button { border-left: 1px solid var(--line); }
-    .seg button[aria-pressed="true"] { background: rgba(127, 231, 255, 0.16); color: var(--accent); }
-    #view-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #view-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #back { background: #0b1020; border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; cursor: pointer; color: var(--accent); white-space: nowrap; }
     .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 10px; }
     select { flex: 1; min-width: 0; background: #0b1020; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font: inherit; }
@@ -144,11 +140,7 @@
     </div>
     <div class="controls">
       <select id="project-filter" aria-label="Project"><option value="">All projects</option></select>
-      <label class="check"><input type="checkbox" id="show-past" checked> Past</label>
-      <div class="seg" role="group" aria-label="Camera">
-        <button type="button" data-mode="2.5d" aria-pressed="false" title="Tilted floor view: drag to pan, scroll to zoom (V)">2.5D</button>
-        <button type="button" data-mode="3d" aria-pressed="true" title="Free orbit: drag to rotate (V)">3D</button>
-      </div>
+      <label class="check"><input type="checkbox" id="show-past" checked> Past sessions</label>
     </div>
   </header>
 
