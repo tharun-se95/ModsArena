@@ -98,7 +98,8 @@ async function serveStatic(res, pathname) {
   if (rel.includes('..')) return void res.writeHead(400).end()
   try {
     const body = await readFile(join(PUBLIC, rel))
-    res.writeHead(200, { 'content-type': TYPES[extname(rel)] ?? 'application/octet-stream' })
+    // No caching: after a pull, a refresh always shows the current build.
+    res.writeHead(200, { 'content-type': TYPES[extname(rel)] ?? 'application/octet-stream', 'cache-control': 'no-store' })
     res.end(body)
   } catch {
     res.writeHead(404).end('not found')
