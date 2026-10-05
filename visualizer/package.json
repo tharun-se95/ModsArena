@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Source of the 3D cluster page the agent-cluster-3d bridge serves.",
   "scripts": {
-    "build": "esbuild src/main.js --bundle --minify --format=esm --target=es2020 --outfile=../agent-cluster-3d/server/public/app.js",
+    "build": "esbuild src/main.js --bundle --minify --format=esm --target=es2022 --outfile=../agent-cluster-3d/server/public/app.js",
     "watch": "npm run build -- --watch"
   },
   "dependencies": {

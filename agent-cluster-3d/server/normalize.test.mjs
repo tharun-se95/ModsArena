@@ -1,7 +1,7 @@
-// node --test agent-cluster-3d/server
+// node --test agent-cluster-3d/server/*.test.mjs
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { normalize } from './normalize.mjs'
+import { normalize, GAUGES, gaugeKey } from './normalize.mjs'
 
 test('mod events pass through, stamped when unstamped', () => {
   const [ev] = normalize({ kind: 'tool.start', session: 's1', id: 't1', tool: 'Bash' }, 42)
@@ -28,4 +28,12 @@ test('Agent tool calls are left to SubagentStart/Stop', () => {
   assert.equal(spawn.kind, 'agent.spawn')
   assert.equal(spawn.agent, 'a1')
   assert.equal(spawn.type, 'Explore')
+})
+
+test('context events pass through and gauges key per loop', () => {
+  const [m] = normalize({ kind: 'context.measure', session: 's', context: { tokens: 1, window: 2 } }, 1)
+  assert.ok(GAUGES.has(m.kind))
+  assert.equal(gaugeKey({ kind: 'agent.context', session: 's', agent: 'a' }), 'agent.context|s|a')
+  assert.equal(normalize({ kind: 'context.compact', session: 's', trigger: 'auto' }).length, 1)
+  assert.equal(normalize({ hook_event_name: 'PreCompact', session_id: 's', trigger: 'manual' })[0].trigger, 'manual')
 })

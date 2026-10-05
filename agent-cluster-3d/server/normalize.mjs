@@ -7,19 +7,30 @@
 //     hook stdin as-is: `{ hook_event_name, session_id, tool_name, ... }`.
 //
 // The schema (every event also carries `t`, ms since epoch, and `session`):
-//   session.start  { cwd?, model? }
-//   session.end    {}
+//   session.start  { cwd?, model?, project? { id, name, remote } }
+//   session.end    { reason?, resumeId? }
 //   turn.start     { agent?, turnId?, text? }
 //   turn.complete  { agent?, turnId?, durationMs?, reason?, context? }
 //   agent.spawn    { agent, parent?, type, description?, model?, background? }
 //   agent.end      { agent }
 //   tool.start     { agent?, id, tool, summary? }
 //   tool.end       { agent?, id, tool, ok }
+//   agent.idle     { agent }                      a teammate waiting for mail
+// Gauges (the bridge keeps only the newest per session and agent):
+//   context.measure   { context { tokens?, window, percent? }, costUsd?, rateLimits? }
+//   context.breakdown { window, used, categories [{ name, tokens, kind }] }
+//   agent.context     { agent?, tokens, window?, model? }   one request's input
+// And:
+//   context.compact   { agent?, trigger, before?, after? }
 
 const KINDS = new Set([
   'session.start', 'session.end', 'turn.start', 'turn.complete',
-  'agent.spawn', 'agent.end', 'tool.start', 'tool.end',
+  'agent.spawn', 'agent.end', 'agent.idle', 'tool.start', 'tool.end',
+  'context.measure', 'context.breakdown', 'context.compact', 'agent.context',
 ])
+
+export const GAUGES = new Set(['context.measure', 'context.breakdown', 'agent.context'])
+export const gaugeKey = ev => `${ev.kind}|${ev.session}|${ev.agent ?? ''}`
 
 // Agent spawning tools: the spawn itself is drawn as a satellite, not a tool leaf.
 const SPAWN_TOOLS = new Set(['Agent', 'Task'])
@@ -52,6 +63,8 @@ function fromClassic(p, now) {
         ...base, kind: 'agent.spawn', agent: String(p.agent_id ?? p.tool_use_id ?? now),
         type: p.agent_type ?? 'subagent',
       }]
+    case 'PreCompact':
+      return [{ ...base, kind: 'context.compact', trigger: p.trigger ?? 'auto' }]
     case 'SubagentStop':
       return [{ ...base, kind: 'agent.end', agent: String(p.agent_id ?? '') }]
     case 'PreToolUse':

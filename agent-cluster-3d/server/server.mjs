@@ -2,10 +2,11 @@
 // Claude Cluster 3D bridge: takes events from Claude Code, streams them to the
 // 3D visualizer over Server-Sent Events. Node built-ins only, no install step.
 //
-//   node server.mjs [--port 7337] [--demo]
+//   node server.mjs [--port 7337] [--demo] [--history-days 14]
 //
 //   POST /event    one event or an array (mod schema or classic hook stdin)
-//   GET  /stream   SSE: replays the recent log, then every new event
+//   GET  /stream   SSE: replays the recent log and gauges, then every new event
+//   GET  /history  past sessions read from ~/.claude/projects transcripts
 //   GET  /healthz  liveness probe the mod uses before spawning a bridge
 //   GET  /         the visualizer
 
@@ -13,7 +14,9 @@ import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { extname, join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { normalize } from './normalize.mjs'
+import { normalize, GAUGES, gaugeKey } from './normalize.mjs'
+import { findProject } from './projects.mjs'
+import { readHistory, tailContext } from './history.mjs'
 import { startDemo } from './demo.mjs'
 
 const args = process.argv.slice(2)
@@ -25,7 +28,8 @@ const option = (name, fallback) => {
 
 const PORT = Number(option('port', process.env.CLUSTER3D_PORT ?? 7337))
 const HOST = option('host', '127.0.0.1')
-const LOG_LIMIT = 5000
+const HISTORY_DAYS = Number(option('history-days', 14))
+const LOG_LIMIT = 8000
 const MAX_BODY = 1024 * 1024
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), 'public')
 const TYPES = {
@@ -35,16 +39,40 @@ const TYPES = {
   '.svg': 'image/svg+xml',
 }
 
+// Events in order, plus the newest reading of each gauge, which would
+// otherwise crowd everything else out of the log.
 const log = []
+const gauges = new Map()
 const clients = new Set()
 
+// The bridge names projects itself, so live and past sessions of one
+// repository land in one cluster whatever the producer called it.
+function enrich(ev) {
+  if (ev.kind !== 'session.start') return ev
+  const found = findProject(ev.project?.id ?? ev.cwd)
+  // Keep a producer's name when this machine knows no repository there.
+  if (!ev.project || found.remote) ev.project = found
+  return ev
+}
+
 function publish(events) {
-  for (const ev of events) {
-    log.push(ev)
+  for (const raw of events) {
+    const ev = enrich(raw)
+    if (GAUGES.has(ev.kind)) gauges.set(gaugeKey(ev), ev)
+    else log.push(ev)
     const frame = `data: ${JSON.stringify(ev)}\n\n`
     for (const res of clients) res.write(frame)
   }
   if (log.length > LOG_LIMIT) log.splice(0, log.length - LOG_LIMIT)
+}
+
+// Settings hooks carry no context figures, but they name the transcript.
+async function contextFromTranscript(payloads) {
+  for (const p of Array.isArray(payloads) ? payloads : [payloads]) {
+    if (p?.hook_event_name !== 'Stop' || !p.transcript_path) continue
+    const context = await tailContext(p.transcript_path)
+    if (context) publish([{ t: Date.now(), kind: 'agent.context', session: String(p.session_id), ...context }])
+  }
 }
 
 function readBody(req) {
@@ -75,15 +103,21 @@ async function serveStatic(res, pathname) {
   }
 }
 
+const json = (res, status, body) => {
+  res.writeHead(status, { 'content-type': 'application/json' })
+  res.end(JSON.stringify(body))
+}
+
 const server = createServer(async (req, res) => {
-  const { pathname } = new URL(req.url, 'http://localhost')
+  const { pathname, searchParams } = new URL(req.url, 'http://localhost')
 
   if (req.method === 'POST' && pathname === '/event') {
     try {
-      const events = normalize(JSON.parse(await readBody(req)))
+      const payload = JSON.parse(await readBody(req))
+      const events = normalize(payload)
       publish(events)
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ accepted: events.length }))
+      json(res, 200, { accepted: events.length })
+      void contextFromTranscript(payload)
     } catch (err) {
       res.writeHead(400).end(String(err.message ?? err))
     }
@@ -96,7 +130,7 @@ const server = createServer(async (req, res) => {
       'cache-control': 'no-cache',
       connection: 'keep-alive',
     })
-    res.write(`event: replay\ndata: ${JSON.stringify(log)}\n\n`)
+    res.write(`event: replay\ndata: ${JSON.stringify([...log, ...gauges.values()])}\n\n`)
     clients.add(res)
     const ping = setInterval(() => res.write(': ping\n\n'), 15000)
     req.on('close', () => {
@@ -106,9 +140,18 @@ const server = createServer(async (req, res) => {
     return
   }
 
+  if (req.method === 'GET' && pathname === '/history') {
+    try {
+      const days = Number(searchParams.get('days') ?? HISTORY_DAYS)
+      json(res, 200, { sessions: await readHistory({ days }) })
+    } catch (err) {
+      json(res, 500, { error: String(err.message ?? err) })
+    }
+    return
+  }
+
   if (pathname === '/healthz') {
-    res.writeHead(200, { 'content-type': 'application/json' })
-    res.end(JSON.stringify({ ok: true, name: 'agent-cluster-3d', events: log.length, viewers: clients.size }))
+    json(res, 200, { ok: true, name: 'agent-cluster-3d', events: log.length, viewers: clients.size })
     return
   }
 
