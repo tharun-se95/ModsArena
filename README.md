@@ -8,7 +8,7 @@ A live office of everything Claude Code is doing on your machine. Each project g
 
 **[Try the demo in your browser](https://tharun-se95.github.io/ModsArena/)**: sample activity, nothing to install.
 
-![Agent Office](docs/agent-office.png)
+![Agent Office: sessions at work in their rooms, a click gliding into one, and a hover showing what a session is doing](docs/agent-office.gif)
 
 ### Quick start
 

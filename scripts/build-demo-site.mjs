@@ -18,7 +18,10 @@ const app = readFileSync(join(pub, 'app.js'), 'utf8').replaceAll('</script', '<\
 const tag = '<script type="module" src="/app.js"></script>'
 if (!html.includes(tag)) throw new Error(`index.html no longer loads ${tag}; update this script`)
 
-const page = html.replace(tag, `<script>window.AGENT_OFFICE_DEMO = true</script>\n<script type="module">\n${app}\n</script>`)
+// A function, not a string: in a replacement string `$$`, `$&` and `$'` are
+// patterns, and the bundle is full of `$`.
+const page = html.replace(tag, () => `<script>window.AGENT_OFFICE_DEMO = true</script>\n<script type="module">\n${app}\n</script>`)
+if (!page.includes(app)) throw new Error('the bundle did not land in the page verbatim')
 mkdirSync(out, { recursive: true })
 writeFileSync(join(out, 'index.html'), page)
 writeFileSync(join(out, '.nojekyll'), '')
