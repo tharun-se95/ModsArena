@@ -6,6 +6,7 @@ import ForceGraph3D from '3d-force-graph'
 import * as THREE from 'three'
 import SpriteText from 'three-spritetext'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
+import { startDemo } from '../../agent-cluster-3d/server/demo.mjs'
 
 const TOOL_LINGER_MS = 6000 // a finished tool stays visible this long
 const FINISHED_AGENT_LIMIT = 12
@@ -477,6 +478,21 @@ addEventListener('resize', () => {
   bloom?.setSize(stage.clientWidth, stage.clientHeight)
 })
 
+// A page with no bridge behind it (the hosted preview) sets window.CLUSTER_DEMO
+// and plays the same synthetic activity as `server.mjs --demo`.
+function playDemo() {
+  const status = $('#conn')
+  status.textContent = 'demo'
+  status.className = 'live'
+  startDemo(events => {
+    for (const ev of events) {
+      apply(ev)
+      feedLine(ev)
+    }
+  })
+}
+
 setInterval(refreshStats, 500)
-connect()
+if (window.CLUSTER_DEMO) playDemo()
+else connect()
 requestAnimationFrame(render)
