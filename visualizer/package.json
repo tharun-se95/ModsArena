@@ -3,15 +3,13 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Source of the 3D cluster page the agent-cluster-3d bridge serves.",
+  "description": "Source of the tabletop page the agent-cluster-3d bridge serves.",
   "scripts": {
     "build": "esbuild src/main.js --bundle --minify --format=esm --target=es2022 --outfile=../agent-cluster-3d/server/public/app.js",
     "watch": "npm run build -- --watch"
   },
   "dependencies": {
-    "3d-force-graph": "^1.80.1",
-    "three": "^0.180.0",
-    "three-spritetext": "^1.10.0"
+    "three": "^0.180.0"
   },
   "devDependencies": {
     "esbuild": "^0.25.0"
