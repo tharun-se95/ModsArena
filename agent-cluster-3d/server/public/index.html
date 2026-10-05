@@ -34,6 +34,8 @@
     /* The rooms: wooden floors, a wall color each, warm lamps */
     --wood: #e6cfae; --wood-dark: #8a6446; --trim: #fbf6ec; --glow: #ffcf7a; --window: #bfe3f7; --gem: #f2c14e;
     --room-a: #f6d8c6; --room-b: #cfe9dd; --room-c: #dcdaf5; --room-d: #f5e4b0; --room-e: #f3d0dc; --room-f: #cfe2f3;
+    /* The office around the rooms: carpet, outer walls, desks and the coffee corner */
+    --carpet: #c9d3cf; --outer-wall: #efe9df; --desk: #f1e6d4; --tile: #f4efe6; --counter: #8fb8b0; --fridge: #f7f5f0;
     --serif: "Source Serif 4", "Iowan Old Style", Georgia, serif;
     --sans: "Geist", -apple-system, "Segoe UI", system-ui, sans-serif;
     --mono: "Geist Mono", ui-monospace, Menlo, Consolas, monospace;
@@ -46,6 +48,8 @@
       --coral: #f08a6e; --teal: #4cc0b4; --mustard: #f0bb4f; --lilac: #ac90ea; --sky: #66aeea; --leaf: #7cc677; --pink: #ee8ab0;
       --wood: #6b5442; --wood-dark: #3f2f24; --trim: #5e564c; --glow: #ffc266; --window: #3f6f96; --gem: #f5c95a;
       --room-a: #5a443a; --room-b: #36504a; --room-c: #45425e; --room-d: #594f33; --room-e: #573f4b; --room-f: #364b5c;
+    --carpet: #343c3a; --outer-wall: #3b3732; --desk: #7a6552; --tile: #4a4540; --counter: #3e5f5a; --fridge: #b9b4ab;
+      --carpet: #343c3a; --outer-wall: #3b3732; --desk: #7a6552; --tile: #4a4540; --counter: #3e5f5a; --fridge: #b9b4ab;
       color-scheme: dark;
     }
   }
@@ -56,6 +60,7 @@
     --coral: #f08a6e; --teal: #4cc0b4; --mustard: #f0bb4f; --lilac: #ac90ea; --sky: #66aeea; --leaf: #7cc677; --pink: #ee8ab0;
     --wood: #6b5442; --wood-dark: #3f2f24; --trim: #5e564c; --glow: #ffc266; --window: #3f6f96; --gem: #f5c95a;
     --room-a: #5a443a; --room-b: #36504a; --room-c: #45425e; --room-d: #594f33; --room-e: #573f4b; --room-f: #364b5c;
+    --carpet: #343c3a; --outer-wall: #3b3732; --desk: #7a6552; --tile: #4a4540; --counter: #3e5f5a; --fridge: #b9b4ab;
     color-scheme: dark;
   }
   * { box-sizing: border-box; }
@@ -136,10 +141,12 @@
   .toggle input { accent-color: var(--accent); margin: 0; }
   .tag.project { pointer-events: auto; cursor: pointer; }
   .tag.project.focused { border-color: var(--accent); }
+  .tag.project.coffee { pointer-events: none; }
   .tag.project.focused .pname { color: var(--accent); }
   .tag .pmore { margin-left: 8px; font-size: 11.5px; color: var(--muted); }
   .tag.session.past { opacity: 0.72; }
   .tag.session.crowded .sname { display: none; }
+  .tag.session.covered { visibility: hidden; }
   .tag.session.past .sname { font-weight: 400; }
   .scard.past { background: transparent; }
   .scard.past .stitle { font-weight: 400; }
@@ -177,7 +184,7 @@
   </section>
 
   <main class="stage-wrap">
-    <div id="stage" aria-label="Your sessions on an office floor: each project is a room, each session a colorful critter on its own rug, its subagents stand behind it, and small beads rise with each tool call"></div>
+    <div id="stage" aria-label="Your sessions in an office: each project is a room, each session a colorful critter at its own desk, its subagents stand behind it, and small beads rise with each tool call"></div>
     <span class="hint">Drag to look around<span class="more"> &middot; click a critter to see what it&rsquo;s doing &middot; click a project to zoom in</span></span>
   </main>
 

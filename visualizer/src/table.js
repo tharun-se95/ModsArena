@@ -1,5 +1,5 @@
-// The office floor: each project is a cozy room, each session a colorful
-// critter on its own rug, and each subagent a smaller critter standing
+// The office: each project is a cozy room, each session a colorful critter
+// on its own rug in front of a desk whose monitor glows while it works, and each subagent a smaller critter standing
 // behind its session, tied to it by a thread. Tool calls make the caller
 // hop and release a bead; a compaction sends a ripple across the room. The scene is reconciled from
 // model.js every frame, so it never holds state the model doesn't.
@@ -8,15 +8,19 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
 import { makeCharacter, pose } from './character.js'
-import { buildRoom, rug, FLOOR_TOP, WALL_H } from './office.js'
+import { buildRoom, rug, desk, coffeeCorner, officeShell, FLOOR_TOP, WALL_H, COFFEE_W, COFFEE_D } from './office.js'
 import { nodes, fill, sid, aid, idOf, WARN_AT } from './model.js'
 import { beadColor, escapeHtml } from './words.js'
 
 
-const ROW_DEPTH = 170 // one row of sessions, with their helpers behind
+const ROW_DEPTH = 160 // one row: helpers, desk, the session, its label
 const BACK_SPACE = 44 // along the back wall, for the shelf, window and plants
+const BEHIND = 76 // from a session back to its farthest helpers
+const IN_FRONT = 52 // from a session forward to the edge, room for its label
 const SIDE_SPACE = 80
-const ROOM_GAP = 64
+const OFFICE_MARGIN = 70 // open floor between the rooms and the office walls
+const DESK_Z = -34
+const ROOM_GAP = 96 // wide enough for the next room's sign to hang clear of this one
 const SESSION_GAP = 185
 // A room holds its sessions in a small grid, so a busy project stays
 // compact instead of stretching into a long thin strip.
@@ -118,18 +122,22 @@ export function mount(el, { pick }) {
 // Colors come from the page's tokens, so the scene follows light and dark.
 function readPalette() {
   const css = getComputedStyle(document.documentElement)
-  const keys = ['floor', 'line', 'ok', 'warn', 'crit', 'clay', 'thread', 'scene', 'wood', 'wood-dark', 'trim', 'pot', 'glow', 'window', 'gem', ...TINTS, ...ROOMS.map(r => `room-${r}`)]
+  const keys = ['floor', 'line', 'ok', 'warn', 'crit', 'clay', 'thread', 'scene', 'wood', 'wood-dark', 'trim', 'pot', 'glow', 'window', 'gem',
+    'desk', 'tile', 'counter', 'fridge', 'carpet', 'outer-wall', ...TINTS, ...ROOMS.map(r => `room-${r}`)]
   for (const k of keys) palette[k] = new THREE.Color(css.getPropertyValue(`--${k}`).trim() || '#888')
   scene.background = palette.scene
   floor.material.color.copy(palette.floor)
   // Rooms are rebuilt in the new colors on the next sync.
   for (const t of rooms.values()) { if (t.mesh) scene.remove(t.mesh); t.w = null }
+  if (coffee) { scene.remove(coffee.group); coffee = null }
+  if (shell) { scene.remove(shell); shell = null }
   layoutKey = ''
   for (const s of sessionViews.values()) {
     s.track.material.color.copy(palette.line)
     s.char.bulb.material.color.copy(palette.gem)
     s.char.bulb.material.emissive.copy(palette.gem)
     s.rug.material.color.copy(rugColor(s.tint, s.room))
+    placeDesk(s)
     s.gaugeKey = ''
   }
   for (const a of agentViews.values()) a.char.accentMat.color.copy(accent(a.tint))
@@ -140,10 +148,45 @@ const rugColor = (tint, room) => palette[tint].clone().lerp(palette[`room-${room
 
 function roomColors(room) {
   return {
-    wood: palette.wood, woodDark: palette['wood-dark'], wall: palette[`room-${room}`], trim: palette.trim,
+    wood: palette.wood, woodDark: palette['wood-dark'], wall: palette[`room-${room ?? 'a'}`], trim: palette.trim,
     pot: palette.coral.clone().lerp(palette['wood-dark'], 0.35), leaf: palette.leaf, shade: palette.trim, glow: palette.glow, sky: palette.window,
-    books: TINTS.map(t => palette[t]),
+    window: palette.window, desk: palette.desk, tile: palette.tile, counter: palette.counter, fridge: palette.fridge,
+    carpet: palette.carpet, outerWall: palette['outer-wall'],
+    books: TINTS.map(t => palette[t]), mugs: TINTS.map(t => palette[t]),
   }
+}
+
+// Each session's desk sits behind its rug, monitor facing you.
+function placeDesk(s) {
+  if (s.desk) s.group.remove(s.desk.group)
+  s.desk = desk(roomColors(s.room), palette[s.tint])
+  s.desk.group.position.set(0, FLOOR_TOP, DESK_Z)
+  s.desk.group.traverse(o => { if (o.isMesh) o.userData.pick = { kind: 'session', id: s.id } })
+  s.group.add(s.desk.group)
+}
+
+// The shared coffee corner and the office around everything.
+let coffee = null
+let shell = null
+let shellKey = ''
+
+function ensureCoffee() {
+  if (coffee) return coffee
+  const c = coffeeCorner(roomColors('a'))
+  coffee = { ...c, w: COFFEE_W, d: COFFEE_D, target: new THREE.Vector3(), center: new THREE.Vector3(), placed: false, label: label('<span class="pname">Coffee corner</span>', 'project coffee') }
+  coffee.label.obj.position.set(-25, 66, -COFFEE_D / 2 + 14)
+  coffee.group.add(coffee.label.obj)
+  scene.add(coffee.group)
+  return coffee
+}
+
+function ensureShell(W, D) {
+  const key = `${Math.round(W)}x${Math.round(D)}`
+  if (shell && key === shellKey) return
+  if (shell) scene.remove(shell)
+  shell = officeShell({ W, D, colors: roomColors('a') })
+  shellKey = key
+  scene.add(shell)
 }
 
 function label(html, cls) {
@@ -201,7 +244,7 @@ function ensureRoom(p) {
   }
   const cols = gridCols(p.sessions.length)
   const w = cols * SESSION_GAP + SIDE_SPACE
-  const d = Math.ceil(p.sessions.length / cols) * ROW_DEPTH + BACK_SPACE
+  const d = BACK_SPACE + BEHIND + (Math.ceil(p.sessions.length / cols) - 1) * ROW_DEPTH + IN_FRONT
   t.cols = cols
   if (t.w !== w || t.d !== d) {
     if (t.mesh) scene.remove(t.mesh)
@@ -230,6 +273,7 @@ function ensureSession(n) {
   s.char = makeCharacter({ build: 'session', bodyColor: palette[s.tint], inkColor: EYE, accentColor: palette.gem, pick: { kind: 'session', id: n.id } })
   s.rug = rug(rugColor(s.tint, s.room))
   s.group.add(s.rug)
+  placeDesk(s)
   s.char.root.scale.setScalar(SS)
   s.char.root.position.y = FLOOR_TOP
   s.track = flatRing(22, 23.6, palette.line)
@@ -291,35 +335,34 @@ function dropAgent(id) {
 // table fill the stage best. Positions ease, so a change never jumps.
 
 function layout(list) {
-  const widths = list.map(p => rooms.get(p.id).w)
+  // The coffee corner is packed in with the rooms, last.
+  const items = [...list.map(p => rooms.get(p.id)), ensureCoffee()]
   const sw = stage.clientWidth || 1
   const sh = stage.clientHeight || 1
   let best = null
-  for (let cols = 1; cols <= Math.max(1, list.length); cols++) {
+  for (let cols = 1; cols <= items.length; cols++) {
     const rows = []
-    for (let i = 0; i < list.length; i += cols) rows.push(widths.slice(i, i + cols))
-    const W = Math.max(...rows.map(r => r.reduce((a, b) => a + b, 0) + (r.length - 1) * ROOM_GAP), 1)
-    const depths = []
-    for (let i = 0; i < list.length; i += cols) depths.push(Math.max(...list.slice(i, i + cols).map(p => rooms.get(p.id).d)))
-    const D = depths.reduce((a, b) => a + b, 0) + (depths.length - 1) * ROOM_GAP
+    for (let i = 0; i < items.length; i += cols) rows.push(items.slice(i, i + cols))
+    const W = Math.max(...rows.map(r => r.reduce((a, t) => a + t.w, 0) + (r.length - 1) * ROOM_GAP)) + OFFICE_MARGIN * 2
+    const D = rows.reduce((a, r) => a + Math.max(...r.map(t => t.d)), 0) + (rows.length - 1) * ROOM_GAP + OFFICE_MARGIN * 2
     const scale = Math.min(sw / (W + 60), sh / (D * Math.sin(TILT) + 80))
     if (!best || scale > best.scale) best = { cols, W, D, scale }
   }
-  if (!best) return { W: 300, D: ROW_DEPTH }
-  let z = -best.D / 2
-  for (let i = 0; i < list.length; i += best.cols) {
-    const row = list.slice(i, i + best.cols)
-    const rowD = Math.max(...row.map(p => rooms.get(p.id).d))
-    const rowW = row.reduce((a, p) => a + rooms.get(p.id).w, 0) + (row.length - 1) * ROOM_GAP
+  let z = -best.D / 2 + OFFICE_MARGIN
+  for (let i = 0; i < items.length; i += best.cols) {
+    const row = items.slice(i, i + best.cols)
+    const rowD = Math.max(...row.map(t => t.d))
+    const rowW = row.reduce((a, t) => a + t.w, 0) + (row.length - 1) * ROOM_GAP
     let x = -rowW / 2
-    for (const p of row) {
-      const t = rooms.get(p.id)
-      t.target.set(x + t.w / 2, 0, z + rowD / 2)
+    for (const t of row) {
+      // Short items sit at the back of their row, against the window side.
+      t.target.set(x + t.w / 2, 0, z + t.d / 2)
       if (!t.placed) { t.center.copy(t.target); t.placed = true }
       x += t.w + ROOM_GAP
     }
     z += rowD + ROOM_GAP
   }
+  ensureShell(best.W, best.D)
   return { W: best.W, D: best.D }
 }
 
@@ -338,7 +381,7 @@ function frame() {
   const hfov = 2 * Math.atan(Math.tan(vfov / 2) * aspect)
   let dist = Math.max((w + 50) / 2 / Math.tan(hfov / 2), (d * Math.sin(TILT) + 70) / 2 / Math.tan(vfov / 2))
   const corners = []
-  for (const x of [-w / 2, w / 2]) for (const z of [-d / 2, d / 2 + 30]) for (const y of [0, WALL_H + 16]) corners.push(new THREE.Vector3(c.x + x, y, c.z + z))
+  for (const x of [-w / 2, w / 2]) for (const z of [-d / 2, d / 2 + 30]) for (const y of [0, t ? WALL_H + 16 : 66]) corners.push(new THREE.Vector3(c.x + x, y, c.z + z))
   for (let i = 0; i < 4; i++) {
     camera.position.set(c.x, Math.sin(TILT) * dist, c.z + Math.cos(TILT) * dist)
     camera.lookAt(c.x, 8, c.z)
@@ -401,7 +444,6 @@ export function sync(showPast) {
     size = layout(list)
     for (const p of list) {
       const t = rooms.get(p.id)
-      const rows = Math.ceil(p.sessions.length / t.cols)
       p.sessions.forEach((n, j) => {
         const s = sessionViews.get(n.id)
         const row = Math.floor(j / t.cols)
@@ -410,7 +452,7 @@ export function sync(showPast) {
         s.home.set(
           t.target.x - ((inRow - 1) * SESSION_GAP) / 2 + col * SESSION_GAP,
           0,
-          t.target.z - ((rows - 1) * ROW_DEPTH) / 2 + row * ROW_DEPTH + BACK_SPACE / 2 + 10,
+          t.target.z - t.d / 2 + BACK_SPACE + BEHIND + row * ROW_DEPTH,
         )
         if (!s.placed) { s.group.position.copy(s.home); s.placed = true }
       })
@@ -487,6 +529,11 @@ export function animate() {
     t.center.lerp(t.target, 0.12)
     t.mesh.position.copy(t.center)
   }
+  if (coffee) {
+    coffee.center.lerp(coffee.target, 0.12)
+    coffee.group.position.copy(coffee.center)
+    coffee.animate(now)
+  }
 
   for (const s of sessionViews.values()) {
     const n = nodes.get(s.id)
@@ -506,6 +553,7 @@ export function animate() {
     // A resting critter fades toward the table.
     s.char.bodyMat.color.copy(palette[s.tint]).lerp(palette.line, asleep ? 0.6 : 0)
     s.char.bulb.visible = !asleep
+    s.desk.draw(now, asleep ? 'off' : busy > 0.5 ? 'busy' : 'idle', `#${palette[s.tint].getHexString()}`)
     updateGauge(s, f)
     const warn = !asleep && f >= WARN_AT
     if (warn && !s.alarm) { s.alarm = flatRing(26.5, 27.5, palette.crit); s.group.add(s.alarm) }
@@ -527,7 +575,7 @@ export function animate() {
     const ring = Math.floor(a.slot / 5)
     const ang = -Math.PI / 2 + ((a.slot % 5) - 2) * 0.62 + (ring % 2) * 0.31
     const r = 1 + ring * 0.4
-    const target = new THREE.Vector3(s.group.position.x + Math.cos(ang) * 58 * r, FLOOR_TOP, s.group.position.z + Math.sin(ang) * 46 * r)
+    const target = new THREE.Vector3(s.group.position.x + Math.cos(ang) * 74 * r, FLOOR_TOP, s.group.position.z + Math.sin(ang) * 62 * r)
     const grow = Math.min(1, (now - a.born) / 0.6)
     a.group.rotation.y = Math.atan2(s.group.position.x - a.group.position.x, s.group.position.z - a.group.position.z) * 0.45
     pose(a.char, now + a.slot, {
@@ -585,7 +633,8 @@ export function animate() {
   if ((tick++ % 12) === 0) declutter()
 }
 
-// When session labels collide, the less important one drops its name and
+// Room signs come first. A session label under a sign steps aside, and
+// when session labels collide, the less important one drops its name and
 // keeps only its percentage: the selected or hovered session first, then
 // live sessions, then past ones.
 let tick = 0
@@ -594,13 +643,16 @@ function declutter() {
     const n = nodes.get(s.id)
     return (selected === s.id || hovered === s.id ? 0 : n && !resting(n) ? 1 : 2) * 1e13 - recency(n ?? {})
   }
+  const overlaps = (r, list) => list.some(p => r.left < p.right + 4 && r.right > p.left - 4 && r.top < p.bottom + 2 && r.bottom > p.top - 2)
+  const signs = [...rooms.values(), ...(coffee ? [coffee] : [])].map(t => t.label.el.getBoundingClientRect())
   const placed = []
   for (const s of [...sessionViews.values()].sort((a, b) => rank(a) - rank(b))) {
-    s.label.el.classList.remove('crowded')
-    const r = s.label.el.getBoundingClientRect()
-    const hit = placed.some(p => r.left < p.right + 4 && r.right > p.left - 4 && r.top < p.bottom + 2 && r.bottom > p.top - 2)
-    if (hit && selected !== s.id && hovered !== s.id) s.label.el.classList.add('crowded')
-    placed.push(s.label.el.getBoundingClientRect())
+    const el = s.label.el
+    el.classList.remove('crowded', 'covered')
+    const mine = selected === s.id || hovered === s.id
+    if (!mine && overlaps(el.getBoundingClientRect(), signs)) { el.classList.add('covered'); continue }
+    if (!mine && overlaps(el.getBoundingClientRect(), placed)) el.classList.add('crowded')
+    placed.push(el.getBoundingClientRect())
   }
 }
 
