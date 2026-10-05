@@ -18,6 +18,7 @@ import {
 } from './office.js'
 import { nodes, fill, sid, aid, WARN_AT } from './model.js'
 import { beadColor, escapeHtml, activity, ago } from './words.js'
+import { sound } from './sound.js'
 
 const ROW_DEPTH = 160 // one row: helpers, desk, the session, its label
 const BACK_SPACE = 44 // along the back wall, for the shelf, window and plants
@@ -41,6 +42,22 @@ const BUSY_MS = 2500
 const DOZE_MS = 120000 // a live session idle this long dozes off
 const WALK_SPEED = 120
 const BREAK_S = 10 // how long a finished helper lingers over coffee
+const WAVE_S = 1.2
+const MEET = 38 // critters closer than this on the move wave at each other
+const PERSONAL = 21 // standing helpers keep at least this far apart
+// Where helpers stand behind their session's desk: a row of five, a
+// staggered row of four behind it, then either side of the session. All
+// within the session's own patch of floor, so neighbours never mingle.
+const SLOTS = [
+  [0, -62], [-32, -62], [32, -62], [-64, -62], [64, -62],
+  [-16, -90], [16, -90], [-48, -90], [48, -90],
+  [-76, -4], [76, -4], [-76, 20], [76, 20],
+]
+const slotAt = slot => {
+  const [x, z] = SLOTS[slot % SLOTS.length]
+  const lap = Math.floor(slot / SLOTS.length)
+  return [x + lap * 10, z + lap * 6]
+}
 // Eyes stay near-black in both themes, like the critters they're drawn from.
 const EYE = new THREE.Color('#1c1a17')
 // Critter colors, from CSS tokens. Sessions each get one from their id;
@@ -382,6 +399,11 @@ function ensureAgent(n, s) {
   a.group.visible = !a.gone
   scene.add(a.group)
   agentViews.set(n.id, a)
+  // The session waves hello to a helper that arrives while you watch.
+  if (!a.gone && clock() - mountedAt > 3) {
+    s.waveAt = clock()
+    sound.pop()
+  }
   return a
 }
 
@@ -529,8 +551,10 @@ function startBreak(a, s) {
   a.spot = free
   const room = roomOfSession(s)
   const spot = c.target.clone().add(c.spots[free])
-  const lane = aisleZ(room)
-  const x = aisleX()
+  // Each helper keeps to its own lane, so walkers don't stack up.
+  const offset = ((hash(a.id) % 5) - 2) * 9
+  const lane = aisleZ(room) + offset
+  const x = aisleX() + offset
   const path = [
     new THREE.Vector3(a.group.position.x, 0, lane),
     new THREE.Vector3(x, 0, lane),
@@ -539,6 +563,7 @@ function startBreak(a, s) {
   ]
   walk(a, a.group, path, () => {
     a.onBreak = clock()
+    sound.clink()
     const mug = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.15, 0.32, 12), new THREE.MeshStandardMaterial({ color: palette.trim }))
     mug.position.set(0.45, -0.12, 0.2)
     a.char.arms[1].add(mug)
@@ -653,8 +678,10 @@ export function pulse(ev) {
       view.hopAt = t
       view.lastAt = t
       if (session) session.lookAt = ev.agent ? owner : null
+      sound.keys()
     } else {
       view.failAt = t
+      sound.bonk()
     }
     const from = headOf(owner)
     if (from) addBead(from, ev.kind === 'tool.end' ? palette.crit : palette[beadColor(ev.tool)] ?? palette.line)
@@ -664,11 +691,13 @@ export function pulse(ev) {
     r.position.z = session.group.position.z
     scene.add(r)
     ripples.push({ r, born: t })
+    sound.hush()
   } else if (ev.kind === 'turn.start' && session && !ev.agent) {
     session.hopAt = t
   } else if (ev.kind === 'turn.complete' && session && !ev.agent) {
     const from = headOf(session.id)
     if (from) addConfetti(from)
+    sound.chime()
   }
 }
 
@@ -718,6 +747,58 @@ function oops(view, char, el, now) {
   const k = view.failAt ? (now - view.failAt) / 1.4 : 1
   char.rig.rotation.z = k < 1 ? Math.sin(now * 38) * 0.09 * (1 - k) : 0
   el.classList.toggle('on', k < 1)
+}
+
+// One arm up and waving.
+function waving(view, char, now) {
+  const k = view.waveAt ? (now - view.waveAt) / WAVE_S : 1
+  if (k >= 1) return
+  const arm = char.arms[0]
+  arm.rotation.x = 0
+  arm.rotation.z = -(2.1 + Math.sin(now * 16) * 0.35) * Math.sin(Math.min(1, k * 4) * Math.PI / 2)
+}
+
+// Critters on the move (walking in, off to coffee, or on their break) wave
+// when they pass each other, once per pair every so often.
+const greeted = new Map()
+function greetings(now) {
+  const movers = []
+  for (const a of agentViews.values()) {
+    if (a.gone || a.leaving || !a.endedAt || !(a.walk || a.onBreak)) continue
+    movers.push({ view: a, pos: a.group.position, walking: !!a.walk })
+  }
+  for (const s of sessionViews.values()) {
+    if (s.walk) movers.push({ view: s, pos: s.group.position.clone().add(s.body.position), walking: true })
+  }
+  for (let i = 0; i < movers.length; i++) {
+    for (let j = i + 1; j < movers.length; j++) {
+      const a = movers[i], b = movers[j]
+      if (!a.walking && !b.walking) continue
+      if (Math.hypot(a.pos.x - b.pos.x, a.pos.z - b.pos.z) > MEET) continue
+      const key = a.view.id < b.view.id ? `${a.view.id}|${b.view.id}` : `${b.view.id}|${a.view.id}`
+      if (now - (greeted.get(key) ?? -99) < 12) continue
+      greeted.set(key, now)
+      a.view.waveAt = b.view.waveAt = now
+      sound.hello()
+    }
+  }
+  if (greeted.size > 200) greeted.clear()
+}
+
+// Standing helpers nudge apart so nobody stands inside anybody else.
+function makeRoom() {
+  const standing = [...agentViews.values()].filter(a => !a.gone && !a.walk && !a.leaving && a.settled)
+  for (let i = 0; i < standing.length; i++) {
+    for (let j = i + 1; j < standing.length; j++) {
+      const p = standing[i].group.position, q = standing[j].group.position
+      const dx = q.x - p.x, dz = q.z - p.z
+      const d = Math.hypot(dx, dz) || 0.01
+      if (d >= PERSONAL) continue
+      const push = (PERSONAL - d) / 2
+      p.x -= (dx / d) * push; p.z -= (dz / d) * push
+      q.x += (dx / d) * push; q.z += (dz / d) * push
+    }
+  }
 }
 
 export function animate() {
@@ -785,6 +866,7 @@ export function animate() {
       asleep: dozing,
     })
     oops(s, s.char, s.oops.el, now)
+    waving(s, s.char, now)
     // A resting critter fades toward the floor's color.
     s.char.bodyMat.color.copy(palette[s.tint]).lerp(palette.line, asleep ? 0.6 : 0)
     s.char.bulb.visible = !asleep
@@ -808,9 +890,11 @@ export function animate() {
     if (!n || !s) continue
     if (n.status === 'done' && !a.endedAt) {
       a.endedAt = now
-      if (!a.gone) startBreak(a, s)
+      // A wave goodbye (and one back from the session), then off to coffee.
+      if (!a.gone) { a.waveAt = now; s.waveAt = now + 0.2; a.departAt = now + 0.9 }
     }
     if (a.gone) continue
+    if (a.departAt && now >= a.departAt) { a.departAt = null; startBreak(a, s) }
     oops(a, a.char, a.oops.el, now)
     const walking = stepWalk(a, dt)
 
@@ -818,6 +902,7 @@ export function animate() {
       // On the way to coffee, on a break, then off home.
       if (!walking && a.onBreak && !a.leaving && now - a.onBreak > BREAK_S) a.leaving = now
       pose(a.char, now + a.slot, { busy: walking ? 1 : 0, hop: 1 })
+      waving(a, a.char, now)
       if (a.onBreak && !a.leaving) {
         const table = coffee.target.clone().add(coffee.tableAt)
         const face = Math.atan2(table.x - a.group.position.x, table.z - a.group.position.z)
@@ -839,11 +924,8 @@ export function animate() {
       continue
     }
 
-    // Helpers stand in half circles behind their session, five to a ring.
-    const ring = Math.floor(a.slot / 5)
-    const ang = -Math.PI / 2 + ((a.slot % 5) - 2) * 0.62 + (ring % 2) * 0.31
-    const r = 1 + ring * 0.4
-    const target = new THREE.Vector3(s.group.position.x + Math.cos(ang) * 74 * r, FLOOR_TOP, s.group.position.z + Math.sin(ang) * 62 * r)
+    const [sx, sz] = slotAt(a.slot)
+    const target = new THREE.Vector3(s.group.position.x + sx, FLOOR_TOP, s.group.position.z + sz)
     const grow = Math.min(1, (now - a.born) / 0.6)
     a.group.rotation.y = Math.atan2(s.group.position.x - a.group.position.x, s.group.position.z - a.group.position.z) * 0.45
     pose(a.char, now + a.slot, {
@@ -851,12 +933,16 @@ export function animate() {
       hop: a.hopAt ? (now - a.hopAt) / 0.3 : 1,
       alarm: n.status === 'active' && fill(n) >= WARN_AT,
     })
+    waving(a, a.char, now)
     a.group.scale.setScalar(Math.max(0.01, grow < 1 ? grow * (1 + 0.2 * Math.sin(grow * Math.PI)) : 1))
     // New helpers drop in from above.
     target.y = FLOOR_TOP + (1 - grow) * (1 - grow) * 40
     a.group.position.lerp(target, grow < 1 || !a.settled ? 1 : 0.1)
     a.settled = true
   }
+
+  if (tick % 3 === 0) greetings(now)
+  makeRoom()
 
   for (let i = beads.length - 1; i >= 0; i--) {
     const b = beads[i], k = (now - b.born) / 1.6
@@ -988,4 +1074,4 @@ function bindPointer() {
   renderer.domElement.addEventListener('pointerleave', () => { hoverPick = null; hovered = null })
 }
 // ?debug reaches these through window.cluster.table.debug.
-export const debug = { sessionViews, agentViews, rooms, get camera() { return camera }, get stage() { return stage }, get controls() { return controls }, get coffee() { return coffee } }
+export const debug = { sessionViews, agentViews, rooms, get camera() { return camera }, get stage() { return stage }, get controls() { return controls }, get coffee() { return coffee }, greeted }

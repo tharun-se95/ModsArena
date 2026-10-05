@@ -8,6 +8,7 @@ import * as model from './model.js'
 import * as words from './words.js'
 import * as table from './table.js'
 import * as panels from './panels.js'
+import { unlock, isMuted, setMuted } from './sound.js'
 
 const HISTORY_REFRESH_MS = 60000
 const PANEL_REFRESH_MS = 700
@@ -33,6 +34,17 @@ addEventListener('keydown', e => {
   pick(null)
   table.focusProject(null)
 })
+
+// Sound: off until the page has been clicked or a key pressed (browsers
+// insist), and the mute button remembers your choice.
+const soundButton = document.getElementById('sound')
+function showSound() {
+  soundButton.setAttribute('aria-pressed', String(!isMuted()))
+  soundButton.querySelector('span').textContent = isMuted() ? 'Sound off' : 'Sound on'
+}
+soundButton.addEventListener('click', () => { setMuted(!isMuted()); showSound() })
+showSound()
+for (const type of ['pointerdown', 'keydown']) addEventListener(type, unlock, { once: true })
 
 const pastToggle = document.getElementById('show-past')
 pastToggle.addEventListener('change', () => {

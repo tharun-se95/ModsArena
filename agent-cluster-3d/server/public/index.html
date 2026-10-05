@@ -138,7 +138,11 @@
 
   [hidden] { display: none !important; }
   .status.down i { background: var(--crit); box-shadow: 0 0 0 4px color-mix(in srgb, var(--crit) 20%, transparent); }
-  .toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; cursor: pointer; }
+  .sound { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; padding: 3px 8px; border-radius: 999px; }
+  .sound:hover { color: var(--ink); background: color-mix(in srgb, var(--line) 50%, transparent); }
+  .sound svg { width: 16px; height: 16px; }
+  .sound[aria-pressed="true"] .cross, .sound[aria-pressed="false"] .waves { display: none; }
+  .toggle { margin-left: 16px; display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; cursor: pointer; }
   .toggle input { accent-color: var(--accent); margin: 0; }
   .tag.project { pointer-events: auto; cursor: pointer; }
   .tag.project.focused { box-shadow: 0 0 0 1.5px var(--accent); }
@@ -195,6 +199,10 @@
   <header>
     <svg class="mark" viewBox="0 0 22 22" aria-hidden="true"><circle cx="11" cy="11" r="4.2" fill="var(--accent)"/><circle cx="11" cy="11" r="8.6" fill="none" stroke="var(--line)" stroke-width="1.6"/><circle cx="18.2" cy="6.4" r="2" fill="var(--ink)"/></svg>
     <span class="word">Agent Cluster</span>
+    <button class="sound" id="sound" type="button" aria-pressed="true" title="Office sounds">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8h3l4-3.5v11L6 12H3z" fill="currentColor"/><path class="waves" d="M13 7.5a3.5 3.5 0 0 1 0 5M15 5.5a6.4 6.4 0 0 1 0 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path class="cross" d="M13.5 8l4 4m0-4l-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      <span>Sound on</span>
+    </button>
     <label class="toggle"><input type="checkbox" id="show-past" checked> Past sessions</label>
     <span class="status" id="conn"><i></i><span>Connecting…</span></span>
   </header>

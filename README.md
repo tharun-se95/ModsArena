@@ -15,7 +15,7 @@ A live office of everything Claude Code is doing on your machine. Each project g
 | Room | A project: a git repository (worktrees included) or a folder outside one. Each room has a wooden floor, walls in its own color, and furniture (a bookshelf, a window, plants, a lamp, sometimes a couch). What a room holds and its wall color come from the project's name, so it always looks the same. Its sessions sit in a small grid. Click the sign over the back wall to zoom in, and press Esc to see every room again. |
 | Critter on a rug, with a gold gem | A live chat session, named by its first prompt. Each session gets its own color. Its desk's monitor scrolls code while it works, dims while it waits, and is off for past sessions. Its legs patter while it works, and the gem glows and spins faster. It hops on each prompt and each tool call, and it turns toward the subagent that acted last. |
 | Ring on the rug around it | How full that context window is: green, then amber past 60%, then red past 85%. A pulsing red ring, and both arms up, mean it's past 80% and will compact soon. |
-| Smaller critters behind it | Subagents. Each type has its own color and build: **Explore** is sky blue, low and wide, with a periscope; **Plan** is lilac and tall on two legs, with a cap; **code-reviewer** is pink and wears glasses; **test-runner** is mustard with six legs and antennae; and **general-purpose** is the plain green critter. Your own agent types get a color from their name. They drop in when started, and walk to the coffee corner when finished. |
+| Smaller critters behind its desk | Subagents, standing in a row behind the desk (then a second row, then either side), so they never overlap. Each type has its own color and build: **Explore** is sky blue, low and wide, with a periscope; **Plan** is lilac and tall on two legs, with a cap; **code-reviewer** is pink and wears glasses; **test-runner** is mustard with six legs and antennae; and **general-purpose** is the plain green critter. Your own agent types get a color from their name. They drop in when started (the session waves hello), and when finished they wave goodbye and walk to the coffee corner. |
 | Grey critter with closed eyes | A past session from the last 14 days, read from its transcript. Each room shows the three most recent, and its sign counts the rest. Untick **Past sessions** to hide them. |
 | Bead rising off a critter | A tool call, colored by what it does: reads sky blue, edits coral, searches green, web lookups lilac, shell commands mustard, handoffs teal. A red bead means the call failed. |
 | Ripple across the rug | The session just compacted its context. |
@@ -24,6 +24,9 @@ A live office of everything Claude Code is doing on your machine. Each project g
 | Red "!" and a wobble | A tool call just failed. |
 | "zzz" | A session that's been idle for two minutes has dozed off, and past sessions are asleep. |
 | Steam over a desk mug | That session is working right now. |
+| A wave | Two critters passing each other on the way in or to coffee say hi. |
+
+**Sounds:** soft key taps when a tool runs, a two-note chime when a turn finishes, a bonk when a call fails, a pop when a helper arrives, a chirp when critters wave, a clink at the coffee corner and a hush on compaction. They're synthesized in the browser (no audio files), start after your first click or key press, and the **Sound** button in the header mutes them (it remembers your choice).
 
 Hover any critter for a bubble with what it is and what it's doing: its status, the tool it's running, its context use, model and tool calls, and who it works for. Session names and room signs stay small and quiet, and a name that would collide with another steps aside. Click a session to open its details:
 
