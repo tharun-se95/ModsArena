@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Cluster 3D</title>
+  <style>
+    :root {
+      --bg: #05060d;
+      --panel: rgba(12, 16, 30, 0.78);
+      --line: rgba(127, 231, 255, 0.18);
+      --text: #d7e3f4;
+      --dim: #7d8aa3;
+      --accent: #7fe7ff;
+      --ok: #4ef08a;
+      --err: #ff4d6d;
+      --spawn: #b48cff;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font: 13px/1.45 var(--mono); }
+    #graph { position: fixed; inset: 0; }
+    @media (min-width: 761px) { #graph { right: calc(min(420px, 38vw) + 32px); } }
+    .panel { position: fixed; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; backdrop-filter: blur(8px); }
+    header { top: 16px; left: 16px; padding: 12px 16px; min-width: 260px; }
+    header h1 { margin: 0 0 8px; font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+    #conn { float: right; font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; color: var(--dim); }
+    #conn.live { color: var(--ok); }
+    #conn.down { color: var(--err); }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 16px; }
+    .stats div { display: flex; flex-direction: column; }
+    .stats b { font-size: 20px; font-weight: 600; color: #fff; }
+    .stats span { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); }
+    #feed-panel { top: 16px; right: 16px; bottom: 16px; width: min(420px, 38vw); padding: 12px 0 12px 14px; display: flex; flex-direction: column; }
+    #feed-panel h2 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); }
+    #feed { list-style: none; margin: 0; padding: 0 12px 0 0; overflow-y: auto; flex: 1; }
+    #feed li { padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.04); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: in 0.35s ease-out; }
+    #feed time { color: var(--dim); margin-right: 8px; }
+    #feed b { color: var(--accent); font-weight: 500; margin-right: 6px; }
+    .err { color: var(--err); } .spawn { color: var(--spawn); } .turn { color: var(--accent); } .dim { color: var(--dim); }
+    @keyframes in { from { opacity: 0; transform: translateX(8px); } }
+    #detail { left: 16px; bottom: 16px; width: 340px; padding: 12px 16px; }
+    #detail.hidden { display: none; }
+    #detail h3 { margin: 0 0 8px; color: #fff; font-size: 14px; }
+    #detail dl { display: grid; grid-template-columns: 90px 1fr; gap: 4px 10px; margin: 0; }
+    #detail dt { color: var(--dim); } #detail dd { margin: 0; word-break: break-all; }
+    #legend { left: calc(50% - min(420px, 38vw) / 2 - 16px); bottom: 16px; transform: translateX(-50%); padding: 8px 14px; display: flex; gap: 14px; font-size: 11px; color: var(--dim); }
+    #legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+    .tip { font: 12px/1.4 var(--mono); max-width: 360px; white-space: normal; }
+    @media (max-width: 760px) {
+      #feed-panel { top: auto; height: 34vh; left: 16px; right: 16px; width: auto; }
+      #legend, #detail { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div id="graph"></div>
+
+  <header class="panel">
+    <span id="conn">connecting…</span>
+    <h1>Agent Cluster</h1>
+    <div class="stats">
+      <div><b id="stat-sessions">0</b><span>sessions</span></div>
+      <div><b id="stat-agents">0</b><span>agents live</span></div>
+      <div><b id="stat-tools">0</b><span>tools live</span></div>
+      <div><b id="stat-calls">0</b><span>tool calls</span></div>
+      <div><b id="stat-errors">0</b><span>errors</span></div>
+      <div><b id="stat-context">—</b><span>context</span></div>
+    </div>
+  </header>
+
+  <aside id="feed-panel" class="panel">
+    <h2>Activity</h2>
+    <ul id="feed"></ul>
+  </aside>
+
+  <section id="detail" class="panel hidden"></section>
+
+  <footer id="legend" class="panel">
+    <span><i style="background:#7fe7ff"></i>session</span>
+    <span><i style="background:#b48cff"></i>subagent</span>
+    <span><i style="background:#6ea8ff"></i>read/search</span>
+    <span><i style="background:#4ef0c8"></i>edit</span>
+    <span><i style="background:#ff9f5a"></i>bash</span>
+    <span><i style="background:#ff8ad8"></i>web</span>
+    <span><i style="background:#ff4d6d"></i>failed</span>
+  </footer>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
