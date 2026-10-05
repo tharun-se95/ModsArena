@@ -1,13 +1,20 @@
 name: Release
 
-# Push a tag like v0.2.1 on main to publish a GitHub Release. The tag must
-# match the version in every manifest (scripts/version.mjs), and the notes
-# are that version's CHANGELOG.md section. The release carries the hosted
-# demo as a single HTML file you can open offline.
+# Publishes a GitHub Release for the version in the manifests, two ways:
+#
+#   - push a tag like v0.2.1 on main, or
+#   - Actions → Release → Run workflow on main: the workflow creates the
+#     v<version> tag on that commit itself.
+#
+# Either way the tag must match the version in every manifest
+# (scripts/version.mjs), the notes are that version's CHANGELOG.md section,
+# and the release carries the hosted demo as one HTML file you can open
+# offline.
 
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -20,21 +27,27 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: The tag matches every manifest and has changelog notes
-        run: node scripts/version.mjs check "$GITHUB_REF_NAME"
+      - name: Which tag, and does it match every manifest and have notes
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = push ]; then tag="$GITHUB_REF_NAME"
+          else tag="v$(node scripts/version.mjs check)"; fi
+          node scripts/version.mjs check "$tag"
+          echo "TAG=$tag" >> "$GITHUB_ENV"
       - run: node --test agent-office/server/*.test.mjs scripts/*.test.mjs
       - name: Build the offline demo
         run: |
           node scripts/build-demo-site.mjs site
-          cp site/index.html "agent-office-demo-$GITHUB_REF_NAME.html"
+          cp site/index.html "agent-office-demo-$TAG.html"
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          node scripts/version.mjs notes "$GITHUB_REF_NAME" > notes.md
+          node scripts/version.mjs notes "$TAG" > notes.md
           printf '\n\n**Install or update:** `/plugin marketplace add tharun-se95/ModsArena`, then `/plugin install agent-office@modsarena` (or `claude plugin marketplace update modsarena`). **Try it:** https://tharun-se95.github.io/ModsArena/\n' >> notes.md
-          gh release create "$GITHUB_REF_NAME" \
-            --title "Agent Office ${GITHUB_REF_NAME#v}" \
+          # A pushed tag must already exist; a manual run creates it on this commit.
+          if [ "$GITHUB_EVENT_NAME" = push ]; then where=--verify-tag
+          else where="--target=$GITHUB_SHA"; fi
+          gh release create "$TAG" "$where" \
+            --title "Agent Office ${TAG#v}" \
             --notes-file notes.md \
-            --verify-tag \
-            "agent-office-demo-$GITHUB_REF_NAME.html"
+            "agent-office-demo-$TAG.html"

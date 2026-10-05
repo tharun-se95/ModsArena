@@ -141,7 +141,7 @@ node --test agent-office/server/*.test.mjs       # bridge and CLI: schema, histo
 node scripts/build-demo-site.mjs                 # the hosted demo, into site/
 ```
 
-CI (`.github/workflows/ci.yml`) runs all of these on every pull request. `.github/workflows/pages.yml` publishes the demo to GitHub Pages from `main`. To release: bump `version` in `agent-office/.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` (both places) and both `package.json` files, add a `CHANGELOG.md` section, merge, then tag `main` (`git tag v0.2.1 && git push origin v0.2.1`). `.github/workflows/release.yml` checks the tag against every manifest (`node scripts/version.mjs check`) and publishes a GitHub Release with that section as its notes; `marketplace update` picks the new version up.
+CI (`.github/workflows/ci.yml`) runs all of these on every pull request. `.github/workflows/pages.yml` publishes the demo to GitHub Pages from `main`. To release: bump `version` in `agent-office/.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` (both places) and both `package.json` files, add a `CHANGELOG.md` section, merge, then either tag `main` (`git tag v0.2.1 && git push origin v0.2.1`) or run **Actions → Release → Run workflow** on `main`, which creates the tag itself. `.github/workflows/release.yml` checks the tag against every manifest (`node scripts/version.mjs check`) and publishes a GitHub Release with that section as its notes; `marketplace update` picks the new version up.
 
 The bridge's event schema is documented at the top of `agent-office/server/normalize.mjs`. Any other producer, such as an OpenTelemetry receiver, can `POST` the same shapes.
 
