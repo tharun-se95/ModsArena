@@ -4,29 +4,31 @@ Claude Code mods and the tools around them.
 
 ## Agent Cluster 3D
 
-A live 3D view of everything Claude Code is doing on your machine. Each project is a cluster. Inside it are your chat sessions, live and recent. Sessions spawn subagents, agents run tools, and every session and agent wears a ring that shows how full its context window is.
+A live 3D view of everything Claude Code is doing on your machine. Each project is an area of the map. Inside it sit your chat sessions, live and recent. Sessions run subagents, agents run tools, and every session and agent wears a gauge that shows how full its context window is. Glance at it beside your terminal to see what is in trouble, what is working, and where to look.
 
 ![Agent Cluster 3D](docs/agent-cluster-3d.png)
 
-| On screen | What it is |
+| On the map | What it is |
 | --- | --- |
-| Faint wireframe shape with a big label | A project: a git repository (worktrees included) or a folder outside one. |
-| Cyan core with a wireframe shell | A live chat session, named by its first prompt. It pulses on each prompt. |
-| Small grey-blue core | A past session from the last 14 days, read from its transcript. |
-| Segmented ring around a session | Its context window, split by what fills it: system prompt, tools, MCP tools, memory files, skills, messages. The empty part is free space. |
-| Colored satellites | Subagents (`Explore`, `Plan`, your own agent types, teammates), linked to whoever spawned them. Finished ones dim. |
-| Ring around a satellite | That agent's own context fill: green, then amber past 60%, then red past 85%. |
-| Red pulsing halo | A session or agent past 80% of its window. |
-| White ring bursting outward | A compaction just happened. |
-| Small crystals | Tool calls in flight, colored by family. They flash green or red when done, then fold away. |
+| Outlined area with a heading | A project: a git repository (worktrees included) or a folder outside one. The heading shows live sessions, working agents and the fullest window, with a red dot when something needs attention. |
+| Large core with a label | A chat session, named by its first prompt. It glows while working and pulses on each prompt. |
+| Small grey core | A past session from the last 14 days, read from its transcript. |
+| Ring around a core | How full that context window is: green, amber past 60%, red past 85%. |
+| Red halo | Over 80%. It is also listed under **Needs attention**. |
+| Small colored cores | Subagents (`Explore`, `Plan`, your own agent types, teammates), on a fixed ring around the session that started them. Finished ones fade after 20 seconds. |
+| Diamonds | Tool calls, right beside whoever runs them. Green when they worked, red when they failed. |
+| A ring bursting outward | The context was just compacted. |
 
-**Controls:** pick a project in the top-left menu to show only that project, or untick **Past sessions** to show only live work. Click any node to fly to it and open its details:
+**Using it**
 
-- **Session:** context meter, the `/context` breakdown, turns, tool calls, errors, cost, model, rate limits, compactions, subagents, and every prompt with its time.
-- **Agent:** its context meter, type, model, tools done, who spawned it, and its compactions.
-- **Project:** every live and past session, with context fill and last activity.
-
-The right column lists what **needs attention** (anything over 80% and recent compactions; click one to jump to it), then the live activity feed.
+- **Top bar:** one chip per project with its live session count, and a red dot when it needs attention. The page opens on the project you last chose, or the busiest one. **All projects** shows everything.
+- **Stat strip:** live sessions, agents working, tools running, and how many need attention, all for the project in view.
+- **Click** a node or its label to select it. It is highlighted, everything else steps back, and its details open on the right. The camera stays put. **Double-click**, **F**, or **Focus** glides to it.
+- **Drag** to tilt (it stays within about 50° of head-on, so nothing turns edge-on), **scroll** to zoom toward the mouse, **right-drag** to pan, and **R** or **Reset view** to frame everything again. **Esc** clears the selection.
+- **Needs attention** lists anything over 80% first, fullest on top, then compactions from the last minute. Click a row to select it.
+- **Activity** follows the project in view. Each line names its session and agent, and lines arrive twice a second. Hover to pause it, and use **Problems** to see only failures and compactions.
+- **Details** for a session: its context gauge and what fills it (`/context` categories), turns, tool calls, errors, cost, model, branch, rate limits, working and finished subagents, compactions, and every prompt. For an agent: its gauge, task, model, tools done and who started it. For a project: every session with its fill and last activity.
+- **Phones:** project chips scroll sideways, and the side column becomes a bottom sheet that starts folded.
 
 ### How each thing is measured
 
@@ -50,7 +52,7 @@ Claude Code ──(mod hooks / settings hooks)──► bridge :7337 ──(SSE)
 
 - **`agent-cluster-3d/`** is the Claude Code mod. It hooks `session.start`, `session.measure`, `session.compact`, `turn.step`, `turn.start`, `turn.complete`, `agent.spawn` and `tool.call`. Every tool call is attributed to the agent loop that made it (`agentId`), and every subagent to its parent (`parentAgentId`). Hooks run in a sandbox without Node, so events are queued in memory and flushed to the bridge every 250 ms with `$.http.fetch`. Context readings are coalesced so only the newest is sent, and a tool call never waits on the visualizer. On session start the mod also starts the bridge (`$.process.spawn`) if none is running.
 - **`agent-cluster-3d/server/`** is the bridge. It uses only Node built-ins and has no dependencies. It accepts events on `POST /event` and keeps the last 8,000, plus the newest context reading per session and agent. It streams them to browsers over Server-Sent Events and replays the backlog when a browser connects. `GET /history` summarizes recent transcripts, cached by file modification time. One bridge serves every session on the machine. It strips any credentials from remote URLs before showing them.
-- **`visualizer/`** is the page's source: [3d-force-graph](https://github.com/vasturiano/3d-force-graph), Three.js and bloom, split into `model.js`, `scene.js` and `hud.js`. It's built into `agent-cluster-3d/server/public/app.js`, which is committed, so running it needs only Node.
+- **`visualizer/`** is the page's source: [3d-force-graph](https://github.com/vasturiano/3d-force-graph), Three.js and bloom, split into `model.js` (state), `layout.js` (fixed positions), `scene.js` (how nodes look) and `hud.js` (panels). The redesign plan is in `docs/ui-revamp-plan.md`. It's built into `agent-cluster-3d/server/public/app.js`, which is committed, so running it needs only Node.
 
 ### Run it
 

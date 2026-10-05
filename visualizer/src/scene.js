@@ -1,267 +1,306 @@
-// Three.js objects for each node kind, and their per-frame animation.
+// What each node looks like and how it moves. Color carries meaning only:
+// rings show how full a context window is (green, amber, red), glow shows
+// work in progress, red shows failure. Labels are HTML, so they stay crisp
+// and the same size at any zoom.
 
 import * as THREE from 'three'
-import SpriteText from 'three-spritetext'
-import { TOOL_LINGER_MS, DEFAULT_WINDOW, WARN_AT, fill } from './model.js'
+import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
+import { TOOL_LINGER_MS, WARN_AT, fill, projectSummary, nodes } from './model.js'
 
 export const COLORS = {
-  project: '#8fa3c7',
-  session: '#7fe7ff',
-  sessionEnded: '#3b5560',
-  past: '#5d6f8f',
-  agentPalette: ['#b48cff', '#4ef0a8', '#ff8ad8', '#ffd166', '#6ea8ff', '#ff9f5a'],
-  agentDone: '#4a4a63',
-  ok: '#4ef08a',
-  warn: '#ffd166',
-  error: '#ff4d6d',
-  track: '#1d2a3a',
+  accent: '#67e8f9',
+  session: '#a5f3fc',
+  past: '#64748b',
+  done: '#475569',
+  track: '#1c2638',
+  ok: '#34d399',
+  warn: '#fbbf24',
+  crit: '#f87171',
+  outline: '#26334a',
 }
-
-// The /context categories, in a stable order of hues; messages stand out.
-export const CATEGORY_COLORS = {
-  'System prompt': '#8b9cff',
-  'System tools': '#6ea8ff',
-  'MCP tools': '#b48cff',
-  'Custom agents': '#ff8ad8',
-  'Memory files': '#ff9f5a',
-  Skills: '#ffd166',
-  Messages: '#7fe7ff',
-}
-const FALLBACK_CATEGORY = ['#9aa4b8', '#c3a6ff', '#7bd8c0', '#e3b6ff']
-
-export function categoryColor(name, i = 0) {
-  return CATEGORY_COLORS[name] ?? FALLBACK_CATEGORY[i % FALLBACK_CATEGORY.length]
-}
-
+const AGENT_PALETTE = ['#a78bfa', '#7dd3fc', '#f0abfc', '#bef264', '#fdba74', '#5eead4']
 const TOOL_FAMILIES = [
-  [/^(Read|Grep|Glob|LS|NotebookRead)$/, '#6ea8ff'],
-  [/^(Edit|Write|MultiEdit|NotebookEdit)$/, '#4ef0c8'],
-  [/^Bash/, '#ff9f5a'],
-  [/^Web/, '#ff8ad8'],
-  [/^mcp__/, '#b48cff'],
-  [/^(TodoWrite|Task\w+)$/, '#ffd166'],
+  [/^(Read|Grep|Glob|LS|NotebookRead)$/, '#7dd3fc'],
+  [/^(Edit|Write|MultiEdit|NotebookEdit)$/, '#5eead4'],
+  [/^Bash/, '#fdba74'],
+  [/^Web/, '#f0abfc'],
+  [/^mcp__/, '#a78bfa'],
 ]
-
-export const toolColor = tool => TOOL_FAMILIES.find(([re]) => re.test(tool))?.[1] ?? '#9aa4b8'
+export const toolColor = tool => TOOL_FAMILIES.find(([re]) => re.test(tool))?.[1] ?? '#94a3b8'
 const agentColors = new Map()
-export const agentColor = type => {
-  if (!agentColors.has(type)) {
-    agentColors.set(type, COLORS.agentPalette[agentColors.size % COLORS.agentPalette.length])
-  }
+export function agentColor(type) {
+  if (!agentColors.has(type)) agentColors.set(type, AGENT_PALETTE[agentColors.size % AGENT_PALETTE.length])
   return agentColors.get(type)
 }
+export const fillColor = f => (f >= 0.85 ? COLORS.crit : f >= 0.6 ? COLORS.warn : COLORS.ok)
 
-export const fillColor = f => (f >= 0.85 ? COLORS.error : f >= 0.6 ? COLORS.warn : COLORS.ok)
-
-export function baseColor(n) {
-  if (n.kind === 'project') return COLORS.project
-  if (n.kind === 'session') return n.past ? COLORS.past : n.status === 'done' ? COLORS.sessionEnded : COLORS.session
-  if (n.kind === 'agent') return n.status === 'done' ? COLORS.agentDone : agentColor(n.type)
-  if (n.status === 'ok') return COLORS.ok
-  if (n.status === 'error') return COLORS.error
-  return toolColor(n.tool)
+// Shared view state the scene reads each frame.
+export const view = {
+  selected: null, // node id
+  hovered: null, // node id
+  camera: null,
+  onLabelClick: () => {},
+  onLabelHover: () => {},
 }
 
-function glowMaterial(color, opacity = 1) {
+// The selected or hovered node and everything directly tied to it.
+let related = new Set()
+export function relatedTo(id, links) {
+  const set = new Set()
+  if (!id) return set
+  set.add(id)
+  const n = nodes.get(id)
+  for (const l of links) {
+    const s = typeof l.source === 'object' ? l.source.id : l.source
+    const t = typeof l.target === 'object' ? l.target.id : l.target
+    if (s === id) set.add(t)
+    if (t === id) set.add(s)
+  }
+  if (n?.session) set.add(`s:${n.session}`)
+  return set
+}
+export function setRelated(set) { related = set }
+export const isRelated = id => related.has(id)
+export const hasFocus = () => related.size > 0
+
+const R = { session: 15, past: 9, agent: 7.5 }
+
+function glow(color, opacity = 1) {
   return new THREE.MeshStandardMaterial({
-    color, emissive: color, emissiveIntensity: 0.9, roughness: 0.35, metalness: 0.1,
-    transparent: opacity < 1, opacity,
+    color, emissive: color, emissiveIntensity: 0.85, roughness: 0.4, metalness: 0,
+    transparent: true, opacity,
   })
 }
 
-function label(text, height, color, y) {
-  const sprite = new SpriteText(text, height, color)
-  sprite.fontFace = 'ui-monospace, SFMono-Regular, Menlo, monospace'
-  sprite.backgroundColor = 'rgba(5,6,13,0.4)'
-  sprite.padding = 1.5
-  sprite.borderRadius = 2
-  sprite.position.y = y
-  sprite.material.transparent = true
-  return sprite
-}
-
-function ring(radius, tube, color, arc = Math.PI * 2, opacity = 1) {
-  const mesh = new THREE.Mesh(
-    new THREE.TorusGeometry(radius, tube, 8, 96, arc),
-    new THREE.MeshBasicMaterial({ color, transparent: opacity < 1, opacity }),
+function ring(radius, tube, color, opacity = 1, arc = Math.PI * 2) {
+  return new THREE.Mesh(
+    new THREE.TorusGeometry(radius, tube, 10, 96, arc),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity }),
   )
-  return mesh
 }
 
-const RADIUS = { session: 21, past: 12, agent: 9 }
+// A large invisible sphere, so a click near a node counts as a click on it.
+function hitArea(radius) {
+  return new THREE.Mesh(
+    new THREE.SphereGeometry(radius, 8, 8),
+    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+  )
+}
+
+function label(n, cls) {
+  const el = document.createElement('div')
+  el.className = `node-label ${cls}`
+  el.addEventListener('pointerdown', e => e.stopPropagation())
+  el.addEventListener('click', e => { e.stopPropagation(); view.onLabelClick(n.id) })
+  el.addEventListener('pointerenter', () => view.onLabelHover(n.id))
+  el.addEventListener('pointerleave', () => view.onLabelHover(null))
+  const obj = new CSS2DObject(el)
+  return obj
+}
 
 export function buildObject(n) {
   const group = new THREE.Group()
-  const color = baseColor(n)
-  const parts = { group, rings: new THREE.Group() }
-  group.add(parts.rings)
+  const parts = { group, fill: null, fillKey: '' }
 
   if (n.kind === 'project') {
-    parts.core = new THREE.Mesh(
-      new THREE.DodecahedronGeometry(30, 0),
-      new THREE.MeshBasicMaterial({ color, wireframe: true, transparent: true, opacity: 0.12 }),
-    )
-    parts.label = label(n.label, 9, '#c9d6ee', 44)
-    group.add(parts.core, parts.label)
-  } else if (n.kind === 'session' && n.past) {
-    parts.core = new THREE.Mesh(new THREE.SphereGeometry(5, 20, 20), glowMaterial(color, 0.75))
-    parts.track = ring(RADIUS.past, 0.25, COLORS.track)
-    parts.label = label(n.label, 3.2, '#9fb0cc', 17)
-    group.add(parts.core, parts.track, parts.label)
+    parts.outline = new THREE.Group()
+    parts.label = label(n, 'project')
+    group.add(parts.outline, parts.label)
   } else if (n.kind === 'session') {
-    parts.core = new THREE.Mesh(new THREE.SphereGeometry(9, 32, 32), glowMaterial(color))
-    parts.shell = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(15, 1),
-      new THREE.MeshBasicMaterial({ color, wireframe: true, transparent: true, opacity: 0.35 }),
-    )
-    parts.track = ring(RADIUS.session, 0.35, COLORS.track)
-    parts.label = label(n.label, 6, '#e8fbff', 28)
-    group.add(parts.core, parts.shell, parts.track, parts.label)
+    const r = n.past ? R.past : R.session
+    parts.core = new THREE.Mesh(new THREE.SphereGeometry(n.past ? 4 : 7, 32, 32), glow(n.past ? COLORS.past : COLORS.session))
+    parts.track = ring(r, n.past ? 0.4 : 0.6, COLORS.track)
+    parts.hit = hitArea(r + 8)
+    parts.label = label(n, n.past ? 'session past' : 'session')
+    parts.label.position.set(0, -(r + 9), 0)
+    parts.radius = r
+    group.add(parts.core, parts.track, parts.hit, parts.label)
   } else if (n.kind === 'agent') {
-    parts.core = new THREE.Mesh(new THREE.SphereGeometry(5, 24, 24), glowMaterial(color))
-    parts.track = ring(RADIUS.agent, 0.3, COLORS.track)
-    parts.label = label(n.label, 4, '#f0e8ff', 15)
-    group.add(parts.core, parts.track, parts.label)
+    parts.core = new THREE.Mesh(new THREE.SphereGeometry(3.6, 24, 24), glow(agentColor(n.type)))
+    parts.track = ring(R.agent, 0.35, COLORS.track)
+    parts.hit = hitArea(R.agent + 6)
+    parts.label = label(n, 'agent')
+    parts.label.position.set(0, -(R.agent + 6), 0)
+    parts.radius = R.agent
+    group.add(parts.core, parts.track, parts.hit, parts.label)
   } else {
-    parts.core = new THREE.Mesh(new THREE.OctahedronGeometry(2.2), glowMaterial(color))
+    parts.core = new THREE.Mesh(new THREE.OctahedronGeometry(1.7), glow(toolColor(n.tool)))
     group.add(parts.core)
   }
-
+  // Labels live in the DOM; take them out when the node leaves the scene.
+  group.addEventListener('removed', () => parts.label?.element.remove())
   n.parts = parts
-  n.shownColor = color
-  n.ringKey = undefined
+  n.labelHtml = ''
   return group
 }
 
-function setColor(n, color) {
-  if (n.shownColor === color) return
-  n.shownColor = color
-  const m = n.parts.core.material
-  m.color.set(color)
-  if (m.emissive) m.emissive.set(color)
-}
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+const pct = f => `${Math.round(f * 100)}%`
 
-// The arcs a context ring is drawn from: the /context categories when the
-// session has a breakdown (messages kept live from the newest reading),
-// else one arc of the fill colored by how close it is to the limit.
-export function segments(n) {
-  const window = n.context?.window || n.breakdown?.window || DEFAULT_WINDOW
-  const live = n.context?.tokens
-  const cats = n.breakdown?.categories?.filter(c => c.kind === 'used')
-  if (n.kind === 'session' && !n.past && cats?.length) {
-    const fixed = cats.filter(c => c.name !== 'Messages')
-    const fixedSum = fixed.reduce((s, c) => s + c.tokens, 0)
-    const messages = live !== undefined ? Math.max(0, live - fixedSum) : cats.find(c => c.name === 'Messages')?.tokens ?? 0
-    return [...fixed, { name: 'Messages', tokens: messages }]
-      .map((c, i) => ({ name: c.name, share: c.tokens / window, color: categoryColor(c.name, i) }))
-      .filter(s => s.share > 0.002)
+function labelHtml(n) {
+  if (n.kind === 'project') {
+    const s = projectSummary(n.projectId)
+    const fullest = s.live ? `<span class="fill" style="color:${fillColor(s.fullest)}">${pct(s.fullest)}</span>` : ''
+    return `<div class="pl"><b>${esc(n.label)}</b><span class="meta">${s.live} live · ${s.agents} agent${s.agents === 1 ? '' : 's'}</span>${fullest}${s.attention ? '<span class="dot crit"></span>' : ''}</div>`
   }
   const f = fill(n)
-  return f > 0 ? [{ name: 'Context', share: f, color: fillColor(f) }] : []
+  const value = n.context?.tokens ? `<span class="fill" style="color:${fillColor(f)}">${pct(f)}</span>` : ''
+  const state = n.past ? 'past' : n.status === 'active' ? 'live' : n.status
+  return `<span class="dot ${state}"></span><span class="name">${esc(n.label)}</span>${value}`
 }
 
-function updateRings(n) {
-  if (n.kind !== 'session' && n.kind !== 'agent') return
-  const segs = segments(n)
-  const key = segs.map(s => `${s.color}:${s.share.toFixed(3)}`).join('|')
-  if (key === n.ringKey) return
-  n.ringKey = key
-  const { rings } = n.parts
-  for (const m of [...rings.children]) {
-    rings.remove(m)
-    m.geometry.dispose()
+function updateFill(n) {
+  const f = fill(n)
+  const key = f ? `${fillColor(f)}:${f.toFixed(3)}` : ''
+  if (key === n.parts.fillKey) return
+  n.parts.fillKey = key
+  if (n.parts.fill) {
+    n.parts.group.remove(n.parts.fill)
+    n.parts.fill.geometry.dispose()
+    n.parts.fill = null
   }
-  const radius = n.past ? RADIUS.past : RADIUS[n.kind]
-  const tube = n.kind === 'session' && !n.past ? 1.1 : 0.7
-  let start = 0
-  for (const s of segs) {
-    const arc = Math.min(Math.PI * 2 - start, Math.PI * 2 * s.share)
-    if (arc <= 0) break
-    const m = ring(radius, tube, s.color, arc)
-    m.rotation.z = Math.PI / 2 - start - arc
-    rings.add(m)
-    start += arc
+  if (!f) return
+  const tube = n.kind === 'session' && !n.past ? 1.5 : 0.9
+  const arc = Math.max(0.05, Math.PI * 2 * f)
+  n.parts.fill = ring(n.parts.radius, tube, fillColor(f), 1, arc)
+  // Fill clockwise from the top, like a gauge.
+  n.parts.fill.rotation.z = Math.PI / 2 - arc
+  n.parts.group.add(n.parts.fill)
+}
+
+function updateOutline(n) {
+  const b = n.bounds
+  if (!b) return
+  const key = `${b.width}x${b.height}`
+  if (key === n.parts.outlineKey) return
+  n.parts.outlineKey = key
+  const pad = 24
+  const w = b.width + pad * 2
+  const h = b.height + pad * 2
+  const r = 18
+  const shape = new THREE.Shape()
+  const x = -pad
+  const y = pad
+  shape.moveTo(x + r, y)
+  shape.lineTo(x + w - r, y); shape.quadraticCurveTo(x + w, y, x + w, y - r)
+  shape.lineTo(x + w, y - h + r); shape.quadraticCurveTo(x + w, y - h, x + w - r, y - h)
+  shape.lineTo(x + r, y - h); shape.quadraticCurveTo(x, y - h, x, y - h + r)
+  shape.lineTo(x, y - r); shape.quadraticCurveTo(x, y, x + r, y)
+  for (const c of [...n.parts.outline.children]) { n.parts.outline.remove(c); c.geometry.dispose() }
+  const plate = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshBasicMaterial({ color: '#0c1322', transparent: true, opacity: 0.55, depthWrite: false }))
+  plate.position.z = -6
+  const edge = new THREE.Line(new THREE.BufferGeometry().setFromPoints(shape.getPoints(12)), new THREE.LineBasicMaterial({ color: COLORS.outline, transparent: true, opacity: 0.9 }))
+  edge.position.z = -5
+  // The plate is backdrop: the mouse passes through it to the field.
+  plate.raycast = () => {}
+  edge.raycast = () => {}
+  n.parts.outline.add(plate, edge)
+  n.parts.label.position.set(-pad + 4, pad + 16, 0)
+}
+
+function setHalo(n, on, now) {
+  const p = n.parts
+  if (on && !p.halo) {
+    p.halo = ring(p.radius + 5, 0.6, COLORS.crit, 0.7)
+    p.group.add(p.halo)
+  } else if (!on && p.halo) {
+    p.group.remove(p.halo); p.halo.geometry.dispose(); p.halo = null
+  }
+  if (p.halo) {
+    const t = (Math.sin(now / 500) + 1) / 2
+    p.halo.material.opacity = 0.25 + 0.5 * t
+    p.halo.scale.setScalar(1 + 0.06 * t)
   }
 }
 
-function updateHalo(n, now) {
-  const isWarn = !n.past && n.status !== 'done' && fill(n) >= WARN_AT
-  const { parts } = n
-  if (isWarn && !parts.halo) {
-    const r = (n.kind === 'session' ? RADIUS.session : RADIUS.agent) + 4
-    parts.halo = ring(r, 0.5, COLORS.error, Math.PI * 2, 0.8)
-    parts.group.add(parts.halo)
-  } else if (!isWarn && parts.halo) {
-    parts.group.remove(parts.halo)
-    parts.halo.geometry.dispose()
-    parts.halo = undefined
-  }
-  if (parts.halo) {
-    parts.halo.material.opacity = 0.35 + 0.45 * Math.abs(Math.sin(now / 420))
-    parts.halo.scale.setScalar(1 + 0.04 * Math.sin(now / 420))
+function setSelectionRing(n, on) {
+  const p = n.parts
+  if (on && !p.sel) {
+    p.sel = ring(p.radius + (p.halo ? 10 : 6), 0.35, '#ffffff', 0.9)
+    p.group.add(p.sel)
+  } else if (!on && p.sel) {
+    p.group.remove(p.sel); p.sel.geometry.dispose(); p.sel = null
   }
 }
 
-// A compaction: a ring that bursts outward from the loop and fades.
-function updateShockwave(n, now) {
-  const { parts } = n
+// A compaction: a ring that bursts outward and fades.
+function updateWave(n, now) {
+  const p = n.parts
   const age = n.compactAt ? now - n.compactAt : Infinity
   if (age < 1600) {
-    if (!parts.wave) {
-      parts.wave = ring(n.kind === 'session' ? RADIUS.session : RADIUS.agent, 0.8, '#ffffff', Math.PI * 2, 0.9)
-      parts.group.add(parts.wave)
-    }
-    const p = age / 1600
-    parts.wave.scale.setScalar(1 + p * 2.6)
-    parts.wave.material.opacity = 0.9 * (1 - p)
-  } else if (parts.wave) {
-    parts.group.remove(parts.wave)
-    parts.wave.geometry.dispose()
-    parts.wave = undefined
+    if (!p.wave) { p.wave = ring(p.radius, 0.6, '#ffffff', 0.8); p.group.add(p.wave) }
+    const k = age / 1600
+    p.wave.scale.setScalar(1 + k * 2.2)
+    p.wave.material.opacity = 0.8 * (1 - k)
+  } else if (p.wave) {
+    p.group.remove(p.wave); p.wave.geometry.dispose(); p.wave = null
   }
 }
 
-export function animate(nodes, now) {
-  for (const n of nodes) {
-    if (!n.parts) continue
-    const { core, shell, rings, group, label: tag } = n.parts
-    setColor(n, baseColor(n))
-    if (tag) {
-      if (tag.text !== n.label) tag.text = n.label
-      tag.material.opacity = n.status === 'done' || n.past ? 0.45 : 1
-    }
+const tmp = new THREE.Vector3()
+const AGENT_LABEL_DISTANCE = 900 // agent labels show once the camera is this close
 
-    const sincePulse = n.pulseAt ? now - n.pulseAt : Infinity
-    const pulse = sincePulse < 1200 ? 1 + 0.35 * Math.sin((sincePulse / 1200) * Math.PI) : 1
+export function animate(list, now) {
+  const focus = hasFocus()
+  for (const n of list) {
+    const p = n.parts
+    if (!p) continue
+    const dim = focus && !isRelated(n.id)
 
-    if (n.kind === 'project') {
-      core.rotation.y += 0.0012
-      core.rotation.x += 0.0006
-      continue
-    }
-    if (n.kind === 'session' || n.kind === 'agent') {
-      updateRings(n)
-      updateHalo(n, now)
-      updateShockwave(n, now)
-      rings.rotation.x = n.kind === 'agent' ? 0.5 : 0
-    }
-    if (n.kind === 'session') {
-      if (shell) {
-        shell.rotation.y += 0.004
-        shell.rotation.x += 0.0015
+    if (p.label) {
+      const html = labelHtml(n)
+      if (html !== n.labelHtml) { n.labelHtml = html; p.label.element.innerHTML = html }
+      let show = true
+      if (n.kind === 'agent') {
+        const near = view.camera && view.camera.position.distanceTo(p.group.getWorldPosition(tmp)) < AGENT_LABEL_DISTANCE
+        show = near || isRelated(n.id)
       }
-      core.scale.setScalar(pulse)
-    } else if (n.kind === 'agent') {
-      const breathe = n.status === 'active' ? 1 + 0.08 * Math.sin(now / 260) : 0.7
-      core.scale.setScalar(breathe * pulse)
+      p.label.visible = show
+      const el = p.label.element
+      el.classList.toggle('dim', dim)
+      el.classList.toggle('selected', view.selected === n.id)
+      el.classList.toggle('done', n.status === 'done')
+    }
+
+    if (n.kind === 'project') { updateOutline(n); continue }
+
+    const opacity = dim ? 0.18 : n.status === 'done' ? 0.35 : 1
+    p.core.material.opacity = opacity
+    if (p.fill) p.fill.material.opacity = dim ? 0.2 : 1
+    p.track && (p.track.material.opacity = dim ? 0.3 : 1)
+
+    if (n.kind === 'session' || n.kind === 'agent') {
+      updateFill(n)
+      setHalo(n, !n.past && n.status !== 'done' && fill(n) >= WARN_AT, now)
+      setSelectionRing(n, view.selected === n.id)
+      updateWave(n, now)
+      // Work in progress breathes; quiet loops sit still.
+      const busy = n.status === 'active' && !n.past
+      const sincePulse = n.pulseAt ? now - n.pulseAt : Infinity
+      const pulse = sincePulse < 900 ? 1 + 0.3 * Math.sin((sincePulse / 900) * Math.PI) : 1
+      const breathe = busy ? 1 + 0.06 * Math.sin(now / 320) : 1
+      p.core.scale.setScalar(pulse * breathe)
+      p.core.material.emissiveIntensity = busy ? 0.9 : 0.35
+      if (n.kind === 'agent') {
+        const color = n.status === 'done' ? COLORS.done : agentColor(n.type)
+        if (p.core.material.userData.color !== color) {
+          p.core.material.userData.color = color
+          p.core.material.color.set(color); p.core.material.emissive.set(color)
+        }
+      }
     } else if (n.kind === 'tool') {
-      core.rotation.y += n.status === 'active' ? 0.12 : 0.02
-      if (n.status === 'active') {
-        core.material.emissiveIntensity = 0.8 + 0.6 * Math.abs(Math.sin(now / 150))
-      } else if (n.endedAt) {
+      const color = n.status === 'ok' ? COLORS.ok : n.status === 'error' ? COLORS.crit : toolColor(n.tool)
+      if (p.core.material.userData.color !== color) {
+        p.core.material.userData.color = color
+        p.core.material.color.set(color); p.core.material.emissive.set(color)
+      }
+      p.core.rotation.y += n.status === 'active' ? 0.08 : 0.01
+      if (n.endedAt) {
         const fade = 1 - Math.min(1, (now - n.endedAt) / TOOL_LINGER_MS)
-        group.scale.setScalar(0.4 + 0.8 * fade)
-        core.material.emissiveIntensity = 0.3 + fade
+        p.group.scale.setScalar(0.5 + 0.6 * fade)
+        p.core.material.opacity = (dim ? 0.15 : 1) * (0.2 + 0.8 * fade)
+      } else {
+        p.core.material.emissiveIntensity = 0.7 + 0.5 * Math.abs(Math.sin(now / 200))
       }
     }
   }
