@@ -78,6 +78,8 @@ const hash = text => {
 export const tintOf = type => AGENT_TINT[type] ?? TINTS[hash(type) % TINTS.length]
 export const sessionTint = id => TINTS[hash(id) % TINTS.length]
 const roomOf = name => ROOMS[hash(name) % ROOMS.length]
+// The wall color key of a project's room, for the directory's swatches.
+export const roomKey = roomOf
 
 // ---------------------------------------------------------------------------
 // Scene
@@ -97,6 +99,10 @@ let focusedProject = null
 let layoutKey = ''
 let onPick = () => {}
 let mountedAt = 0
+// The panels float over the canvas; the office is framed in what they
+// leave free. Pixels from each edge of the stage.
+let insets = { left: 0, right: 0, top: 0, bottom: 0 }
+let camGoal = null // where the camera is gliding to, if anywhere
 let last = 0
 let tick = 0
 const v = new THREE.Vector3()
@@ -130,6 +136,8 @@ export function mount(el, { pick }) {
   controls.minDistance = 120
   controls.maxDistance = 4000
   controls.enablePan = false
+  // Taking the camera yourself stops any glide in progress.
+  controls.addEventListener('start', () => { camGoal = null })
 
   sky = new THREE.HemisphereLight('#ffffff', '#d8cfc2', 1.6)
   scene.add(sky)
@@ -424,8 +432,9 @@ function layout(list) {
   // The coffee corner is packed in with the rooms, last, so it always ends
   // a row and its right side is open to the office's side aisle.
   const items = [...list.map(p => rooms.get(p.id)), ensureCoffee()]
-  const sw = stage.clientWidth || 1
-  const sh = stage.clientHeight || 1
+  // Pick the arrangement that fills the space the panels leave free.
+  const sw = Math.max(1, (stage.clientWidth || 1) - insets.left - insets.right)
+  const sh = Math.max(1, (stage.clientHeight || 1) - insets.top - insets.bottom)
   let best = null
   for (let cols = 1; cols <= items.length; cols++) {
     const rows = []
@@ -455,36 +464,86 @@ function layout(list) {
 
 let size = { W: 300, D: ROW_DEPTH }
 
-// Frame every room, or the focused one, looking down across the floor:
-// start from a fitted guess, then pull back until every corner projects
-// inside the view.
-function frame() {
+// Frame every room, or the focused one, looking down across the floor and
+// centered in the space the panels leave free. A view offset slides the
+// picture so the office's center lands in the middle of that space; the
+// distance is then pulled back until every corner fits inside it. The
+// camera glides there unless `jump`.
+function frame(jump = false) {
   const t = focusedProject && rooms.get(focusedProject)
   const w = t ? t.w : size.W
   const d = t ? t.d : size.D
   const c = t ? t.target : new THREE.Vector3()
-  const aspect = stage.clientWidth / Math.max(1, stage.clientHeight)
+  const W = stage.clientWidth || 1
+  const H = stage.clientHeight || 1
+  const box = {
+    x0: Math.min(insets.left, W * 0.45), x1: W - Math.min(insets.right, W * 0.45),
+    y0: Math.min(insets.top, H * 0.45), y1: H - Math.min(insets.bottom, H * 0.45),
+  }
+  const cx = (box.x0 + box.x1) / 2, cy = (box.y0 + box.y1) / 2
+  const hw = (box.x1 - box.x0) / 2, hh = (box.y1 - box.y0) / 2
+  camera.setViewOffset(W, H, W / 2 - cx, H / 2 - cy, W, H)
   const vfov = (camera.fov * Math.PI) / 180
-  const hfov = 2 * Math.atan(Math.tan(vfov / 2) * aspect)
-  let dist = Math.max((w + 50) / 2 / Math.tan(hfov / 2), (d * Math.sin(TILT) + 70) / 2 / Math.tan(vfov / 2))
+  const hfov = 2 * Math.atan(Math.tan(vfov / 2) * (hw / hh))
+  let dist = Math.max((w + 50) / 2 / Math.tan(hfov / 2), (d * Math.sin(TILT) + 70) / 2 / Math.tan(vfov / 2)) * (H / (2 * hh))
   const corners = []
   for (const x of [-w / 2, w / 2]) for (const z of [-d / 2, d / 2 + 30]) for (const y of [0, t ? WALL_H + 16 : 66]) corners.push(new THREE.Vector3(c.x + x, y, c.z + z))
-  for (let i = 0; i < 4; i++) {
+  const keep = { pos: camera.position.clone(), quat: camera.quaternion.clone() }
+  const target = new THREE.Vector3(c.x, 8, c.z)
+  for (let i = 0; i < 5; i++) {
     camera.position.set(c.x, Math.sin(TILT) * dist, c.z + Math.cos(TILT) * dist)
-    camera.lookAt(c.x, 8, c.z)
+    camera.lookAt(target)
     camera.updateMatrixWorld()
-    const reach = Math.max(...corners.map(p => { const q = p.clone().project(camera); return Math.max(Math.abs(q.x), Math.abs(q.y)) }))
-    dist *= Math.max(0.7, reach / 0.92)
+    const reach = Math.max(...corners.map(p => {
+      const q = p.clone().project(camera)
+      const sx = ((q.x + 1) / 2) * W, sy = ((1 - q.y) / 2) * H
+      return Math.max(Math.abs(sx - cx) / (hw * 0.94), Math.abs(sy - cy) / (hh * 0.94))
+    }))
+    dist *= Math.max(0.6, reach)
   }
-  camera.position.set(c.x, Math.sin(TILT) * dist, c.z + Math.cos(TILT) * dist)
-  controls.target.set(c.x, 8, c.z)
+  const goal = { pos: new THREE.Vector3(c.x, Math.sin(TILT) * dist, c.z + Math.cos(TILT) * dist), target }
+  if (jump || !framedOnce) {
+    framedOnce = true
+    camera.position.copy(goal.pos)
+    controls.target.copy(goal.target)
+    camGoal = null
+  } else {
+    camera.position.copy(keep.pos)
+    camera.quaternion.copy(keep.quat)
+    camGoal = goal
+  }
   controls.update()
   Object.assign(sun.shadow.camera, { left: -size.W / 2 - 80, right: size.W / 2 + 80, top: size.D / 2 + 100, bottom: -size.D / 2 - 100, near: 10, far: 900 })
   sun.shadow.camera.updateProjectionMatrix()
 }
+let framedOnce = false
+
+// Called by the page whenever the panels change size.
+export function setInsets(next) {
+  const same = ['left', 'right', 'top', 'bottom'].every(k => Math.abs((insets[k] ?? 0) - next[k]) < 2)
+  insets = next
+  if (!same) frame()
+}
+
+// Zoom to the room a session (or a subagent's session) works in, or back
+// out to the whole office.
+export function focusOn(id) {
+  const n = id && nodes.get(id)
+  const host = n?.kind === 'agent' ? nodes.get(sid(n.session)) : n
+  focusProject(host?.project ? `p:${host.project}` : null)
+}
+
+// The directory's entries show the same bubble as hovering the critter.
+export function setHover(id) {
+  const n = id && nodes.get(id)
+  hoverPick = n ? { kind: n.kind, id } : null
+  hovered = n?.kind === 'session' ? id : null
+}
 
 export function focusProject(id) {
-  focusedProject = id && rooms.has(id) ? id : null
+  const next = id && rooms.has(id) ? id : null
+  if (next === focusedProject && camGoal) return
+  focusedProject = next
   frame()
 }
 
@@ -967,11 +1026,17 @@ export function animate() {
     c.m.material.opacity = 1 - k * k
   }
 
+  if (camGoal) {
+    const k = 1 - Math.pow(0.002, dt)
+    camera.position.lerp(camGoal.pos, k)
+    controls.target.lerp(camGoal.target, k)
+    if (camera.position.distanceTo(camGoal.pos) < 0.5) camGoal = null
+  }
   controls.update()
   renderer.render(scene, camera)
   labels.render(scene, camera)
-  if ((tick++ % 12) === 0) declutter()
   placeBubble(tick % 10 === 1)
+  if ((tick++ % 6) === 0) declutter()
 }
 
 // Room signs come first. A session label under a sign steps aside, and
@@ -984,15 +1049,23 @@ function declutter() {
     return (selected === s.id || hovered === s.id ? 0 : n && !resting(n) ? 1 : 2) * 1e13 - recency(n ?? {})
   }
   const overlaps = (r, list) => list.some(p => r.left < p.right + 4 && r.right > p.left - 4 && r.top < p.bottom + 2 && r.bottom > p.top - 2)
+  // Room signs, and the hover bubble while it's up, outrank every name.
   const signs = [...rooms.values(), ...(coffee ? [coffee] : [])].map(t => t.label.el.getBoundingClientRect())
+  if (!bubble.hidden) signs.push(bubble.getBoundingClientRect())
   const placed = []
   for (const s of [...sessionViews.values()].sort((a, b) => rank(a) - rank(b))) {
     const el = s.label.el
     el.classList.remove('crowded', 'covered')
-    const mine = selected === s.id || hovered === s.id
+    const mine = selected === s.id || (hovered === s.id && bubble.hidden)
+    // The bubble already names the critter it's over.
+    if (hoverPick?.id === s.id && !bubble.hidden) { el.classList.add('covered'); continue }
     if (!mine && overlaps(el.getBoundingClientRect(), signs)) { el.classList.add('covered'); continue }
     if (!mine && overlaps(el.getBoundingClientRect(), placed)) el.classList.add('crowded')
     placed.push(el.getBoundingClientRect())
+  }
+  const over = bubble.hidden ? null : bubble.getBoundingClientRect()
+  for (const t of [...rooms.values(), ...(coffee ? [coffee] : [])]) {
+    t.label.el.classList.toggle('covered', Boolean(over && overlaps(t.label.el.getBoundingClientRect(), [over])))
   }
 }
 

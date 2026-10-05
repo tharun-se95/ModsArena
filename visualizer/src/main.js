@@ -22,17 +22,48 @@ let selected = null
 table.mount(document.getElementById('stage'), { pick })
 
 function pick(id) {
-  // Clicking a room or the floor clears the selection.
+  // Picking a critter (in the office, on a sticky note or in the directory)
+  // opens its clipboard and glides to its room; clicking the floor or the
+  // clipboard's back link puts the clipboard away.
   const n = id && model.nodes.get(id)
   selected = n && (n.kind === 'session' || n.kind === 'agent') ? id : null
   table.setSelected(selected)
+  if (selected) table.focusOn(selected)
   refreshPanels()
 }
+
+// Frame the office in the space the floating panels leave free: a panel
+// taller than half the stage claims its side, one wider than half claims
+// the top or bottom.
+const stageEl = document.getElementById('stage')
+function measureInsets() {
+  const W = stageEl.clientWidth, H = stageEl.clientHeight
+  const insets = { left: 0, right: 0, top: 0, bottom: 0 }
+  for (const el of document.querySelectorAll('.hud.left > *, #side, .topbar')) {
+    const r = el.getBoundingClientRect()
+    if (!r.width || !r.height || getComputedStyle(el).display === 'none') continue
+    if (r.height > H * 0.5 && r.width < W * 0.5) {
+      if (r.left + r.width / 2 < W / 2) insets.left = Math.max(insets.left, r.right + 12)
+      else insets.right = Math.max(insets.right, W - r.left + 12)
+    } else if (r.width > W * 0.5) {
+      if (r.top + r.height / 2 < H / 2) insets.top = Math.max(insets.top, r.bottom + 8)
+      else insets.bottom = Math.max(insets.bottom, H - r.top + 8)
+    } else if (r.left + r.width / 2 < W / 2) {
+      // A shorter panel on one side: still keep the office clear of it.
+      insets.left = Math.max(insets.left, r.right + 12)
+    } else {
+      insets.right = Math.max(insets.right, W - r.left + 12)
+    }
+  }
+  table.setInsets(insets)
+}
+const panelWatch = new ResizeObserver(measureInsets)
+for (const el of document.querySelectorAll('.hud.left > *, #side, .topbar, #stage')) panelWatch.observe(el)
 
 addEventListener('keydown', e => {
   if (e.key !== 'Escape') return
   pick(null)
-  table.focusProject(null)
+  table.focusOn(null)
 })
 
 // Sound: off until the page has been clicked or a key pressed (browsers
@@ -63,7 +94,7 @@ function running() {
 
 function refreshPanels() {
   if (selected && !model.nodes.has(selected)) selected = null
-  panels.render({ running: running(), selected, pick })
+  panels.render({ running: running(), selected, pick, hover: table.setHover })
 }
 
 function frame() {

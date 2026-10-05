@@ -1,9 +1,11 @@
-// The words around the table: a summary of right now, what needs a look,
-// the moments so far, and a card per session that opens into its details.
+// The office's paperwork: the notice card (right now, with a sticky note
+// for each thing that needs a look), the tape of moments, and the
+// directory of sessions by room, which turns into a clipboard for the
+// session or subagent you pick.
 
 import { nodes, fill, warnings, sid, WARN_AT } from './model.js'
 import { moments, activity, lastAction, escapeHtml, quote, ago } from './words.js'
-import { pct, level, tintOf, sessionTint } from './table.js'
+import { pct, level, tintOf, sessionTint, roomKey } from './table.js'
 
 const $ = sel => document.querySelector(sel)
 const k = n => (n === undefined ? '—' : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : `${Math.round(n / 1000)}k`)
@@ -39,39 +41,55 @@ function summary(running) {
   return parts
 }
 
+// Sticky notes: yellow for a context window nearly full, pink for a call
+// that just failed. Each one takes you to the critter it's about.
 function needsALook() {
   const full = warnings().map(n => {
     const host = n.kind === 'agent' ? nodes.get(sid(n.session)) : null
-    return `<li><button data-pick="${escapeHtml(n.id)}"><span class="dot crit"></span>${escapeHtml(n.kind === 'agent' ? `${n.label} in ${quote(host?.label ?? '')}` : quote(n.label))} is ${pct(fill(n))} full</button></li>`
+    return `<li class="warn"><button data-pick="${escapeHtml(n.id)}">${escapeHtml(n.kind === 'agent' ? `${n.label} in ${quote(host?.label ?? '')}` : quote(n.label))} is ${pct(fill(n))} full</button></li>`
   })
-  const failures = moments.filter(m => m.tone === 'bad' && Date.now() - m.t < 120000).slice(0, 3)
-    .map(m => `<li class="muted"><button data-pick="${escapeHtml(m.target)}">${escapeHtml(m.text)}</button></li>`)
-  return [...full, ...failures].join('') || '<li class="muted">Nothing needs you right now.</li>'
+  const failures = moments.filter(m => m.tone === 'bad' && Date.now() - m.t < 120000).slice(0, 4 - Math.min(2, full.length))
+    // A note is short: the session's name is already on the critter it points at.
+    .map(m => `<li class="bad"><button data-pick="${escapeHtml(m.target)}">${escapeHtml(m.text.replace(/ in “[^”]*”\.$/, '.'))}</button></li>`)
+  return [...full.slice(0, 2), ...failures].join('') || '<li class="calm"><span>Nothing needs you right now.</span></li>'
 }
 
-function sessionCard(n, running, selected) {
+// One line in the directory: color, name, context, and what it's up to.
+function entry(n, running, selected) {
   const f = fill(n)
   const live = isLive(n)
-  const helpers = live ? liveHelpers(n) : []
-  const last = activity.get(n.id)?.actions[0]?.text ?? n.prompts?.at(-1)?.text
-  const state = !live ? `ended ${ago(n.endedAt ?? n.lastAt)}` : isBusy(n, running) ? 'working' : 'waiting'
+  const helpers = live ? liveHelpers(n).length : 0
+  const last = activity.get(n.id)?.actions[0]?.text
+  const state = !live ? `ended ${ago(n.endedAt ?? n.lastAt)}` : isBusy(n, running) ? (last ?? 'working') : 'waiting for you'
   return `
-    <button class="scard ${live ? '' : 'past'} ${selected === n.id ? 'on' : ''}" data-pick="${escapeHtml(n.id)}">
-      <span class="srow"><span class="stitle"><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(title(n))}</span>${n.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span>` : ''}</span>
-      ${n.context?.tokens ? `<span class="meter"><span class="${level(f)}" style="width:${(f * 100).toFixed(1)}%"></span></span>` : ''}
-      <span class="smeta">${escapeHtml(n.projectName ?? '')} · ${state}${helpers.length ? ` · ${helpers.length} helping` : ''}</span>
-      ${last ? `<span class="slast">${escapeHtml(last)}</span>` : ''}
+    <button class="entry ${live ? '' : 'past'} ${selected === n.id ? 'on' : ''}" data-pick="${escapeHtml(n.id)}" data-hover="${escapeHtml(n.id)}">
+      <i class="dot ${sessionTint(n.session)}"></i>
+      <span class="ename">${escapeHtml(title(n))}</span>
+      ${n.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span>` : '<span></span>'}
+      <span class="estate">${helpers ? `${plural(helpers, 'helper')} · ` : ''}${escapeHtml(state)}</span>
     </button>`
 }
 
-function sessionList(running, selected) {
-  const sessions = [...nodes.values()].filter(n => n.kind === 'session')
-  const live = sessions.filter(isLive).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0))
-  const past = sessions.filter(n => !isLive(n)).sort((a, b) => (b.endedAt ?? b.lastAt ?? 0) - (a.endedAt ?? a.lastAt ?? 0)).slice(0, 8)
+// The office directory: sessions by room, in each room's wall color.
+function directory(running, selected) {
+  const byRoom = new Map()
+  for (const n of nodes.values()) {
+    if (n.kind !== 'session') continue
+    const key = n.projectName ?? 'Elsewhere'
+    if (!byRoom.has(key)) byRoom.set(key, [])
+    byRoom.get(key).push(n)
+  }
+  const rooms = [...byRoom].map(([name, list]) => {
+    const live = list.filter(isLive).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0))
+    const past = list.filter(n => !isLive(n)).sort((a, b) => (b.endedAt ?? b.lastAt ?? 0) - (a.endedAt ?? a.lastAt ?? 0)).slice(0, 3)
+    return { name, live, past }
+  }).sort((a, b) => (b.live.length > 0) - (a.live.length > 0) || a.name.localeCompare(b.name))
+  const liveCount = rooms.reduce((a, r) => a + r.live.length, 0)
   return `
-    <h2 class="sideh">Sessions</h2>
-    ${live.map(n => sessionCard(n, running, selected)).join('') || '<p class="muted">No live sessions.</p>'}
-    ${past.length ? `<h3>Earlier</h3>${past.map(n => sessionCard(n, running, selected)).join('')}` : ''}`
+    <h2 class="sideh">Directory <small>${liveCount} live</small></h2>
+    ${rooms.map(r => `
+      <p class="room"><i class="room-${roomKey(r.name)}"></i>${escapeHtml(r.name)}</p>
+      ${[...r.live, ...r.past].map(n => entry(n, running, selected)).join('')}`).join('') || '<p class="muted">No sessions yet.</p>'}`
 }
 
 function line(text, extra = '', cls = '') {
@@ -168,14 +186,21 @@ function patch(el, html) {
   morph(el, fresh)
 }
 
-// Re-render what changed. `selected` is a node id or null.
-export function render({ running, selected, pick }) {
+// Re-render what changed. `selected` is a node id or null; `hover` shows
+// a critter's bubble while its directory entry is under the pointer.
+export function render({ running, selected, pick, hover }) {
   patch($('#now'), summary(running).map(p => `<p>${p}</p>`).join(''))
   patch($('#look'), needsALook())
   patch($('#moments'), moments.slice(0, 12).map(m =>
     `<li class="${m.tone}"><span>${escapeHtml(m.text)}</span><time>${ago(m.t)}</time></li>`).join('') || '<li class="muted"><span>Quiet so far.</span></li>')
   const n = selected && nodes.get(selected)
-  patch($('#side'), !n ? sessionList(running, selected) : n.kind === 'agent' ? agentDetail(n) : n.kind === 'session' ? sessionDetail(n) : sessionList(running, selected))
+  const detail = n && (n.kind === 'agent' || n.kind === 'session')
+  $('#side').classList.toggle('clipboard', Boolean(detail))
+  patch($('#side'), !detail ? directory(running, selected) : n.kind === 'agent' ? agentDetail(n) : sessionDetail(n))
   for (const b of document.querySelectorAll('[data-pick]')) b.onclick = () => pick(b.dataset.pick || null)
   for (const b of document.querySelectorAll('[data-back]')) b.onclick = () => pick(null)
+  for (const b of document.querySelectorAll('[data-hover]')) {
+    b.onpointerenter = () => hover(b.dataset.hover)
+    b.onpointerleave = () => hover(null)
+  }
 }

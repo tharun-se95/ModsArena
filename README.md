@@ -4,7 +4,7 @@ Claude Code mods and the tools around them.
 
 ## Agent Cluster 3D
 
-A live office of everything Claude Code is doing on your machine. Each project gets its own cozy room on the office floor. Your chat sessions are colorful critters, each on its own rug in front of a desk whose monitor scrolls code while it works, live ones awake and recent ones resting. Each subagent is a smaller critter standing behind the session that started it, and every tool call makes its caller hop. Around the floor, plain sentences tell you what's happening, what needs a look, and what each session has been working on.
+A live office of everything Claude Code is doing on your machine. Each project gets its own cozy room on the office floor. Your chat sessions are colorful critters, each on its own rug in front of a desk whose monitor scrolls code while it works, live ones awake and recent ones resting. Each subagent is a smaller critter standing behind the session that started it, and every tool call makes its caller hop. The office fills the window, and its paperwork floats over it: a pinned notice says what's happening, sticky notes flag what needs a look, a tape of moments keeps the log, and the directory lists every session by room.
 
 ![Agent Cluster](docs/agent-cluster-3d.png)
 
@@ -28,13 +28,19 @@ A live office of everything Claude Code is doing on your machine. Each project g
 
 **Sounds:** soft key taps when a tool runs, a two-note chime when a turn finishes, a bonk when a call fails, a pop when a helper arrives, a chirp when critters wave, a clink at the coffee corner and a hush on compaction. They're synthesized in the browser (no audio files), start after your first click or key press, and the **Sound** button in the header mutes them (it remembers your choice).
 
-Hover any critter for a bubble with what it is and what it's doing: its status, the tool it's running, its context use, model and tool calls, and who it works for. Session names and room signs stay small and quiet, and a name that would collide with another steps aside. Click a session to open its details:
+Hover any critter (or its line in the directory) for a bubble with what it is and what it's doing: its status, the tool it's running, its context use, model and tool calls, and who it works for. Session names and room signs stay small and quiet; a name that would collide with another, with a sign or with the bubble steps aside. Click a critter, a sticky note or a directory line and the camera glides to its room while the directory turns into a clipboard with its details:
 
 - its context use and what fills it (the `/context` breakdown);
 - turns, tool calls, errors, cost, model and rate limits;
 - who is helping now, the files it has read and edited, its recent actions in plain words, and what you asked it.
 
-The left column says what's going on in a sentence or two, lists what **needs a look** (anything past 80% and recent failures; click one to open it), and keeps a log of moments: subagents starting and finishing, failures, compactions.
+Floating over the office (and framed around, so the office always sits in the space they leave free):
+
+- **The notice card** (top left) says what's going on in a sentence or two, with a sticky note for each thing that **needs a look**: yellow for a context window past 80%, pink for a call that just failed.
+- **The tape** (bottom left) keeps the moments: subagents starting and finishing, failures, compactions.
+- **The directory** (right) lists sessions by room, each room marked with its wall color, with context use and what each session is up to. Picking one clips it to a clipboard with its details; **All sessions** or Esc puts it back and glides out to the whole office.
+
+On a narrow screen the notice card becomes a strip under the top bar and the directory a sheet at the bottom.
 
 ### How each thing is measured
 
