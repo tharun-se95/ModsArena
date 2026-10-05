@@ -1,7 +1,9 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 // Streams this session's projects, agents, tool calls and context to the
-// cluster-3d bridge (server/server.mjs), which fans it out to the visualizer.
+// Agent Office bridge (server/server.mjs), which fans it out to the office
+// page. `/office` opens the page (starting the bridge first if need be) and
+// `/office status` says what's running.
 //
 // Hooks run in a sandbox with no Node, so events are queued here and flushed
 // over `$.http.fetch` on a timer: a tool call never waits on the bridge.
@@ -12,6 +14,9 @@ const SPAWN_TOOLS = new Set(['Agent', 'Task'])
 const FLUSH_MS = 250
 const QUEUE_LIMIT = 2000
 const RESPAWN_MS = 15000
+const BRIDGE_WAIT_MS = 8000
+const MIN_NODE = 18
+const WELCOMED = 'welcomed'
 // Gauges: only the newest reading per loop matters, so a queued one is replaced.
 const GAUGES = new Set(['context.measure', 'agent.context'])
 
@@ -73,7 +78,7 @@ function showStatus($: EngineInterface) {
   const tools = link.activeTools
   $.ui.status(
     link.isBridgeUp && (agents > 0 || tools > 0)
-      ? `◉ cluster ${agents} agent${agents === 1 ? '' : 's'} · ${tools} tool${tools === 1 ? '' : 's'}`
+      ? `◉ office ${agents} agent${agents === 1 ? '' : 's'} · ${tools} tool${tools === 1 ? '' : 's'}`
       : undefined,
   )
 }
@@ -86,6 +91,19 @@ async function isHealthy($: EngineInterface) {
   }
 }
 
+// The bridge runs on Node; say plainly when it's missing or too old.
+export function nodeProblem(version: string | undefined): string | undefined {
+  if (!version) return `Agent Office needs Node ${MIN_NODE} or newer to run its bridge, and \`node\` wasn't found. Install it from https://nodejs.org, then run /office again.`
+  const major = Number(/^v?(\d+)/.exec(version.trim())?.[1] ?? 0)
+  if (major < MIN_NODE) return `Agent Office needs Node ${MIN_NODE} or newer to run its bridge; this machine has ${version.trim()}. Update it from https://nodejs.org, then run /office again.`
+  return undefined
+}
+
+async function nodeVersion($: EngineInterface) {
+  const ran = await $.process.run(['node', '--version'], { timeoutMs: 5000 }).catch(() => undefined)
+  return ran?.exitCode === 0 ? ran.stdout : undefined
+}
+
 // The child lives as long as this loop, which lives as long as the module.
 function startBridge($: EngineInterface) {
   link.lastSpawnAt = Date.now()
@@ -96,7 +114,7 @@ function startBridge($: EngineInterface) {
       })
       for await (const { text } of child) $.ui.log(text.trimEnd(), { to: 'debug' })
     } catch (err) {
-      $.ui.log(`agent-cluster-3d: bridge did not start: ${String(err)}`, { to: 'debug' })
+      $.ui.log(`agent-office: bridge did not start: ${String(err)}`, { to: 'debug' })
     }
   })()
 }
@@ -122,6 +140,22 @@ async function flush($: EngineInterface) {
   } finally {
     link.isFlushing = false
   }
+}
+
+// What `/office status` reports: the bridge, what it has seen, this session.
+async function status($: EngineInterface) {
+  const url = bridgeUrl()
+  const lines: string[] = []
+  try {
+    const res = await $.http.fetch(`${url}/healthz`)
+    const health = JSON.parse(res.text) as { events?: number; viewers?: number }
+    lines.push(`Bridge: running on ${url}, ${health.events ?? 0} events so far, ${health.viewers ?? 0} page${health.viewers === 1 ? '' : 's'} open.`)
+  } catch {
+    const problem = nodeProblem(await nodeVersion($))
+    lines.push(`Bridge: not running on ${url}.${problem ? ` ${problem}` : link.autoStart ? ' /office starts it.' : ` Start one with: node ${$.plugin.root}/server/server.mjs --port ${link.port}`}`)
+  }
+  lines.push(`This session: ${link.queue.length} event${link.queue.length === 1 ? '' : 's'} waiting to send, ${link.activeAgents.size} subagent${link.activeAgents.size === 1 ? '' : 's'} and ${link.activeTools} tool call${link.activeTools === 1 ? '' : 's'} in flight.`)
+  return lines.join('\n')
 }
 
 async function openBrowser($: EngineInterface) {
@@ -167,22 +201,40 @@ export const register: Register = (on, options) => {
     if (!link.isBridgeUp && link.autoStart) startBridge($)
 
     await $.command.register({
-      name: 'cluster3d',
-      description: 'Open the live 3D cluster of your projects, sessions, agents and context.',
+      name: 'office',
+      description: 'Open Agent Office, the live view of your sessions and subagents (`/office status` to check on it).',
     })
     $.clock.every(FLUSH_MS, () => void flush($))
+
+    // Once per machine: say how to open it.
+    if (!(await $.store.get(WELCOMED).catch(() => true))) {
+      await $.store.set(WELCOMED, true).catch(() => undefined)
+      $.ui.toast('Agent Office is on. Type /office to watch your sessions at work.', { timeoutMs: 8000 })
+    }
     return started
   })
 
-  on('command.run', { command: 'cluster3d' }, async $ => {
+  on('command.run', { command: 'office' }, async ($, e) => {
     const url = bridgeUrl()
+    const arg = (e.args ?? '').trim().toLowerCase()
+    if (arg === 'status') return { text: await status($) }
+    if (arg && arg !== 'open') return { text: 'Usage: /office (open the office) or /office status' }
+
     if (!(await isHealthy($))) {
-      if (!link.autoStart) return { text: `No bridge on ${url}. Start it with: node ${$.plugin.root}/server/server.mjs` }
+      if (!link.autoStart) return { text: `No bridge on ${url}. Start one with: node ${$.plugin.root}/server/server.mjs --port ${link.port}` }
+      const problem = nodeProblem(await nodeVersion($))
+      if (problem) return { text: problem }
       startBridge($)
-      return { text: `Starting the bridge on ${url}; run /cluster3d again in a moment.` }
+      // Wait for it to answer, then carry on and open the page.
+      const until = Date.now() + BRIDGE_WAIT_MS
+      while (!(await isHealthy($))) {
+        if (Date.now() > until) return { text: `The bridge didn't answer on ${url}. Is port ${link.port} taken by something else? Try /office status, or set another port in this plugin's options.` }
+        await $.clock.sleep(250)
+      }
+      link.isBridgeUp = true
     }
     const isOpened = await openBrowser($)
-    return { text: isOpened ? `Opened the visualizer at ${url}` : `Visualizer: ${url}` }
+    return { text: isOpened ? `Opened Agent Office at ${url}` : `Agent Office is at ${url}` }
   })
 
   on('session.end', async ($, e, next) => {

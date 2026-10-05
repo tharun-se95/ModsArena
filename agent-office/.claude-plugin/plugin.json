@@ -1,0 +1,31 @@
+{
+  "name": "agent-office",
+  "version": "0.2.0",
+  "author": {
+    "name": "tharun-se95"
+  },
+  "description": "A live office of your Claude Code sessions: a room per project, a critter per session, its subagents beside it, every tool call and context window as it happens. Type /office to open it.",
+  "homepage": "https://github.com/tharun-se95/ModsArena",
+  "repository": "https://github.com/tharun-se95/ModsArena",
+  "license": "MIT",
+  "keywords": [
+    "visualizer",
+    "subagents",
+    "monitoring",
+    "context"
+  ],
+  "userConfig": {
+    "port": {
+      "type": "number",
+      "title": "Bridge port",
+      "description": "Local port the office's bridge listens on (http://127.0.0.1:<port>).",
+      "default": 7337
+    },
+    "autoStart": {
+      "type": "boolean",
+      "title": "Start the bridge automatically",
+      "description": "Start the bundled Node bridge when none answers on the port.",
+      "default": true
+    }
+  }
+}

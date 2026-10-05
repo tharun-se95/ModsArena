@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Claude Cluster 3D bridge: takes events from Claude Code, streams them to the
-// 3D visualizer over Server-Sent Events. Node built-ins only, no install step.
+// Agent Office bridge: takes events from Claude Code, streams them to the
+// office page over Server-Sent Events. Node built-ins only, no install step.
 //
 //   node server.mjs [--port 7337] [--demo] [--history-days 14]
 //
@@ -26,7 +26,7 @@ const option = (name, fallback) => {
   return i >= 0 && args[i + 1] ? args[i + 1] : fallback
 }
 
-const PORT = Number(option('port', process.env.CLUSTER3D_PORT ?? 7337))
+const PORT = Number(option('port', process.env.AGENT_OFFICE_PORT ?? 7337))
 const HOST = option('host', '127.0.0.1')
 const HISTORY_DAYS = Number(option('history-days', 14))
 const LOG_LIMIT = 8000
@@ -46,7 +46,7 @@ const gauges = new Map()
 const clients = new Set()
 
 // The bridge names projects itself, so live and past sessions of one
-// repository land in one cluster whatever the producer called it.
+// repository land in one room whatever the producer called it.
 function enrich(ev) {
   if (ev.kind !== 'session.start') return ev
   const found = findProject(ev.project?.id ?? ev.cwd)
@@ -154,7 +154,7 @@ const server = createServer(async (req, res) => {
   }
 
   if (pathname === '/healthz') {
-    json(res, 200, { ok: true, name: 'agent-cluster-3d', events: log.length, viewers: clients.size })
+    json(res, 200, { ok: true, name: 'agent-office', demo: flag('demo'), events: log.length, viewers: clients.size })
     return
   }
 
@@ -165,13 +165,13 @@ const server = createServer(async (req, res) => {
 server.on('error', err => {
   // Another session's bridge already holds the port: that one serves us too.
   if (err.code === 'EADDRINUSE') {
-    console.error(`[cluster-3d] port ${PORT} in use, assuming a bridge is already running`)
+    console.error(`[agent-office] port ${PORT} in use, assuming a bridge is already running`)
     process.exit(0)
   }
   throw err
 })
 
 server.listen(PORT, HOST, () => {
-  console.log(`[cluster-3d] visualizer on http://${HOST}:${PORT}`)
+  console.log(`[agent-office] office on http://${HOST}:${PORT}`)
   if (flag('demo')) startDemo(publish)
 })

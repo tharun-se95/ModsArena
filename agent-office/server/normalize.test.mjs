@@ -1,4 +1,4 @@
-// node --test agent-cluster-3d/server/*.test.mjs
+// node --test agent-office/server/*.test.mjs
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { normalize, GAUGES, gaugeKey } from './normalize.mjs'

@@ -5,7 +5,7 @@
 // hush when a session compacts. Browsers only allow sound after you've
 // interacted with the page, so nothing plays until your first click or key.
 
-const KEY = 'agent-cluster-muted'
+const KEY = 'agent-office-muted'
 let ctx = null
 let master = null
 let muted = false

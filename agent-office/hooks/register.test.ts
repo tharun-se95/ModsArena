@@ -1,5 +1,5 @@
 import { test, expect, mock } from 'claude-code/testing'
-import { summarize, contextTokens, projectOf } from './register'
+import { summarize, contextTokens, projectOf, nodeProblem } from './register'
 
 test('summarize picks the most telling field and trims it', async () => {
   expect(summarize({ command: 'npm   test\n --watch' })).toBe('npm test --watch')
@@ -20,7 +20,7 @@ test('tool calls and spawns reach the bridge as cluster events', async ($, on) =
   on('session.start', async (_$, e) => ({ cwd: e.cwd }))
   on('session.id', async () => ({ value: 'sess-test' }))
   on('session.model', async () => ({ value: 'test-model' }))
-  on('command.register', async () => ({ value: { command: 'cluster3d' } }))
+  on('command.register', async () => ({ value: { command: 'office' } }))
   on('ui.status', async () => ({ value: undefined }))
   on('tool.call', { tool: 'Read' }, async () => ({ result: { type: 'text', file: { filePath: 'a.ts', content: '', numLines: 0, startLine: 1, totalLines: 0 } } }))
   on('agent.spawn', async () => ({ model: 'haiku', agentId: 'agent-1' }))
@@ -65,7 +65,7 @@ test('context readings, requests and compactions reach the bridge', async ($, on
   on('session.model', async () => ({ value: 'test-model' }))
   on('session.repo', async () => ({ value: { root: '/w', remote: null, internal: false, name: null } }))
   on('session.usage', async () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 50000, window: 200000, breakdown: undefined } } }))
-  on('command.register', async () => ({ value: { command: 'cluster3d' } }))
+  on('command.register', async () => ({ value: { command: 'office' } }))
   on('ui.status', async () => ({ value: undefined }))
   on('session.measure', async (_$, e) => ({ changed: e.changed }))
   on('session.compact', async () => ({ messages: [{ role: 'user', text: 'summary', toolUses: [] }], tokensBefore: 180000, tokensAfter: 30000 }))
@@ -89,4 +89,45 @@ test('context readings, requests and compactions reach the bridge', async ($, on
   expect(compact?.before).toBe(180000)
   expect(compact?.after).toBe(30000)
   expect(posted.find(ev => ev.kind === 'session.start')?.project).toEqual({ id: '/w', name: 'w', remote: null })
+})
+
+test('nodeProblem explains a missing or old Node, and passes a current one', async () => {
+  expect(nodeProblem(undefined)).toContain('Node 18 or newer')
+  expect(nodeProblem('v16.20.0\n')).toContain('v16.20.0')
+  expect(nodeProblem('v22.3.0\n')).toBe(undefined)
+})
+
+test('/office starts the bridge, waits for it, then opens the page', async ($, on) => {
+  let isUp = false
+  const ran: string[][] = []
+  on('http.fetch', async (_$, e) => {
+    if (e.url.endsWith('/healthz')) {
+      return { value: { status: isUp ? 200 : 503, ok: isUp, headers: {}, text: '{"ok":true,"events":3,"viewers":1}' } }
+    }
+    return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }
+  })
+  on('process.run', async (_$, e) => {
+    ran.push([...e.argv])
+    return { value: { exitCode: 0, stdout: e.argv[0] === 'node' ? 'v22.3.0\n' : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('process.spawn', async function* () {
+    isUp = true // the bridge comes up once started
+    return { code: 0, signal: null }
+  })
+  on('clock.sleep', async () => ({ value: undefined }))
+
+  const opened = await $.command.run({ command: 'office', args: '' })
+  expect(opened.text).toContain('Opened Agent Office at http://127.0.0.1:7337')
+  expect(ran.some(argv => argv[0] === 'node')).toBe(true)
+  expect(ran.some(argv => argv.includes('http://127.0.0.1:7337'))).toBe(true)
+
+  const report = await $.command.run({ command: 'office', args: 'status' })
+  expect(report.text).toContain('Bridge: running on http://127.0.0.1:7337, 3 events so far, 1 page open.')
+})
+
+test('/office says plainly when Node is missing', async ($, on) => {
+  on('http.fetch', async () => ({ value: { status: 503, ok: false, headers: {}, text: '' } }))
+  on('process.run', async () => { throw new Error('spawn node ENOENT') })
+  const answer = await $.command.run({ command: 'office', args: '' })
+  expect(answer.text).toContain('needs Node 18 or newer')
 })

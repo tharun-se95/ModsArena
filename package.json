@@ -1,0 +1,31 @@
+{
+  "name": "agent-office",
+  "version": "0.2.0",
+  "description": "A live office of your Claude Code sessions and subagents: the bridge, the page, and a settings-hooks installer.",
+  "type": "module",
+  "bin": {
+    "agent-office": "agent-office/server/cli.mjs"
+  },
+  "files": [
+    "agent-office/server",
+    "agent-office/fallback",
+    "agent-office/.claude-plugin",
+    "agent-office/hooks"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node agent-office/server/cli.mjs",
+    "demo": "node agent-office/server/cli.mjs demo",
+    "test": "node --test agent-office/server/*.test.mjs",
+    "build": "npm --prefix visualizer run build",
+    "build:demo-site": "node scripts/build-demo-site.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tharun-se95/ModsArena.git"
+  },
+  "homepage": "https://github.com/tharun-se95/ModsArena#agent-office",
+  "license": "MIT"
+}
