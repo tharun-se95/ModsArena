@@ -27,14 +27,14 @@ const base = path => String(path).split(/[\\/]/).filter(Boolean).pop() ?? path
 // Families of tools, by what they do to your work. `bead` names the
 // palette color of the small bead a call releases on the table.
 const FAMILIES = [
-  { test: t => ['Read', 'NotebookRead'].includes(t), done: 'read', try: 'read', bead: 'slate', file: 'read' },
-  { test: t => ['Edit', 'MultiEdit', 'Write', 'NotebookEdit'].includes(t), done: 'edited', try: 'edit', bead: 'clay', file: 'edit' },
-  { test: t => ['Grep', 'Glob', 'LS'].includes(t), done: 'searched for', try: 'search for', bead: 'sage' },
-  { test: t => ['WebFetch', 'WebSearch'].includes(t), done: 'looked up', try: 'look up', bead: 'plum' },
-  { test: t => ['Bash', 'BashOutput', 'PowerShell'].includes(t), done: 'ran', try: 'run', bead: 'ochre' },
-  { test: t => ['Task', 'Agent'].includes(t), done: 'handed off', try: 'hand off', bead: 'sage' },
+  { test: t => ['Read', 'NotebookRead'].includes(t), done: 'read', try: 'read', bead: 'sky', file: 'read' },
+  { test: t => ['Edit', 'MultiEdit', 'Write', 'NotebookEdit'].includes(t), done: 'edited', try: 'edit', bead: 'coral', file: 'edit' },
+  { test: t => ['Grep', 'Glob', 'LS'].includes(t), done: 'searched for', try: 'search for', bead: 'leaf' },
+  { test: t => ['WebFetch', 'WebSearch'].includes(t), done: 'looked up', try: 'look up', bead: 'lilac' },
+  { test: t => ['Bash', 'BashOutput', 'PowerShell'].includes(t), done: 'ran', try: 'run', bead: 'mustard' },
+  { test: t => ['Task', 'Agent'].includes(t), done: 'handed off', try: 'hand off', bead: 'teal' },
   { test: t => t === 'TodoWrite', done: 'updated its todo list', try: 'update its todo list', bead: 'line', bare: true },
-  { test: t => t.startsWith('mcp__'), mcp: true, bead: 'plum' },
+  { test: t => t.startsWith('mcp__'), mcp: true, bead: 'lilac' },
 ]
 
 export function family(tool) {

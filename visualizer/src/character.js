@@ -1,6 +1,6 @@
 // Little block critters: a soft-cornered body, stubby side arms, square
-// eyes and short legs, in warm clay. Each subagent type has its own build
-// so you can tell them apart by shape, not just color. Built in unit space
+// eyes and short legs, in the caller's color. Each subagent type has its
+// own build so you can tell them apart by shape, not just color. Built in unit space
 // with feet at y = 0; the caller scales the root.
 
 import * as THREE from 'three'

@@ -11,6 +11,7 @@
   /* Layout: words on the left (what is happening, what needs a look, the
      moments so far), the tabletop in the middle, sessions on the right.
      Warm paper and ink, one clay accent; status colors stay separate.
+     The office floor's colors are tokens too, with a dark set below.
      The scene reads its colors from these tokens too (table.js). */
   :root {
     --bg: #f4f0e8;
@@ -24,15 +25,15 @@
     --crit: #b4483a;
     /* The scene's own materials */
     --scene: #f1ece3;
-    --floor: #ede7dc;
-    --tray: #e6dfd2;
-    --porcelain: #fbf8f2;
+    --floor: #e9e2d6;
     --thread: #8a8277;
     --clay: #c46a48;
-    --slate: #6f8297;
-    --sage: #7b9a7f;
-    --plum: #8f6f8f;
-    --ochre: #c49a4a;
+    /* Critters, beads and books */
+    --coral: #ec7a5c; --teal: #2fa59a; --mustard: #e9ad35; --lilac: #9a7ae0;
+    --sky: #4b9be0; --leaf: #5fb35a; --pink: #e872a0;
+    /* The rooms: wooden floors, a wall color each, warm lamps */
+    --wood: #e6cfae; --wood-dark: #8a6446; --trim: #fbf6ec; --glow: #ffcf7a; --window: #bfe3f7; --gem: #f2c14e;
+    --room-a: #f6d8c6; --room-b: #cfe9dd; --room-c: #dcdaf5; --room-d: #f5e4b0; --room-e: #f3d0dc; --room-f: #cfe2f3;
     --serif: "Source Serif 4", "Iowan Old Style", Georgia, serif;
     --sans: "Geist", -apple-system, "Segoe UI", system-ui, sans-serif;
     --mono: "Geist Mono", ui-monospace, Menlo, Consolas, monospace;
@@ -41,16 +42,20 @@
     :root:not([data-theme="light"]) {
       --bg: #1c1b19; --paper: #24221f; --ink: #ece7df; --muted: #a39b90; --line: #3a3631;
       --accent: #d98463; --ok: #8bb592; --warn: #d6a454; --crit: #e07a6a;
-      --scene: #1e1d1a; --floor: #22201d; --tray: #2c2925; --porcelain: #e9e3d8; --thread: #8d867b;
-      --clay: #d98463; --slate: #8ea2b8; --sage: #8bb592; --plum: #b291b2; --ochre: #d6a454;
+      --scene: #1e1d1a; --floor: #26231f; --thread: #8d867b; --clay: #d98463;
+      --coral: #f08a6e; --teal: #4cc0b4; --mustard: #f0bb4f; --lilac: #ac90ea; --sky: #66aeea; --leaf: #7cc677; --pink: #ee8ab0;
+      --wood: #6b5442; --wood-dark: #3f2f24; --trim: #5e564c; --glow: #ffc266; --window: #3f6f96; --gem: #f5c95a;
+      --room-a: #5a443a; --room-b: #36504a; --room-c: #45425e; --room-d: #594f33; --room-e: #573f4b; --room-f: #364b5c;
       color-scheme: dark;
     }
   }
   :root[data-theme="dark"] {
     --bg: #1c1b19; --paper: #24221f; --ink: #ece7df; --muted: #a39b90; --line: #3a3631;
     --accent: #d98463; --ok: #8bb592; --warn: #d6a454; --crit: #e07a6a;
-    --scene: #1e1d1a; --floor: #22201d; --tray: #2c2925; --porcelain: #e9e3d8; --thread: #8d867b;
-    --clay: #d98463; --slate: #8ea2b8; --sage: #8bb592; --plum: #b291b2; --ochre: #d6a454;
+    --scene: #1e1d1a; --floor: #26231f; --thread: #8d867b; --clay: #d98463;
+    --coral: #f08a6e; --teal: #4cc0b4; --mustard: #f0bb4f; --lilac: #ac90ea; --sky: #66aeea; --leaf: #7cc677; --pink: #ee8ab0;
+    --wood: #6b5442; --wood-dark: #3f2f24; --trim: #5e564c; --glow: #ffc266; --window: #3f6f96; --gem: #f5c95a;
+    --room-a: #5a443a; --room-b: #36504a; --room-c: #45425e; --room-d: #594f33; --room-e: #573f4b; --room-f: #364b5c;
     color-scheme: dark;
   }
   * { box-sizing: border-box; }
@@ -85,8 +90,8 @@
   .labels { position: absolute; inset: 0; pointer-events: none; }
   .hint { position: absolute; left: 16px; bottom: 14px; font-size: 12px; color: var(--muted); background: color-mix(in srgb, var(--paper) 80%, transparent); padding: 4px 10px; border-radius: 999px; }
   .tag { pointer-events: auto; cursor: pointer; white-space: nowrap; font-size: 12px; }
-  .tag.project { pointer-events: none; transform-origin: left; }
-  .tag .pname { font: 600 13px var(--serif); color: var(--muted); letter-spacing: 0.01em; }
+  .tag.project { display: inline-flex; align-items: baseline; padding: 3px 12px; border-radius: 8px; background: var(--paper); border: 1px solid var(--line); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); }
+  .tag .pname { font: 600 13.5px var(--serif); color: var(--ink); letter-spacing: 0.01em; }
   .tag.session { display: inline-flex; gap: 8px; align-items: baseline; padding: 4px 10px; border-radius: 999px; background: var(--paper); border: 1px solid var(--line); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); }
   .tag.session.selected { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
   .tag .sname { font-weight: 500; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
@@ -108,7 +113,8 @@
   .meter .ok { background: var(--ok); } .meter .warn { background: var(--warn); } .meter .crit { background: var(--crit); }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; flex: none; }
   .dot.crit { background: var(--crit); }
-  .dot.slate { background: var(--slate); } .dot.plum { background: var(--plum); } .dot.sage { background: var(--sage); } .dot.clay { background: var(--clay); } .dot.ochre { background: var(--ochre); }
+  .dot.coral { background: var(--coral); } .dot.teal { background: var(--teal); } .dot.mustard { background: var(--mustard); } .dot.lilac { background: var(--lilac); }
+  .dot.sky { background: var(--sky); } .dot.leaf { background: var(--leaf); } .dot.pink { background: var(--pink); }
   .back { color: var(--muted); font-size: 13px; }
   .back:hover { color: var(--accent); }
   .dtitle { font: 600 22px/1.25 var(--serif); margin: 4px 0 0; text-wrap: balance; }
@@ -129,6 +135,7 @@
   .toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; cursor: pointer; }
   .toggle input { accent-color: var(--accent); margin: 0; }
   .tag.project { pointer-events: auto; cursor: pointer; }
+  .tag.project.focused { border-color: var(--accent); }
   .tag.project.focused .pname { color: var(--accent); }
   .tag .pmore { margin-left: 8px; font-size: 11.5px; color: var(--muted); }
   .tag.session.past { opacity: 0.72; }
@@ -170,7 +177,7 @@
   </section>
 
   <main class="stage-wrap">
-    <div id="stage" aria-label="Your sessions on a tabletop: each session is a clay critter on its project's tray, its subagents stand behind it, and small beads rise with each tool call"></div>
+    <div id="stage" aria-label="Your sessions on an office floor: each project is a room, each session a colorful critter on its own rug, its subagents stand behind it, and small beads rise with each tool call"></div>
     <span class="hint">Drag to look around<span class="more"> &middot; click a critter to see what it&rsquo;s doing &middot; click a project to zoom in</span></span>
   </main>
 

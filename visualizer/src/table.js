@@ -1,21 +1,24 @@
-// The tabletop: each project is a tray, each session a clay critter on it,
-// and each subagent a smaller critter standing behind its session, tied to
-// it by a thread. Tool calls make the caller hop and release a bead; a
-// compaction sends a ripple across the tray. The scene is reconciled from
+// The office floor: each project is a cozy room, each session a colorful
+// critter on its own rug, and each subagent a smaller critter standing
+// behind its session, tied to it by a thread. Tool calls make the caller
+// hop and release a bead; a compaction sends a ripple across the room. The scene is reconciled from
 // model.js every frame, so it never holds state the model doesn't.
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
 import { makeCharacter, pose } from './character.js'
+import { buildRoom, rug, FLOOR_TOP, WALL_H } from './office.js'
 import { nodes, fill, sid, aid, idOf, WARN_AT } from './model.js'
 import { beadColor, escapeHtml } from './words.js'
 
-const TRAY_TOP = 2.4
+
 const ROW_DEPTH = 170 // one row of sessions, with their helpers behind
-const TRAY_GAP = 44
+const BACK_SPACE = 44 // along the back wall, for the shelf, window and plants
+const SIDE_SPACE = 80
+const ROOM_GAP = 64
 const SESSION_GAP = 185
-// A tray holds its sessions in a small grid, so a busy project stays
+// A room holds its sessions in a small grid, so a busy project stays
 // compact instead of stretching into a long thin strip.
 const gridCols = n => (n <= 2 ? Math.max(1, n) : n <= 4 ? 2 : 3)
 const TILT = 0.78
@@ -27,26 +30,31 @@ const PAST_ONLY_PROJECTS = 4
 const BUSY_MS = 2500
 // Eyes stay near-black in both themes, like the critters they're drawn from.
 const EYE = new THREE.Color('#1c1a17')
-const TINTS = ['slate', 'plum', 'sage', 'clay', 'ochre']
-const AGENT_TINT = { Explore: 'slate', Plan: 'plum', 'general-purpose': 'sage', 'code-reviewer': 'clay', 'test-runner': 'ochre' }
+// Critter colors, from CSS tokens. Sessions each get one from their id;
+// subagents wear their type's.
+const TINTS = ['coral', 'teal', 'mustard', 'lilac', 'sky', 'leaf', 'pink']
+const AGENT_TINT = { Explore: 'sky', Plan: 'lilac', 'general-purpose': 'leaf', 'code-reviewer': 'pink', 'test-runner': 'mustard' }
+const ROOMS = ['a', 'b', 'c', 'd', 'e', 'f']
 
 export const pct = f => `${Math.round(f * 100)}%`
 export const level = f => (f >= 0.85 ? 'crit' : f >= 0.6 ? 'warn' : 'ok')
 
 // Your own agent types get a stable color from their name.
-export function tintOf(type) {
-  if (AGENT_TINT[type]) return AGENT_TINT[type]
+const hash = text => {
   let h = 0
-  for (const c of String(type ?? '')) h = (h * 31 + c.charCodeAt(0)) >>> 0
-  return TINTS[h % TINTS.length]
+  for (const c of String(text ?? '')) h = (h * 31 + c.charCodeAt(0)) >>> 0
+  return h
 }
+export const tintOf = type => AGENT_TINT[type] ?? TINTS[hash(type) % TINTS.length]
+export const sessionTint = id => TINTS[hash(id) % TINTS.length]
+const roomOf = name => ROOMS[hash(name) % ROOMS.length]
 
 // ---------------------------------------------------------------------------
 // Scene
 
 let stage, renderer, labels, scene, camera, controls, sun, floor
 const palette = {}
-const trays = new Map() // project node id -> tray view
+const rooms = new Map() // project node id -> room view
 const sessionViews = new Map() // session node id -> view
 const agentViews = new Map() // agent node id -> view
 const beads = []
@@ -110,25 +118,33 @@ export function mount(el, { pick }) {
 // Colors come from the page's tokens, so the scene follows light and dark.
 function readPalette() {
   const css = getComputedStyle(document.documentElement)
-  for (const k of ['floor', 'tray', 'line', 'ok', 'warn', 'crit', 'clay', 'slate', 'sage', 'plum', 'ochre', 'thread', 'scene']) {
-    palette[k] = new THREE.Color(css.getPropertyValue(`--${k}`).trim() || '#888')
-  }
+  const keys = ['floor', 'line', 'ok', 'warn', 'crit', 'clay', 'thread', 'scene', 'wood', 'wood-dark', 'trim', 'pot', 'glow', 'window', 'gem', ...TINTS, ...ROOMS.map(r => `room-${r}`)]
+  for (const k of keys) palette[k] = new THREE.Color(css.getPropertyValue(`--${k}`).trim() || '#888')
   scene.background = palette.scene
   floor.material.color.copy(palette.floor)
-  for (const t of trays.values()) t.mesh?.material.color.copy(palette.tray)
+  // Rooms are rebuilt in the new colors on the next sync.
+  for (const t of rooms.values()) { if (t.mesh) scene.remove(t.mesh); t.w = null }
+  layoutKey = ''
   for (const s of sessionViews.values()) {
     s.track.material.color.copy(palette.line)
-    s.char.bulb.material.color.copy(palette.ochre)
-    s.char.bulb.material.emissive.copy(palette.ochre)
+    s.char.bulb.material.color.copy(palette.gem)
+    s.char.bulb.material.emissive.copy(palette.gem)
+    s.rug.material.color.copy(rugColor(s.tint, s.room))
     s.gaugeKey = ''
   }
-  for (const a of agentViews.values()) a.char.accentMat.color.copy(helperAccent(a.tint))
+  for (const a of agentViews.values()) a.char.accentMat.color.copy(accent(a.tint))
 }
 
-// Helpers are clay like their session, leaning toward their type's color;
-// their accessory wears that color fully.
-const helperBody = tint => palette.clay.clone().lerp(palette[tint], 0.38)
-const helperAccent = tint => palette[tint].clone().multiplyScalar(0.78)
+const accent = tint => palette[tint].clone().multiplyScalar(0.62)
+const rugColor = (tint, room) => palette[tint].clone().lerp(palette[`room-${room}`] ?? palette.line, 0.62)
+
+function roomColors(room) {
+  return {
+    wood: palette.wood, woodDark: palette['wood-dark'], wall: palette[`room-${room}`], trim: palette.trim,
+    pot: palette.coral.clone().lerp(palette['wood-dark'], 0.35), leaf: palette.leaf, shade: palette.trim, glow: palette.glow, sky: palette.window,
+    books: TINTS.map(t => palette[t]),
+  }
+}
 
 function label(html, cls) {
   const el = document.createElement('div')
@@ -137,23 +153,13 @@ function label(html, cls) {
   return { obj: new CSS2DObject(el), el }
 }
 
-function roundedRect(w, d, r) {
-  const s = new THREE.Shape()
-  s.moveTo(-w / 2 + r, -d / 2)
-  s.lineTo(w / 2 - r, -d / 2); s.quadraticCurveTo(w / 2, -d / 2, w / 2, -d / 2 + r)
-  s.lineTo(w / 2, d / 2 - r); s.quadraticCurveTo(w / 2, d / 2, w / 2 - r, d / 2)
-  s.lineTo(-w / 2 + r, d / 2); s.quadraticCurveTo(-w / 2, d / 2, -w / 2, d / 2 - r)
-  s.lineTo(-w / 2, -d / 2 + r); s.quadraticCurveTo(-w / 2, -d / 2, -w / 2 + r, -d / 2)
-  return s
-}
-
 function flatRing(inner, outer, color, theta = Math.PI * 2) {
   const m = new THREE.Mesh(
     new THREE.RingGeometry(inner, outer, 96, 1, Math.PI / 2, -theta),
     new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent: true }),
   )
   m.rotation.x = -Math.PI / 2
-  m.position.y = TRAY_TOP + 0.9
+  m.position.y = FLOOR_TOP + 0.9
   return m
 }
 
@@ -186,30 +192,28 @@ function chooseSessions(showPast) {
   return [...live, ...quiet]
 }
 
-function ensureTray(p) {
-  let t = trays.get(p.id)
+function ensureRoom(p) {
+  let t = rooms.get(p.id)
   if (!t) {
     t = { id: p.id, label: label('', 'project'), center: new THREE.Vector3(), target: new THREE.Vector3() }
     t.label.el.addEventListener('click', () => focusProject(focusedProject === p.id ? null : p.id))
-    trays.set(p.id, t)
+    rooms.set(p.id, t)
   }
   const cols = gridCols(p.sessions.length)
-  const w = cols * SESSION_GAP + 40
-  const d = Math.ceil(p.sessions.length / cols) * ROW_DEPTH + 10
+  const w = cols * SESSION_GAP + SIDE_SPACE
+  const d = Math.ceil(p.sessions.length / cols) * ROW_DEPTH + BACK_SPACE
   t.cols = cols
   if (t.w !== w || t.d !== d) {
     if (t.mesh) scene.remove(t.mesh)
-    const geo = new THREE.ExtrudeGeometry(roundedRect(w, d, 14), { depth: TRAY_TOP, bevelEnabled: true, bevelThickness: 0.6, bevelSize: 0.6, bevelSegments: 3 })
-    geo.rotateX(-Math.PI / 2)
-    t.mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: palette.tray, roughness: 0.85 }))
-    t.mesh.receiveShadow = true
+    t.mesh = buildRoom({ w, d, name: p.name, colors: roomColors(roomOf(p.name)) }).group
     t.mesh.position.copy(t.center)
     t.mesh.add(t.label.obj)
     scene.add(t.mesh)
     t.w = w
     t.d = d
   }
-  t.label.obj.position.set(-w / 2 + 14, TRAY_TOP, d / 2 + 2)
+  // The room's name hangs as a sign over its back wall.
+  t.label.obj.position.set(0, WALL_H + 10, -d / 2)
   const more = p.hidden > 0 ? `<span class="pmore">+${p.hidden} earlier</span>` : ''
   const html = `<span class="pname">${escapeHtml(p.name)}</span>${more}`
   if (t.html !== html) t.label.el.innerHTML = t.html = html
@@ -221,12 +225,16 @@ function ensureSession(n) {
   let s = sessionViews.get(n.id)
   if (s) return s
   s = { id: n.id, home: new THREE.Vector3(), group: new THREE.Group(), slots: new Map(), gaugeKey: '', placed: false }
-  s.char = makeCharacter({ build: 'session', bodyColor: palette.clay, inkColor: EYE, accentColor: palette.ochre, pick: { kind: 'session', id: n.id } })
+  s.tint = sessionTint(n.session)
+  s.room = roomOf(nodes.get(`p:${n.project}`)?.label ?? n.project)
+  s.char = makeCharacter({ build: 'session', bodyColor: palette[s.tint], inkColor: EYE, accentColor: palette.gem, pick: { kind: 'session', id: n.id } })
+  s.rug = rug(rugColor(s.tint, s.room))
+  s.group.add(s.rug)
   s.char.root.scale.setScalar(SS)
-  s.char.root.position.y = TRAY_TOP
+  s.char.root.position.y = FLOOR_TOP
   s.track = flatRing(22, 23.6, palette.line)
   s.label = label('', 'session')
-  s.label.obj.position.set(0, TRAY_TOP, 34)
+  s.label.obj.position.set(0, FLOOR_TOP, 34)
   s.label.el.addEventListener('click', () => onPick(n.id))
   s.label.el.addEventListener('pointerenter', () => { hovered = n.id })
   s.label.el.addEventListener('pointerleave', () => { if (hovered === n.id) hovered = null })
@@ -255,7 +263,7 @@ function ensureAgent(n, s) {
   // A finished agent seen for the first time (on a replay) is already gone.
   const born = n.status === 'done' ? -Infinity : clock()
   a = { id: n.id, session: s.id, slot, tint, born, group: new THREE.Group(), gone: n.status === 'done' }
-  a.char = makeCharacter({ build: n.type, bodyColor: helperBody(tint), inkColor: EYE, accentColor: helperAccent(tint), pick: { kind: 'agent', id: n.id } })
+  a.char = makeCharacter({ build: n.type, bodyColor: palette[tint], inkColor: EYE, accentColor: accent(tint), pick: { kind: 'agent', id: n.id } })
   a.char.root.scale.setScalar(AG)
   a.thread = new THREE.Line(
     new THREE.BufferGeometry().setFromPoints(Array.from({ length: 24 }, () => new THREE.Vector3())),
@@ -279,21 +287,21 @@ function dropAgent(id) {
 }
 
 // ---------------------------------------------------------------------------
-// Layout: trays packed into rows, choosing the column count that lets the
+// Layout: rooms packed into rows, choosing the column count that lets the
 // table fill the stage best. Positions ease, so a change never jumps.
 
 function layout(list) {
-  const widths = list.map(p => trays.get(p.id).w)
+  const widths = list.map(p => rooms.get(p.id).w)
   const sw = stage.clientWidth || 1
   const sh = stage.clientHeight || 1
   let best = null
   for (let cols = 1; cols <= Math.max(1, list.length); cols++) {
     const rows = []
     for (let i = 0; i < list.length; i += cols) rows.push(widths.slice(i, i + cols))
-    const W = Math.max(...rows.map(r => r.reduce((a, b) => a + b, 0) + (r.length - 1) * TRAY_GAP), 1)
+    const W = Math.max(...rows.map(r => r.reduce((a, b) => a + b, 0) + (r.length - 1) * ROOM_GAP), 1)
     const depths = []
-    for (let i = 0; i < list.length; i += cols) depths.push(Math.max(...list.slice(i, i + cols).map(p => trays.get(p.id).d)))
-    const D = depths.reduce((a, b) => a + b, 0) + (depths.length - 1) * TRAY_GAP
+    for (let i = 0; i < list.length; i += cols) depths.push(Math.max(...list.slice(i, i + cols).map(p => rooms.get(p.id).d)))
+    const D = depths.reduce((a, b) => a + b, 0) + (depths.length - 1) * ROOM_GAP
     const scale = Math.min(sw / (W + 60), sh / (D * Math.sin(TILT) + 80))
     if (!best || scale > best.scale) best = { cols, W, D, scale }
   }
@@ -301,27 +309,27 @@ function layout(list) {
   let z = -best.D / 2
   for (let i = 0; i < list.length; i += best.cols) {
     const row = list.slice(i, i + best.cols)
-    const rowD = Math.max(...row.map(p => trays.get(p.id).d))
-    const rowW = row.reduce((a, p) => a + trays.get(p.id).w, 0) + (row.length - 1) * TRAY_GAP
+    const rowD = Math.max(...row.map(p => rooms.get(p.id).d))
+    const rowW = row.reduce((a, p) => a + rooms.get(p.id).w, 0) + (row.length - 1) * ROOM_GAP
     let x = -rowW / 2
     for (const p of row) {
-      const t = trays.get(p.id)
+      const t = rooms.get(p.id)
       t.target.set(x + t.w / 2, 0, z + rowD / 2)
       if (!t.placed) { t.center.copy(t.target); t.placed = true }
-      x += t.w + TRAY_GAP
+      x += t.w + ROOM_GAP
     }
-    z += rowD + TRAY_GAP
+    z += rowD + ROOM_GAP
   }
   return { W: best.W, D: best.D }
 }
 
 let size = { W: 300, D: ROW_DEPTH }
 
-// Frame every tray, or the focused one, tilted like a view across a desk:
+// Frame every room, or the focused one, looking down across the floor:
 // start from a fitted guess, then pull back until every corner of the
 // table (and the critters on it) projects inside the view.
 function frame() {
-  const t = focusedProject && trays.get(focusedProject)
+  const t = focusedProject && rooms.get(focusedProject)
   const w = t ? t.w : size.W
   const d = t ? t.d : size.D
   const c = t ? t.target : new THREE.Vector3()
@@ -330,7 +338,7 @@ function frame() {
   const hfov = 2 * Math.atan(Math.tan(vfov / 2) * aspect)
   let dist = Math.max((w + 50) / 2 / Math.tan(hfov / 2), (d * Math.sin(TILT) + 70) / 2 / Math.tan(vfov / 2))
   const corners = []
-  for (const x of [-w / 2, w / 2]) for (const z of [-d / 2, d / 2 + 30]) for (const y of [0, 50]) corners.push(new THREE.Vector3(c.x + x, y, c.z + z))
+  for (const x of [-w / 2, w / 2]) for (const z of [-d / 2, d / 2 + 30]) for (const y of [0, WALL_H + 16]) corners.push(new THREE.Vector3(c.x + x, y, c.z + z))
   for (let i = 0; i < 4; i++) {
     camera.position.set(c.x, Math.sin(TILT) * dist, c.z + Math.cos(TILT) * dist)
     camera.lookAt(c.x, 8, c.z)
@@ -346,7 +354,7 @@ function frame() {
 }
 
 export function focusProject(id) {
-  focusedProject = id && trays.has(id) ? id : null
+  focusedProject = id && rooms.has(id) ? id : null
   frame()
 }
 
@@ -366,13 +374,13 @@ export function sync(showPast) {
   const list = chooseSessions(showPast)
   const shownSessions = new Set()
   for (const p of list) {
-    ensureTray(p)
+    ensureRoom(p)
     p.sessions.forEach(n => { shownSessions.add(n.id); ensureSession(n) })
   }
-  for (const id of [...trays.keys()]) {
-    if (!list.some(p => p.id === id)) { scene.remove(trays.get(id).mesh); trays.get(id).label.el.remove(); trays.delete(id) }
+  for (const id of [...rooms.keys()]) {
+    if (!list.some(p => p.id === id)) { scene.remove(rooms.get(id).mesh); rooms.get(id).label.el.remove(); rooms.delete(id) }
   }
-  if (focusedProject && !trays.has(focusedProject)) focusedProject = null
+  if (focusedProject && !rooms.has(focusedProject)) focusedProject = null
   for (const id of [...sessionViews.keys()]) if (!shownSessions.has(id)) dropSession(id)
 
   // Agents of live, shown sessions.
@@ -392,7 +400,7 @@ export function sync(showPast) {
     layoutKey = key
     size = layout(list)
     for (const p of list) {
-      const t = trays.get(p.id)
+      const t = rooms.get(p.id)
       const rows = Math.ceil(p.sessions.length / t.cols)
       p.sessions.forEach((n, j) => {
         const s = sessionViews.get(n.id)
@@ -402,7 +410,7 @@ export function sync(showPast) {
         s.home.set(
           t.target.x - ((inRow - 1) * SESSION_GAP) / 2 + col * SESSION_GAP,
           0,
-          t.target.z - ((rows - 1) * ROW_DEPTH) / 2 + row * ROW_DEPTH + 14,
+          t.target.z - ((rows - 1) * ROW_DEPTH) / 2 + row * ROW_DEPTH + BACK_SPACE / 2 + 10,
         )
         if (!s.placed) { s.group.position.copy(s.home); s.placed = true }
       })
@@ -419,7 +427,7 @@ function headOf(id) {
   const a = agentViews.get(id)
   if (a && !a.gone) return a.group.position.clone().add(v.set(0, AG * a.char.height, 0))
   const s = sessionViews.get(id)
-  if (s) return s.group.position.clone().add(v.set(0, TRAY_TOP + SS * s.char.height, 0))
+  if (s) return s.group.position.clone().add(v.set(0, FLOOR_TOP + SS * s.char.height, 0))
   return null
 }
 
@@ -446,7 +454,7 @@ export function pulse(ev) {
     const from = headOf(owner)
     if (from) addBead(from, ev.kind === 'tool.end' ? palette.crit : palette[beadColor(ev.tool)] ?? palette.line)
   } else if (ev.kind === 'context.compact' && session && !ev.agent) {
-    const r = flatRing(23, 24, palette.clay)
+    const r = flatRing(23, 24, palette[session.tint])
     r.position.x = session.group.position.x
     r.position.z = session.group.position.z
     scene.add(r)
@@ -475,7 +483,7 @@ export function animate() {
   const running = new Set()
   for (const n of nodes.values()) if (n.kind === 'tool' && n.status === 'active') running.add(n.owner)
 
-  for (const t of trays.values()) {
+  for (const t of rooms.values()) {
     t.center.lerp(t.target, 0.12)
     t.mesh.position.copy(t.center)
   }
@@ -496,7 +504,7 @@ export function animate() {
       asleep,
     })
     // A resting critter fades toward the table.
-    s.char.bodyMat.color.copy(palette.clay).lerp(palette.line, asleep ? 0.55 : 0)
+    s.char.bodyMat.color.copy(palette[s.tint]).lerp(palette.line, asleep ? 0.6 : 0)
     s.char.bulb.visible = !asleep
     updateGauge(s, f)
     const warn = !asleep && f >= WARN_AT
@@ -519,7 +527,7 @@ export function animate() {
     const ring = Math.floor(a.slot / 5)
     const ang = -Math.PI / 2 + ((a.slot % 5) - 2) * 0.62 + (ring % 2) * 0.31
     const r = 1 + ring * 0.4
-    const target = new THREE.Vector3(s.group.position.x + Math.cos(ang) * 58 * r, TRAY_TOP, s.group.position.z + Math.sin(ang) * 46 * r)
+    const target = new THREE.Vector3(s.group.position.x + Math.cos(ang) * 58 * r, FLOOR_TOP, s.group.position.z + Math.sin(ang) * 46 * r)
     const grow = Math.min(1, (now - a.born) / 0.6)
     a.group.rotation.y = Math.atan2(s.group.position.x - a.group.position.x, s.group.position.z - a.group.position.z) * 0.45
     pose(a.char, now + a.slot, {
@@ -529,16 +537,16 @@ export function animate() {
     })
     if (a.endedAt) {
       const k = Math.min(1, (now - a.endedAt) / 3)
-      a.char.bodyMat.color.copy(helperBody(a.tint)).lerp(palette.line, k)
+      a.char.bodyMat.color.copy(palette[a.tint]).lerp(palette.line, k)
       a.group.scale.setScalar(Math.max(0.01, 1 - k * 0.9))
       a.thread.material.opacity = 0.7 * (1 - k)
       a.label.el.style.opacity = String(1 - k)
       if (k >= 1) { a.gone = true; a.group.visible = a.thread.visible = false; continue }
     } else {
-      a.char.bodyMat.color.copy(helperBody(a.tint))
+      a.char.bodyMat.color.copy(palette[a.tint])
       a.group.scale.setScalar(Math.max(0.01, grow < 1 ? grow * (1 + 0.2 * Math.sin(grow * Math.PI)) : 1))
       // New helpers drop in from above.
-      target.y = TRAY_TOP + (1 - grow) * (1 - grow) * 40
+      target.y = FLOOR_TOP + (1 - grow) * (1 - grow) * 40
     }
     a.group.position.lerp(target, grow < 1 || !a.settled ? 1 : 0.1)
     a.settled = true
@@ -547,7 +555,7 @@ export function animate() {
     const parent = agentViews.get(idOf(n.parent))
     const top = parent && !parent.gone
       ? parent.group.position.clone().add(new THREE.Vector3(0, AG * (parent.char.height - 0.1), 0))
-      : s.group.position.clone().add(new THREE.Vector3(0, TRAY_TOP + SS * (s.char.height - 0.3), 0))
+      : s.group.position.clone().add(new THREE.Vector3(0, FLOOR_TOP + SS * (s.char.height - 0.3), 0))
     const end = a.group.position.clone().add(new THREE.Vector3(0, AG * (a.char.height - 0.1) * a.group.scale.y, 0))
     const mid = top.clone().lerp(end, 0.5).add(new THREE.Vector3(0, 12, 0))
     a.thread.geometry.setFromPoints(new THREE.QuadraticBezierCurve3(top, mid, end).getPoints(23))

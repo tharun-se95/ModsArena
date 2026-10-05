@@ -3,7 +3,7 @@
 
 import { nodes, fill, warnings, sid, WARN_AT } from './model.js'
 import { moments, activity, lastAction, escapeHtml, quote, ago } from './words.js'
-import { pct, level, tintOf } from './table.js'
+import { pct, level, tintOf, sessionTint } from './table.js'
 
 const $ = sel => document.querySelector(sel)
 const k = n => (n === undefined ? '—' : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : `${Math.round(n / 1000)}k`)
@@ -57,7 +57,7 @@ function sessionCard(n, running, selected) {
   const state = !live ? `ended ${ago(n.endedAt ?? n.lastAt)}` : isBusy(n, running) ? 'working' : 'waiting'
   return `
     <button class="scard ${live ? '' : 'past'} ${selected === n.id ? 'on' : ''}" data-pick="${escapeHtml(n.id)}">
-      <span class="srow"><span class="stitle">${escapeHtml(title(n))}</span>${n.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span>` : ''}</span>
+      <span class="srow"><span class="stitle"><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(title(n))}</span>${n.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span>` : ''}</span>
       ${n.context?.tokens ? `<span class="meter"><span class="${level(f)}" style="width:${(f * 100).toFixed(1)}%"></span></span>` : ''}
       <span class="smeta">${escapeHtml(n.projectName ?? '')} · ${state}${helpers.length ? ` · ${helpers.length} helping` : ''}</span>
       ${last ? `<span class="slast">${escapeHtml(last)}</span>` : ''}
@@ -112,7 +112,7 @@ function sessionDetail(n) {
   ].filter(Boolean).join(' · ')
   return `
     <button class="back" data-back>← All sessions</button>
-    <h2 class="dtitle">${escapeHtml(title(n))}</h2>
+    <h2 class="dtitle"><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(title(n))}</h2>
     <p class="dmeta">${escapeHtml(where)}${live ? '' : ` · ended ${ago(n.endedAt ?? n.lastAt)}`}</p>
     ${n.context?.tokens ? `
       <div class="dgauge"><span class="big ${level(f)}">${pct(f)}</span><span>of its context window ${live ? 'is' : 'was'} in use${live && f >= WARN_AT ? '. It will compact soon.' : '.'}</span></div>

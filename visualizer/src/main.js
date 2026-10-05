@@ -1,6 +1,7 @@
-// Agent Cluster: your Claude Code sessions as clay critters on project
-// trays, with their subagents around them. Fed by the bridge's Server-Sent
-// Events and /history; words.js turns the same events into plain sentences.
+// Agent Cluster: your Claude Code sessions as colorful critters in a cozy
+// office, one room per project, with their subagents around them. Fed by
+// the bridge's Server-Sent Events and /history; words.js turns the same
+// events into plain sentences.
 
 import { startDemo, demoHistory } from '../../agent-cluster-3d/server/demo.mjs'
 import * as model from './model.js'
@@ -20,7 +21,7 @@ let selected = null
 table.mount(document.getElementById('stage'), { pick })
 
 function pick(id) {
-  // Clicking a project's tray or the floor clears the selection.
+  // Clicking a room or the floor clears the selection.
   const n = id && model.nodes.get(id)
   selected = n && (n.kind === 'session' || n.kind === 'agent') ? id : null
   table.setSelected(selected)
