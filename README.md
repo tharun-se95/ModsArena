@@ -20,13 +20,19 @@ A live 3D view of everything Claude Code is doing on your machine. Each project 
 | White ring bursting outward | A compaction just happened. |
 | Small crystals | Tool calls in flight, colored by family. They flash green or red when done, then fold away. |
 
-**Controls:** pick a project in the top-left menu to show only that project, or untick **Past sessions** to show only live work. Click any node to fly to it and open its details:
+**Two views.** The **overview** shows every project as one node with its sessions around it, plus a one-line status: live sessions, running agents, and the fullest context window. The node turns red when any session is over 80%. Click a project, or pick it in the top-left menu, to open its **project view**: that project alone, with its live sessions in a row (a column on a tall screen), past sessions in a smaller row beneath, each session's subagents on a ring around it, and tool calls right beside whoever runs them. **← All projects** or Esc goes back.
 
-- **Session:** context meter, the `/context` breakdown, turns, tool calls, errors, cost, model, rate limits, compactions, subagents, and every prompt with its time.
+Nothing moves by itself. Every node has a fixed place, and a new session or agent takes the next free place without moving the others. Finished agents fade out after 20 seconds and stay listed on their session. On a phone the activity panel folds into a one-line bar, so the view gets the screen.
+
+Click any node to open its details:
+
+- **Session:** context meter, the `/context` breakdown, turns, tool calls, errors, cost, model, rate limits, compactions, running and finished subagents, and every prompt with its time.
 - **Agent:** its context meter, type, model, tools done, who spawned it, and its compactions.
 - **Project:** every live and past session, with context fill and last activity.
 
-The right column lists what **needs attention** (anything over 80% and recent compactions; click one to jump to it), then the live activity feed.
+The header totals always match the view you're in.
+
+The right column lists what **needs attention** (anything over 80%, and compactions from the last few minutes; click one to jump to it), then the live activity feed.
 
 ### How each thing is measured
 

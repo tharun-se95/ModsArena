@@ -55,20 +55,27 @@ export const clearFeed = () => $('#feed').replaceChildren()
 // ---------------------------------------------------------------------------
 // Stats, filter and alerts
 
-export function refreshStats() {
-  const all = [...nodes.values()]
+// Totals for what is in view: one project, or everything in the overview.
+export function refreshStats(projectFilter) {
+  const inView = n => !projectFilter || (n.kind === 'project' ? n.projectId : nodes.get(sid(n.session))?.project) === projectFilter
+  const all = [...nodes.values()].filter(inView)
   const live = all.filter(n => n.kind === 'session' && !n.past && n.status === 'active')
-  $('#stat-projects').textContent = projects().length
+  $('#stat-projects').textContent = projectFilter ? 1 : projects().length
   $('#stat-sessions').textContent = live.length
   $('#stat-agents').textContent = all.filter(n => n.kind === 'agent' && n.status === 'active').length
   $('#stat-tools').textContent = all.filter(n => n.kind === 'tool' && n.status === 'active').length
-  $('#stat-calls').textContent = stats.calls
+  $('#stat-calls').textContent = projectFilter ? all.filter(n => n.kind === 'session').reduce((s, n) => s + (n.toolCalls ?? 0), 0) : stats.calls
   $('#stat-cost').textContent = usd(live.reduce((s, n) => s + (n.costUsd ?? 0), 0))
+}
+
+export function setViewTitle(name) {
+  $('#view-title').textContent = name || 'All projects'
+  $('#back').hidden = !name
 }
 
 export function refreshProjects(current, onChange) {
   const select = $('#project-filter')
-  const options = [['', 'All projects'], ...projects().map(p => [p.projectId, p.label])]
+  const options = [['', 'Overview: all projects'], ...projects().map(p => [p.projectId, p.label])]
   const signature = options.map(o => o.join('=')).join('|')
   if (select.dataset.signature !== signature) {
     select.dataset.signature = signature
@@ -83,11 +90,13 @@ export function refreshAlerts(onPick) {
     level: 'warn', target: n.id,
     text: `${n.label} at ${pct(fill(n))} of its context window`,
   }))
-  const recent = notices.filter(x => Date.now() - x.t < 10 * 60000).slice(0, 6)
+  // Compactions are news, not a standing problem: show the last few minutes.
+  const recent = notices.filter(x => Date.now() - x.t < 3 * 60000).slice(0, 3)
   const items = [...warn, ...recent]
   const box = $('#alerts')
   box.hidden = items.length === 0
   $('#alert-count').textContent = items.length
+  $('#side-summary').textContent = items.length ? `${items.length} need${items.length === 1 ? 's' : ''} attention` : ''
   $('#alert-list').innerHTML = items.map(a =>
     `<li><button type="button" class="link ${a.level}" data-target="${escapeHtml(a.target)}">${escapeHtml(a.text)}</button>${a.t ? `<time>${ago(a.t)}</time>` : ''}</li>`,
   ).join('')
@@ -149,6 +158,13 @@ function rateLimits(list) {
       <b>${Math.round(r.percentUsed)}%</b></div>`).join('')}`
 }
 
+function finishedList(session) {
+  const list = session.finishedAgents ?? []
+  if (!list.length) return ''
+  return `<h4>Finished subagents <small>${list.length}</small></h4><ul class="plain">${list.slice(0, 12).map(a =>
+    `<li><time>${clock(a.t)}</time><b>${escapeHtml(a.type)}</b> ${escapeHtml(a.description ?? '')} <span class="dim">${a.tools ?? 0} tools${a.context ? ` · ${k(a.context)} ctx` : ''}</span></li>`).join('')}</ul>`
+}
+
 function agentList(session) {
   if (session.past) {
     const list = session.pastAgents ?? []
@@ -158,7 +174,7 @@ function agentList(session) {
   }
   const agents = [...nodes.values()].filter(n => n.kind === 'agent' && n.session === session.session)
   if (!agents.length) return ''
-  return `<h4>Subagents <small>${agents.length}</small></h4><ul class="plain">${agents.map(a =>
+  return `<h4>Running subagents <small>${agents.length}</small></h4><ul class="plain">${agents.map(a =>
     `<li><button type="button" class="link" data-target="${escapeHtml(a.id)}">${escapeHtml(a.label)}</button> <span class="pill ${a.status}">${a.status}</span>${a.context?.tokens ? ` <span style="color:${fillColor(fill(a))}">${pct(fill(a))}</span>` : ''}</li>`).join('')}</ul>`
 }
 
@@ -182,6 +198,7 @@ function sessionDetail(n) {
     ${rateLimits(n.rateLimits)}
     ${compactionList(n.compactions)}
     ${agentList(n)}
+    ${finishedList(n)}
     ${promptList(n.prompts)}`
 }
 
