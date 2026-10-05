@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="agent-office-token" content="">
 <title>Agent Office</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -214,6 +215,46 @@
   .flag.oops { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--crit); color: #fff; font: 700 11px var(--sans); transform: scale(0.6); transition: opacity 0.2s, transform 0.2s; }
   .flag.oops.on { transform: scale(1); }
   .flag.oops.small { width: 13px; height: 13px; font-size: 9px; }
+
+  /* The clipboard's tabs, and its Transcript tab: the conversation and a
+     box to message the session or subagent (transcript.js). */
+  .tabs { display: flex; gap: 4px; margin: 10px 0 4px; border-bottom: 1px solid var(--line); }
+  .tab { padding: 6px 10px; font-size: 12.5px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tab:hover { color: var(--ink); }
+  .tab.on { color: var(--ink); border-bottom-color: var(--accent); font-weight: 500; }
+  #side.talking { height: calc(100% - 80px); overflow: hidden; }
+  .transcript { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+  .tx-log { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 4px 2px 8px; }
+  .tx { font-size: 12.5px; line-height: 1.45; max-width: 92%; flex-shrink: 0; }
+  .tx p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .tx time { display: block; font: 10px var(--mono); color: var(--muted); margin-top: 2px; }
+  .tx.you { align-self: flex-end; background: color-mix(in srgb, var(--accent) 14%, var(--paper)); padding: 7px 10px; border-radius: 12px 12px 4px 12px; }
+  .tx.say { align-self: flex-start; background: color-mix(in srgb, var(--line) 45%, var(--paper)); padding: 7px 10px; border-radius: 12px 12px 12px 4px; }
+  .tx-from { display: block; font: 500 10px var(--mono); letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); margin-bottom: 2px; }
+  .tx.pending { opacity: 0.85; border: 1px dashed color-mix(in srgb, var(--accent) 50%, transparent); }
+  .tx.pending.failed { border-color: var(--crit); }
+  .tx-status { display: block; font-size: 10.5px; color: var(--muted); margin-top: 3px; }
+  .tx.pending.failed .tx-status { color: var(--crit); }
+  .tx.note { align-self: center; font-size: 11px; color: var(--muted); }
+  .tx.tool { align-self: stretch; max-width: none; font-size: 11.5px; line-height: 1.5; color: var(--muted); }
+  .tx.tool b { font: 500 11px var(--mono); color: var(--ink); }
+  .tx.tool span { font-family: var(--mono); font-size: 11px; }
+  .tx.tool summary { cursor: pointer; list-style: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tx.tool summary::-webkit-details-marker { display: none; }
+  div.tx.tool { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tx.tool pre { margin: 4px 0 2px 14px; padding: 6px 8px; max-height: 160px; overflow: auto; font: 11px/1.4 var(--mono); white-space: pre-wrap; background: color-mix(in srgb, var(--line) 35%, var(--paper)); border-radius: 6px; }
+  .tx-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; background: var(--muted); vertical-align: 1px; }
+  .tx-dot.ok { background: var(--ok); } .tx-dot.bad { background: var(--crit); }
+  .tx-dot.running { background: var(--warn); animation: tx-pulse 1s ease-in-out infinite; }
+  @keyframes tx-pulse { 50% { opacity: 0.3; } }
+  .tx-empty, .tx-off { margin: 8px 0; font-size: 12px; color: var(--muted); }
+  .tx-compose { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: end; padding-top: 8px; border-top: 1px solid var(--line); }
+  .tx-compose textarea { font: 13px/1.4 var(--sans); color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 7px 9px; resize: none; min-height: 38px; max-height: 120px; }
+  .tx-compose textarea:focus { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); border-color: var(--accent); }
+  .tx-compose button { padding: 8px 14px; border-radius: 10px; background: var(--accent); color: #fff; font-weight: 500; font-size: 13px; text-align: center; }
+  .tx-compose button:hover { filter: brightness(1.06); }
+  .tx-hint { grid-column: 1 / -1; margin: 0; font-size: 10.5px; color: var(--muted); }
+  @media (prefers-reduced-motion: reduce) { .tx-dot.running { animation: none; } }
 
   /* Dark mode: the sticky notes dim a little. */
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) #look button, :root:not([data-theme="light"]) #look li > span { filter: brightness(0.86); } }

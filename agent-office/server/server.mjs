@@ -8,7 +8,13 @@
 //   GET  /stream   SSE: replays the recent log and gauges, then every new event
 //   GET  /history  past sessions read from ~/.claude/projects transcripts
 //   GET  /healthz  liveness probe the mod uses before spawning a bridge
-//   GET  /         the visualizer
+//   GET  /transcript?session=&agent=&after=   a conversation, read from its transcript
+//   POST /chat     a message for a session or subagent (the office page only)
+//   GET  /inbox?session=   a session's mod picking up its messages
+//   GET  /         the office
+//
+// Every request must be addressed to the bridge itself, and chat needs the
+// token only the office page gets (guard.mjs says why).
 
 import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
@@ -18,6 +24,9 @@ import { normalize, GAUGES, gaugeKey } from './normalize.mjs'
 import { findProject } from './projects.mjs'
 import { readHistory, tailContext } from './history.mjs'
 import { startDemo } from './demo.mjs'
+import { refusal, newToken, tokenMatches, TOKEN_HEADER, INBOX_HEADER } from './guard.mjs'
+import * as chat from './chat.mjs'
+import { findTranscript, readTranscript } from './transcript.mjs'
 
 const args = process.argv.slice(2)
 const flag = name => args.includes(`--${name}`)
@@ -30,6 +39,8 @@ const PORT = Number(option('port', process.env.AGENT_OFFICE_PORT ?? 7337))
 const HOST = option('host', '127.0.0.1')
 const HISTORY_DAYS = Number(option('history-days', 14))
 const LOG_LIMIT = 8000
+// A fresh secret each run, handed to the office page in its HTML.
+const TOKEN = newToken()
 const MAX_BODY = 1024 * 1024
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), 'public')
 const TYPES = {
@@ -58,6 +69,7 @@ function enrich(ev) {
 function publish(events) {
   for (const raw of events) {
     const ev = enrich(raw)
+    if (ev.kind === 'chat.delivered') chat.settle(ev.id, ev.ok !== false)
     if (GAUGES.has(ev.kind)) gauges.set(gaugeKey(ev), ev)
     else log.push(ev)
     // A finished agent's last reading has nothing left to show.
@@ -97,7 +109,9 @@ async function serveStatic(res, pathname) {
   const rel = pathname === '/' ? 'index.html' : pathname.slice(1)
   if (rel.includes('..')) return void res.writeHead(400).end()
   try {
-    const body = await readFile(join(PUBLIC, rel))
+    let body = await readFile(join(PUBLIC, rel))
+    // The page gets this run's chat token; no other origin can read it.
+    if (rel === 'index.html') body = body.toString('utf8').replace('<meta name="agent-office-token" content="">', `<meta name="agent-office-token" content="${TOKEN}">`)
     // No caching: after a pull, a refresh always shows the current build.
     res.writeHead(200, { 'content-type': TYPES[extname(rel)] ?? 'application/octet-stream', 'cache-control': 'no-store' })
     res.end(body)
@@ -113,6 +127,41 @@ const json = (res, status, body) => {
 
 const server = createServer(async (req, res) => {
   const { pathname, searchParams } = new URL(req.url, 'http://localhost')
+  const refused = refusal(req, PORT)
+  if (refused) return json(res, 403, { error: refused })
+
+  if (req.method === 'POST' && pathname === '/chat') {
+    if (!tokenMatches(req.headers[TOKEN_HEADER], TOKEN)) return json(res, 403, { error: 'missing or wrong token' })
+    try {
+      const sent = chat.send(JSON.parse(await readBody(req)))
+      if (sent.error) return json(res, 400, { error: sent.error })
+      const { id, session, agent, text, t } = sent.message
+      publish([{ t, kind: 'chat.sent', session, ...(agent ? { agent } : {}), id, text }])
+      json(res, 200, { id })
+    } catch (err) {
+      json(res, 400, { error: String(err.message ?? err) })
+    }
+    return
+  }
+
+  if (req.method === 'GET' && pathname === '/inbox') {
+    // A custom header: a web page can't send it to another origin unasked.
+    if (req.headers[INBOX_HEADER] !== '1') return json(res, 403, { error: 'missing inbox header' })
+    json(res, 200, { messages: chat.take(searchParams.get('session') ?? '') })
+    return
+  }
+
+  if (req.method === 'GET' && pathname === '/transcript') {
+    const path = await findTranscript(searchParams.get('session') ?? '', searchParams.get('agent') ?? undefined)
+    if (!path) return json(res, 404, { error: 'no transcript for that session yet' })
+    try {
+      const after = searchParams.has('after') ? Number(searchParams.get('after')) : undefined
+      json(res, 200, await readTranscript(path, after))
+    } catch (err) {
+      json(res, 500, { error: String(err.message ?? err) })
+    }
+    return
+  }
 
   if (req.method === 'POST' && pathname === '/event') {
     try {
@@ -154,7 +203,7 @@ const server = createServer(async (req, res) => {
   }
 
   if (pathname === '/healthz') {
-    json(res, 200, { ok: true, name: 'agent-office', demo: flag('demo'), events: log.length, viewers: clients.size })
+    json(res, 200, { ok: true, name: 'agent-office', demo: flag('demo'), chat: true, events: log.length, viewers: clients.size })
     return
   }
 

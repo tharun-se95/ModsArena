@@ -55,6 +55,8 @@ npx github:tharun-se95/ModsArena demo            # sample activity on http://127
 | The page opens but the office is empty | It fills in as sessions work. Sessions that started before the bridge appear from their next event; past sessions from the last 14 days show as sleeping critters (tick **Past sessions**). |
 | The browser didn't open | Open the address `/office` printed, normally http://127.0.0.1:7337. |
 | No sound | Browsers only allow sound after you click the page once. Check the **Sound** button in the top bar. |
+| A message says "Waiting for the session to pick it up" | The session doesn't have the plugin loaded (settings hooks can't receive messages), or it has ended. Messages are picked up within a second by a session running the plugin. |
+| A message says "Queued as the next prompt" but nothing happens | The session is mid-turn; it reads your message as soon as that turn ends. |
 | Plugin options say "not yet set" | The defaults (port 7337, start the bridge automatically) are fine; you only need to set them to change them. |
 
 ### What you're looking at
@@ -93,6 +95,23 @@ Floating over the office (and framed around, so the office always sits in the sp
 
 On a narrow screen the notice card becomes a strip under the top bar and the directory a sheet at the bottom.
 
+### Talk to your agents
+
+Open a critter's clipboard and switch to **Transcript**: its conversation, live. Your prompts sit on the right and its replies on the left. Tool calls are one line each, green or red once they finish; click one to see what came back. It's read from the transcript Claude Code keeps, so past sessions and subagents have one too.
+
+The box at the bottom sends it a message:
+
+- **To a session:** the message becomes its next prompt, marked as from Agent Office. If the session is mid-turn, it waits until that turn ends.
+- **To a subagent:** the message goes to that subagent directly. A finished one is resumed to answer, which uses tokens.
+
+The message stays on the clipboard with its status until it shows up in the transcript, and the reply appears below it. Tool approvals still pop up in Claude Code itself: chat can't do anything your permission settings don't already allow. It needs the plugin; the settings-hooks fallback can't receive messages.
+
+**How it's kept safe.** The bridge only listens on `127.0.0.1`, but any web page you visit can send requests there, so:
+
+- **Host check:** every request must be addressed to the bridge itself. This stops a page pointing its own hostname at your machine to read the answers (DNS rebinding).
+- **Origin check:** browser requests that change anything must come from the office page.
+- **Token:** sending a message also needs a secret token the bridge makes fresh each time it starts and gives only to the office page.
+
 ### How each thing is measured
 
 | What | Mod (live) | Settings hooks (fallback) | Past sessions |
@@ -114,7 +133,7 @@ Claude Code ──(mod hooks / settings hooks)──► bridge :7337 ──(SSE)
 ```
 
 - **`agent-office/`** is the Claude Code plugin (a mod), listed in this repository's marketplace (`.claude-plugin/marketplace.json`). It hooks `session.start`, `session.measure`, `session.compact`, `turn.step`, `turn.start`, `turn.complete`, `agent.spawn` and `tool.call`. Every tool call is attributed to the agent loop that made it (`agentId`), and every subagent to its parent (`parentAgentId`). Hooks run in a sandbox without Node, so events are queued in memory and flushed to the bridge every 250 ms with `$.http.fetch`. Context readings are coalesced so only the newest is sent, and a tool call never waits on the visualizer. On session start the mod also starts the bridge (`$.process.spawn`) if none is running, and `/office` waits for it before opening the page.
-- **`agent-office/server/`** is the bridge, plus `cli.mjs` (what `npx github:tharun-se95/ModsArena` runs) and `settings-hooks.mjs` (the settings-hooks installer). It uses only Node built-ins and has no dependencies. It accepts events on `POST /event` and keeps the last 8,000, plus the newest context reading per session and agent. It streams them to browsers over Server-Sent Events and replays the backlog when a browser connects. `GET /history` summarizes recent transcripts, cached by file modification time. One bridge serves every session on the machine. It strips any credentials from remote URLs before showing them.
+- **`agent-office/server/`** is the bridge, plus `cli.mjs` (what `npx github:tharun-se95/ModsArena` runs) and `settings-hooks.mjs` (the settings-hooks installer). It uses only Node built-ins and has no dependencies. It accepts events on `POST /event` and keeps the last 8,000, plus the newest context reading per session and agent. It streams them to browsers over Server-Sent Events and replays the backlog when a browser connects. `GET /history` summarizes recent transcripts, cached by file modification time. `GET /transcript` follows one session's or subagent's transcript from a byte offset (`transcript.mjs`). `POST /chat` queues a message from the office, and the session's mod collects it from `GET /inbox` (`chat.mjs`, with the checks in `guard.mjs`). One bridge serves every session on the machine. It strips any credentials from remote URLs before showing them.
 - **`visualizer/`** is the page's source, in plain Three.js: `model.js` turns events into projects, sessions, agents and tools; `words.js` turns the same events into sentences; `table.js` lays out the office and animates the critters (`office.js` builds the rooms, desks, coffee corner and office shell; `character.js` builds each critter); and `panels.js` writes the columns around it. Colors come from CSS tokens on the page, so it follows your light or dark setting. It's built into `agent-office/server/public/app.js`, which is committed, so running it needs only Node; CI checks the committed file matches its source.
 
 ### Options

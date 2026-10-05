@@ -3,7 +3,9 @@ import type { EngineInterface, Register } from 'claude-code'
 // Streams this session's projects, agents, tool calls and context to the
 // Agent Office bridge (server/server.mjs), which fans it out to the office
 // page. `/office` opens the page (starting the bridge first if need be) and
-// `/office status` says what's running.
+// `/office status` says what's running. Messages you send from the office
+// come back through the bridge's inbox: to the session as its next prompt,
+// to a subagent as a message (see deliver()).
 //
 // Hooks run in a sandbox with no Node, so events are queued here and flushed
 // over `$.http.fetch` on a timer: a tool call never waits on the bridge.
@@ -12,6 +14,7 @@ type ClusterEvent = { kind: string; [field: string]: unknown }
 
 const SPAWN_TOOLS = new Set(['Agent', 'Task'])
 const FLUSH_MS = 250
+const INBOX_MS = 1000
 const QUEUE_LIMIT = 2000
 const RESPAWN_MS = 15000
 const BRIDGE_WAIT_MS = 8000
@@ -32,6 +35,7 @@ const link = {
   activeAgents: new Set<string>(),
   teammates: new Set<string>(),
   activeTools: 0,
+  isCheckingInbox: false,
 }
 
 const bridgeUrl = () => `http://127.0.0.1:${link.port}`
@@ -158,6 +162,50 @@ async function status($: EngineInterface) {
   return lines.join('\n')
 }
 
+type ChatMessage = { id: string; agent?: string; text: string }
+
+// Messages from the office for this session. A session's message becomes
+// its next prompt (the engine queues it until the session is free), framed
+// as coming from this plugin; a subagent's goes to it directly, and a
+// finished one is resumed to answer. Either way the office hears back.
+export async function deliver($: EngineInterface, message: ChatMessage) {
+  try {
+    if (message.agent) {
+      const sent = await $.session.send({ to: { agentId: message.agent }, text: message.text })
+      emit({
+        kind: 'chat.delivered', id: message.id, agent: message.agent, ok: sent.isDelivered,
+        how: sent.isDelivered ? 'sent to the subagent' : sent.reason,
+      })
+    } else {
+      // Resolves once the prompt has entered, which waits for the session to
+      // be free: say it's queued now, and don't hold the inbox for it.
+      emit({ kind: 'chat.delivered', id: message.id, ok: true, how: 'queued as the next prompt' })
+      void $.prompt.submit({ text: message.text }).catch(err => {
+        emit({ kind: 'chat.delivered', id: message.id, ok: false, how: String(err) })
+      })
+    }
+  } catch (err) {
+    emit({ kind: 'chat.delivered', id: message.id, agent: message.agent, ok: false, how: String(err) })
+  }
+}
+
+async function checkInbox($: EngineInterface) {
+  if (link.isCheckingInbox || !link.isBridgeUp || link.session === 'unknown') return
+  link.isCheckingInbox = true
+  try {
+    const res = await $.http.fetch(`${bridgeUrl()}/inbox?session=${encodeURIComponent(link.session)}`, {
+      headers: { 'x-agent-office-inbox': '1' },
+    })
+    if (!res.ok) return
+    const { messages } = JSON.parse(res.text) as { messages?: ChatMessage[] }
+    for (const message of messages ?? []) await deliver($, message)
+  } catch {
+    // The bridge went away; flush() notices and restarts it.
+  } finally {
+    link.isCheckingInbox = false
+  }
+}
+
 async function openBrowser($: EngineInterface) {
   const url = bridgeUrl()
   for (const argv of [['open', url], ['xdg-open', url], ['cmd', '/c', 'start', url]]) {
@@ -205,6 +253,7 @@ export const register: Register = (on, options) => {
       description: 'Open Agent Office, the live view of your sessions and subagents (`/office status` to check on it).',
     })
     $.clock.every(FLUSH_MS, () => void flush($))
+    $.clock.every(INBOX_MS, () => void checkInbox($))
 
     // Once per machine: say how to open it.
     if (!(await $.store.get(WELCOMED).catch(() => true))) {

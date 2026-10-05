@@ -131,3 +131,40 @@ test('/office says plainly when Node is missing', async ($, on) => {
   const answer = await $.command.run({ command: 'office', args: '' })
   expect(answer.text).toContain('needs Node 18 or newer')
 })
+
+test('messages from the office reach the session and its subagents', async ($, on) => {
+  const clock = mock.clock(on, { now: 1000 })
+  const posted: Array<Record<string, unknown>> = []
+  const prompts: string[] = []
+  const sent: Array<{ to: unknown; text: string }> = []
+  let inbox = [
+    { id: 'm1', text: 'Also check the retries.' },
+    { id: 'm2', agent: 'agent-1', text: 'Stop after this file.' },
+    { id: 'm3', agent: 'agent-9', text: 'Are you gone?' },
+  ]
+  on('http.fetch', async (_$, e) => {
+    if (e.url.endsWith('/event')) posted.push(...JSON.parse(e.init?.body ?? '[]'))
+    if (e.url.includes('/inbox?session=sess-chat')) {
+      const body = JSON.stringify({ messages: inbox })
+      inbox = []
+      return { value: { status: 200, ok: true, headers: {}, text: body } }
+    }
+    return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }
+  })
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  on('session.id', async () => ({ value: 'sess-chat' }))
+  on('session.model', async () => ({ value: 'test-model' }))
+  on('command.register', async () => ({ value: { command: 'office' } }))
+  on('prompt.submit', async (_$, e) => { prompts.push(e.text); return { text: e.text } })
+  on('session.send', async (_$, e) => { sent.push({ to: e.to, text: e.text }); return e.text.includes('gone') ? { isDelivered: false, reason: 'no agent by that id' } : { isDelivered: true } })
+
+  await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+  await clock.advance(1300)
+  await clock.advance(300)
+
+  expect(prompts).toEqual(['Also check the retries.'])
+  expect(sent.map(s => s.text)).toEqual(['Stop after this file.', 'Are you gone?'])
+  const delivered = posted.filter(ev => ev.kind === 'chat.delivered')
+  expect(delivered.map(ev => [ev.id, ev.ok])).toEqual([['m1', true], ['m2', true], ['m3', false]])
+  expect(delivered[2].how).toBe('no agent by that id')
+})
