@@ -10,14 +10,14 @@ permissions:
 
 jobs:
   bridge:
-    name: Bridge and CLI tests
+    name: Bridge, CLI and version tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --test agent-office/server/*.test.mjs
+      - run: node --test agent-office/server/*.test.mjs scripts/*.test.mjs
 
   page:
     name: Page is built from its source

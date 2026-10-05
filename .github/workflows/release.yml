@@ -1,0 +1,40 @@
+name: Release
+
+# Push a tag like v0.2.1 on main to publish a GitHub Release. The tag must
+# match the version in every manifest (scripts/version.mjs), and the notes
+# are that version's CHANGELOG.md section. The release carries the hosted
+# demo as a single HTML file you can open offline.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: The tag matches every manifest and has changelog notes
+        run: node scripts/version.mjs check "$GITHUB_REF_NAME"
+      - run: node --test agent-office/server/*.test.mjs scripts/*.test.mjs
+      - name: Build the offline demo
+        run: |
+          node scripts/build-demo-site.mjs site
+          cp site/index.html "agent-office-demo-$GITHUB_REF_NAME.html"
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/version.mjs notes "$GITHUB_REF_NAME" > notes.md
+          printf '\n\n**Install or update:** `/plugin marketplace add tharun-se95/ModsArena`, then `/plugin install agent-office@modsarena` (or `claude plugin marketplace update modsarena`). **Try it:** https://tharun-se95.github.io/ModsArena/\n' >> notes.md
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Agent Office ${GITHUB_REF_NAME#v}" \
+            --notes-file notes.md \
+            --verify-tag \
+            "agent-office-demo-$GITHUB_REF_NAME.html"
