@@ -7,7 +7,7 @@ import * as THREE from 'three'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { startDemo, demoHistory } from '../../agent-cluster-3d/server/demo.mjs'
 import * as model from './model.js'
-import { buildObject, animate } from './scene.js'
+import { buildObject, animate, buildLink, updateLink } from './scene.js'
 import * as hud from './hud.js'
 import { place } from './layout.js'
 
@@ -31,20 +31,21 @@ const graph = ForceGraph3D({ controlType: 'orbit' })(stage)
   .nodeId('id')
   .nodeLabel(n => tooltip(n))
   .nodeThreeObject(n => buildObject(n))
-  .linkColor(l => LINK_STYLE[l.kind].color)
-  .linkWidth(l => LINK_STYLE[l.kind].width)
-  .linkCurvature(l => (l.kind === 'spawn' ? 0.25 : 0))
+  // Edges are gradient beams from parent to child (scene.js).
+  .linkThreeObject(l => buildLink(l))
+  .linkPositionUpdate((line, ends, l) => updateLink(line, ends, l))
   .linkDirectionalParticles(l => (isLinkActive(l) ? LINK_STYLE[l.kind].particles : 0))
-  .linkDirectionalParticleSpeed(l => (l.kind === 'spawn' ? 0.006 : 0.02))
-  .linkDirectionalParticleWidth(l => (l.kind === 'spawn' ? 2.2 : 1.4))
-  .linkDirectionalParticleColor(l => (l.kind === 'spawn' ? '#d7c2ff' : '#bfe3ff'))
+  .linkDirectionalParticleSpeed(l => (l.kind === 'spawn' ? 0.007 : 0.02))
+  .linkDirectionalParticleWidth(l => (l.kind === 'spawn' ? 1.6 : 1))
+  .linkDirectionalParticleColor(() => '#eaf6ff')
   .onNodeClick(n => select(n))
   .onBackgroundClick(() => hud.showDetail(null, pick))
 
+// Light only flows along an edge while its child is working.
 const LINK_STYLE = {
-  project: { color: 'rgba(143,163,199,0.18)', width: 0.4, particles: 0 },
-  spawn: { color: 'rgba(180,140,255,0.55)', width: 0.8, particles: 4 },
-  tool: { color: 'rgba(120,170,255,0.25)', width: 0.25, particles: 2 },
+  project: { particles: 0 },
+  spawn: { particles: 3 },
+  tool: { particles: 1 },
 }
 
 // Projects and sessions are pinned (layout.js); only agents and tools move.
@@ -58,7 +59,7 @@ graph.d3VelocityDecay(0.55)
 // ?bloom=0 turns the glow off for GPUs that struggle with post-processing.
 const bloom = params.get('bloom') === '0'
   ? null
-  : new UnrealBloomPass(new THREE.Vector2(stage.clientWidth, stage.clientHeight), 1.1, 0.5, 0.35)
+  : new UnrealBloomPass(new THREE.Vector2(stage.clientWidth, stage.clientHeight), 0.9, 0.45, 0.86)
 if (bloom) graph.postProcessingComposer().addPass(bloom)
 // Paint the background in the scene so the bloom composer keeps it dark.
 graph.scene().background = new THREE.Color('#05060d')
@@ -113,7 +114,7 @@ function render() {
       setTimeout(() => frame(), 100)
     }
   }
-  animate(model.nodes.values(), now)
+  animate(model.nodes.values(), now, graph.camera())
   // Re-evaluate particle counts only when the set of active links changes.
   const key = model.links.filter(isLinkActive).map(l => model.idOf(l.target)).join('|')
   if (key !== particlesKey) {

@@ -10,15 +10,15 @@ A live 3D view of everything Claude Code is doing on your machine. Each project 
 
 | On screen | What it is |
 | --- | --- |
-| Faint wireframe shape with a big label | A project: a git repository (worktrees included) or a folder outside one. |
-| Cyan core with a wireframe shell | A live chat session, named by its first prompt. It pulses on each prompt. |
-| Small grey-blue core | A past session from the last 14 days, read from its transcript. |
-| Segmented ring around a session | Its context window, split by what fills it: system prompt, tools, MCP tools, memory files, skills, messages. The empty part is free space. |
-| Colored satellites | Subagents (`Explore`, `Plan`, your own agent types, teammates), linked to whoever spawned them. Finished ones dim. |
-| Ring around a satellite | That agent's own context fill: green, then amber past 60%, then red past 85%. |
-| Red pulsing halo | A session or agent past 80% of its window. |
+| Soft disc of light with two tilted orbit rings | A project: a git repository (worktrees included) or a folder outside one. |
+| Glass orb with a white-hot center | A live chat session, named by its first prompt. It pulses on each prompt, and a dashed orbit turns around it while it's working. |
+| Gauge ring around a core | How full that context window is: green, then amber past 60%, then red past 85%. It always faces you. |
+| Pulsing red ring | A session or agent past 80% of its window. |
+| Smaller orbs in color | Subagents (`Explore`, `Plan`, your own agent types, teammates), each with its own gauge. They pop in when started, and dim and hollow out when finished. |
+| Faint small orb | A past session from the last 14 days, read from its transcript. |
+| Sparks | Tool calls, colored by family while running, then a small green or red burst as they finish. |
+| Beams | Links that blend from parent color to child color, with light flowing along them while the child is working. |
 | White ring bursting outward | A compaction just happened. |
-| Small crystals | Tool calls in flight, colored by family. They flash green or red when done, then fold away. |
 
 **Controls:** pick a project in the top-left menu to show only that project, or untick **Past sessions** to show only live work. Click any node to fly to it and open its details:
 
