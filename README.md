@@ -22,6 +22,8 @@ A live 3D view of everything Claude Code is doing on your machine. Each project 
 
 **Two views.** The **overview** shows every project as one node with its sessions around it, plus a one-line status: live sessions, running agents, and the fullest context window. The node turns red when any session is over 80%. Click a project, or pick it in the top-left menu, to open its **project view**: that project alone, with its live sessions in a row (a column on a tall screen), past sessions in a smaller row beneath, each session's subagents on a ring around it, and tool calls right beside whoever runs them. **← All projects** or Esc goes back.
 
+**Two cameras.** Switch with **2.5D / 3D** in the header, or press V. **2.5D** looks down at the layout at an angle, as onto a floor with a grid. Dragging pans and scrolling zooms, so the picture never turns over, which suits a monitor left running. **3D** looks at the layout head-on and lets you orbit freely. Your choice is remembered in this browser.
+
 Nothing moves by itself. Every node has a fixed place, and a new session or agent takes the next free place without moving the others. Finished agents fade out after 20 seconds and stay listed on their session. On a phone the activity panel folds into a one-line bar, so the view gets the screen.
 
 Click any node to open its details:
