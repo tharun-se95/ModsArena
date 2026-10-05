@@ -9,6 +9,7 @@ import { startDemo, demoHistory } from '../../agent-cluster-3d/server/demo.mjs'
 import * as model from './model.js'
 import { buildObject, animate } from './scene.js'
 import * as hud from './hud.js'
+import { place } from './layout.js'
 
 const HISTORY_REFRESH_MS = 60000
 const params = new URLSearchParams(location.search)
@@ -46,8 +47,13 @@ const LINK_STYLE = {
   tool: { color: 'rgba(120,170,255,0.25)', width: 0.25, particles: 2 },
 }
 
-graph.d3Force('charge').strength(n => ({ project: -600, session: -260, agent: -120 })[n.kind] ?? -25)
-graph.d3Force('link').distance(l => ({ project: 120, spawn: 70 })[l.kind] ?? 22)
+// Projects and sessions are pinned (layout.js); only agents and tools move.
+// No centering force, so new nodes never drag the whole cluster around, and
+// repulsion stays local so a busy session does not push its neighbours.
+graph.d3Force('center', null)
+graph.d3Force('charge').strength(n => (n.kind === 'agent' ? -90 : n.kind === 'tool' ? -18 : -140)).distanceMax(160)
+graph.d3Force('link').distance(l => ({ spawn: 55 })[l.kind] ?? 18)
+graph.d3VelocityDecay(0.55)
 
 // ?bloom=0 turns the glow off for GPUs that struggle with post-processing.
 const bloom = params.get('bloom') === '0'
@@ -98,7 +104,14 @@ function render() {
   model.sweep(now)
   if (model.isDirty()) {
     model.clean()
+    place(model.nodes)
     graph.graphData(model.visible(projectFilter))
+    // A new project widens the structure: frame it once.
+    const count = model.projects().length
+    if (count !== framedProjects) {
+      framedProjects = count
+      setTimeout(() => frame(), 100)
+    }
   }
   animate(model.nodes.values(), now)
   // Re-evaluate particle counts only when the set of active links changes.
@@ -113,11 +126,30 @@ function render() {
 // ---------------------------------------------------------------------------
 // Controls
 
+// Frame the pinned structure (projects and sessions), which does not move,
+// rather than everything, so busy agents never pull the camera around.
+function frame(ms = 900) {
+  const core = model.visible(projectFilter).nodes.filter(n => n.fx !== undefined)
+  if (!core.length) return
+  const lo = [Infinity, Infinity, Infinity]
+  const hi = [-Infinity, -Infinity, -Infinity]
+  for (const n of core) {
+    ;[n.fx, n.fy, n.fz].forEach((v, i) => { lo[i] = Math.min(lo[i], v); hi[i] = Math.max(hi[i], v) })
+  }
+  const c = lo.map((v, i) => (v + hi[i]) / 2)
+  const extent = Math.max(hi[0] - lo[0], hi[1] - lo[1], 160) + 180
+  const fov = (graph.camera().fov * Math.PI) / 180
+  const distance = extent / 2 / Math.tan(fov / 2)
+  graph.cameraPosition({ x: c[0], y: c[1], z: c[2] + distance }, { x: c[0], y: c[1], z: c[2] }, ms)
+}
+
+let framedProjects = 0
+
 function setFilter(value) {
   projectFilter = value
   document.getElementById('project-filter').value = value
   model.touch()
-  setTimeout(() => graph.zoomToFit(900, 60), 700)
+  setTimeout(() => frame(), 100)
 }
 
 document.getElementById('project-filter').addEventListener('change', e => setFilter(e.target.value))
@@ -193,5 +225,6 @@ setInterval(loadHistory, HISTORY_REFRESH_MS)
 if (isDemo) playDemo()
 else connect()
 requestAnimationFrame(render)
-// Frame whatever arrived once the layout has settled a little.
-setTimeout(() => graph.zoomToFit(1200, 60), 3500)
+// ?debug exposes the model and graph to the console.
+if (params.has('debug')) window.cluster = { model, graph }
+

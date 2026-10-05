@@ -165,6 +165,8 @@ const handlers = {
     node.context = { ...node.context, window: ev.window, tokens: node.context?.tokens ?? ev.used }
   },
   'agent.context'(ev) {
+    // A reading for an agent no longer shown must not bring it back.
+    if (ev.agent && !nodes.has(aid(ev.session, ev.agent))) return
     const node = owner(ev)
     const window = ev.window ?? node.context?.window ?? sessionWindow(node) ?? DEFAULT_WINDOW
     node.context = { ...node.context, tokens: ev.tokens, window }

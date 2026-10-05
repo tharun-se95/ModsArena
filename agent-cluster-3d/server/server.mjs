@@ -60,6 +60,8 @@ function publish(events) {
     const ev = enrich(raw)
     if (GAUGES.has(ev.kind)) gauges.set(gaugeKey(ev), ev)
     else log.push(ev)
+    // A finished agent's last reading has nothing left to show.
+    if (ev.kind === 'agent.end') gauges.delete(gaugeKey({ kind: 'agent.context', session: ev.session, agent: ev.agent }))
     const frame = `data: ${JSON.stringify(ev)}\n\n`
     for (const res of clients) res.write(frame)
   }
