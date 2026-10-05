@@ -144,3 +144,7 @@ node scripts/build-demo-site.mjs                 # the hosted demo, into site/
 CI (`.github/workflows/ci.yml`) runs all of these on every pull request. `.github/workflows/pages.yml` publishes the demo to GitHub Pages from `main`. When you release, bump `version` in `agent-office/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` so `marketplace update` picks it up.
 
 The bridge's event schema is documented at the top of `agent-office/server/normalize.mjs`. Any other producer, such as an OpenTelemetry receiver, can `POST` the same shapes.
+
+## License
+
+[MIT](LICENSE)

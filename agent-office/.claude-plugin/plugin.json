@@ -1,11 +1,19 @@
 {
   "name": "agent-office",
   "version": "0.2.0",
-  "author": { "name": "tharun-se95" },
+  "author": {
+    "name": "tharun-se95"
+  },
   "description": "A live office of your Claude Code sessions: a room per project, a critter per session, its subagents beside it, every tool call and context window as it happens. Type /office to open it.",
   "homepage": "https://github.com/tharun-se95/ModsArena",
   "repository": "https://github.com/tharun-se95/ModsArena",
-  "keywords": ["visualizer", "subagents", "monitoring", "context"],
+  "license": "MIT",
+  "keywords": [
+    "visualizer",
+    "subagents",
+    "monitoring",
+    "context"
+  ],
   "userConfig": {
     "port": {
       "type": "number",
