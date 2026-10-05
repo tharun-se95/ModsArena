@@ -1,11 +1,11 @@
 {
-  "name": "agent-cluster-3d-visualizer",
+  "name": "agent-office-visualizer",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Source of the tabletop page the agent-cluster-3d bridge serves.",
+  "description": "Source of the tabletop page the agent-office bridge serves.",
   "scripts": {
-    "build": "esbuild src/main.js --bundle --minify --format=esm --target=es2022 --outfile=../agent-cluster-3d/server/public/app.js",
+    "build": "esbuild src/main.js --bundle --minify --format=esm --target=es2022 --outfile=../agent-office/server/public/app.js",
     "watch": "npm run build -- --watch"
   },
   "dependencies": {

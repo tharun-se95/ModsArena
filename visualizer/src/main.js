@@ -1,9 +1,9 @@
-// Agent Cluster: your Claude Code sessions as colorful critters in a cozy
+// Agent Office: your Claude Code sessions as colorful critters in a cozy
 // office, one room per project, with their subagents around them. Fed by
 // the bridge's Server-Sent Events and /history; words.js turns the same
 // events into plain sentences.
 
-import { startDemo, demoHistory } from '../../agent-cluster-3d/server/demo.mjs'
+import { startDemo, demoHistory } from '../../agent-office/server/demo.mjs'
 import * as model from './model.js'
 import * as words from './words.js'
 import * as table from './table.js'
@@ -13,7 +13,7 @@ import { unlock, isMuted, setMuted } from './sound.js'
 const HISTORY_REFRESH_MS = 60000
 const PANEL_REFRESH_MS = 700
 const params = new URLSearchParams(location.search)
-const isDemo = Boolean(window.CLUSTER_DEMO) || params.get('demo') === '1'
+const isDemo = Boolean(window.AGENT_OFFICE_DEMO) || params.get('demo') === '1'
 
 let showPast = true
 let history = []

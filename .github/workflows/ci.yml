@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  bridge:
+    name: Bridge and CLI tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test agent-office/server/*.test.mjs
+
+  page:
+    name: Page is built from its source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: visualizer/package-lock.json
+      - run: npm ci
+        working-directory: visualizer
+      - run: npm run build
+        working-directory: visualizer
+      - name: The committed app.js matches a fresh build
+        run: |
+          if ! git diff --quiet -- agent-office/server/public/app.js; then
+            echo "::error file=agent-office/server/public/app.js::app.js is out of date. Run 'cd visualizer && npm run build' and commit the result."
+            exit 1
+          fi
+      - run: node scripts/build-demo-site.mjs
+
+  plugin:
+    name: Plugin and marketplace validate, mod tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install -g @anthropic-ai/claude-code
+      - run: claude plugin validate .
+      - run: claude plugin validate agent-office
+      - run: claude plugin test agent-office

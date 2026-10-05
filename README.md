@@ -2,11 +2,62 @@
 
 Claude Code mods and the tools around them.
 
-## Agent Cluster 3D
+## Agent Office
 
-A live office of everything Claude Code is doing on your machine. Each project gets its own cozy room on the office floor. Your chat sessions are colorful critters, each on its own rug in front of a desk whose monitor scrolls code while it works, live ones awake and recent ones resting. Each subagent is a smaller critter standing behind the session that started it, and every tool call makes its caller hop. The office fills the window, and its paperwork floats over it: a pinned notice says what's happening, sticky notes flag what needs a look, a tape of moments keeps the log, and the directory lists every session by room.
+A live office of everything Claude Code is doing on your machine. Each project gets its own cozy room. Your chat sessions are colorful critters, each at its own desk whose monitor scrolls code while it works. Each subagent is a smaller critter standing behind the session that started it, and every tool call makes its caller hop. A pinned notice says what's happening, sticky notes flag what needs a look, and a directory lists every session by room.
 
-![Agent Cluster](docs/agent-cluster-3d.png)
+**[Try the demo in your browser](https://tharun-se95.github.io/ModsArena/)**: sample activity, nothing to install.
+
+![Agent Office](docs/agent-office.png)
+
+### Quick start
+
+You need Claude Code and [Node](https://nodejs.org) 18 or newer. In Claude Code:
+
+```
+/plugin marketplace add tharun-se95/ModsArena
+/plugin install agent-office@modsarena
+```
+
+Then type **`/office`**. It starts the office's bridge if it isn't running and opens the office in your browser. Every Claude Code session on your machine, in any project, joins the same office. That's all.
+
+- `/office status` says whether the bridge is running, what it has seen, and what this session is doing.
+- `claude plugin marketplace update modsarena` fetches new versions.
+- The status line shows `◉ office N agents · M tools` while work is in flight.
+
+<details>
+<summary><b>Your Claude Code doesn't have mods?</b> Use settings hooks instead.</summary>
+
+Older Claude Code builds can't load the plugin's hooks. Settings hooks get most of the picture: sessions, prompts, subagents, tool calls, and context from the transcript after each turn. The `/context` breakdown, per-subagent context, cost and rate limits need the plugin.
+
+```sh
+npx github:tharun-se95/ModsArena install-hooks   # adds the hooks to ~/.claude/settings.json (backed up first)
+npx github:tharun-se95/ModsArena                 # starts the bridge and opens the office; leave it running
+```
+
+New Claude Code sessions report to it. `install-hooks --project` writes to `./.claude/settings.json` instead, `--port N` picks another port, and `uninstall-hooks` removes exactly what it added. Each hook pipes its input to the bridge with `curl`, waits at most a second, and never blocks or fails a tool call.
+</details>
+
+<details>
+<summary><b>Just want to look?</b> Run the demo locally.</summary>
+
+```sh
+npx github:tharun-se95/ModsArena demo            # sample activity on http://127.0.0.1:7338
+```
+</details>
+
+### Troubleshooting
+
+| You see | Do this |
+| --- | --- |
+| `/office` says Node is missing or too old | Install Node 18 or newer from [nodejs.org](https://nodejs.org), then run `/office` again. |
+| "The bridge didn't answer" | Something else may be using port 7337. Run `/office status`, or pick another port with `/plugin configure agent-office@modsarena` (option `port`). |
+| The page opens but the office is empty | It fills in as sessions work. Sessions that started before the bridge appear from their next event; past sessions from the last 14 days show as sleeping critters (tick **Past sessions**). |
+| The browser didn't open | Open the address `/office` printed, normally http://127.0.0.1:7337. |
+| No sound | Browsers only allow sound after you click the page once. Check the **Sound** button in the top bar. |
+| Plugin options say "not yet set" | The defaults (port 7337, start the bridge automatically) are fine; you only need to set them to change them. |
+
+### What you're looking at
 
 | In the office | What it is |
 | --- | --- |
@@ -58,55 +109,38 @@ A request's context is what it was answered over: uncached input plus cache read
 ### How it works
 
 ```
-Claude Code ──(mod hooks / settings hooks)──► bridge :7337 ──(SSE)──► browser (Three.js)
+Claude Code ──(mod hooks / settings hooks)──► bridge :7337 ──(SSE)──► the office (browser, Three.js)
 ~/.claude/projects/*/*.jsonl ─────────────────►   └─ GET /history
 ```
 
-- **`agent-cluster-3d/`** is the Claude Code mod. It hooks `session.start`, `session.measure`, `session.compact`, `turn.step`, `turn.start`, `turn.complete`, `agent.spawn` and `tool.call`. Every tool call is attributed to the agent loop that made it (`agentId`), and every subagent to its parent (`parentAgentId`). Hooks run in a sandbox without Node, so events are queued in memory and flushed to the bridge every 250 ms with `$.http.fetch`. Context readings are coalesced so only the newest is sent, and a tool call never waits on the visualizer. On session start the mod also starts the bridge (`$.process.spawn`) if none is running.
-- **`agent-cluster-3d/server/`** is the bridge. It uses only Node built-ins and has no dependencies. It accepts events on `POST /event` and keeps the last 8,000, plus the newest context reading per session and agent. It streams them to browsers over Server-Sent Events and replays the backlog when a browser connects. `GET /history` summarizes recent transcripts, cached by file modification time. One bridge serves every session on the machine. It strips any credentials from remote URLs before showing them.
-- **`visualizer/`** is the page's source, in plain Three.js: `model.js` turns events into projects, sessions, agents and tools; `words.js` turns the same events into sentences; `table.js` lays out the office and animates the critters (`office.js` builds the rooms, desks, coffee corner and office shell; `character.js` builds each critter); and `panels.js` writes the columns around it. Colors come from CSS tokens on the page, so it follows your light or dark setting. It's built into `agent-cluster-3d/server/public/app.js`, which is committed, so running it needs only Node.
+- **`agent-office/`** is the Claude Code plugin (a mod), listed in this repository's marketplace (`.claude-plugin/marketplace.json`). It hooks `session.start`, `session.measure`, `session.compact`, `turn.step`, `turn.start`, `turn.complete`, `agent.spawn` and `tool.call`. Every tool call is attributed to the agent loop that made it (`agentId`), and every subagent to its parent (`parentAgentId`). Hooks run in a sandbox without Node, so events are queued in memory and flushed to the bridge every 250 ms with `$.http.fetch`. Context readings are coalesced so only the newest is sent, and a tool call never waits on the visualizer. On session start the mod also starts the bridge (`$.process.spawn`) if none is running, and `/office` waits for it before opening the page.
+- **`agent-office/server/`** is the bridge, plus `cli.mjs` (what `npx github:tharun-se95/ModsArena` runs) and `settings-hooks.mjs` (the settings-hooks installer). It uses only Node built-ins and has no dependencies. It accepts events on `POST /event` and keeps the last 8,000, plus the newest context reading per session and agent. It streams them to browsers over Server-Sent Events and replays the backlog when a browser connects. `GET /history` summarizes recent transcripts, cached by file modification time. One bridge serves every session on the machine. It strips any credentials from remote URLs before showing them.
+- **`visualizer/`** is the page's source, in plain Three.js: `model.js` turns events into projects, sessions, agents and tools; `words.js` turns the same events into sentences; `table.js` lays out the office and animates the critters (`office.js` builds the rooms, desks, coffee corner and office shell; `character.js` builds each critter); and `panels.js` writes the columns around it. Colors come from CSS tokens on the page, so it follows your light or dark setting. It's built into `agent-office/server/public/app.js`, which is committed, so running it needs only Node; CI checks the committed file matches its source.
 
-### Run it
+### Options
 
-**As a mod (recommended).** This needs a Claude Code build with mods (function-hook plugins).
-
-```sh
-claude --plugin-dir ./agent-cluster-3d
-```
-
-Then type `/cluster3d` in the session to open the visualizer (http://127.0.0.1:7337). The status line shows `◉ cluster N agents · M tools` while work is in flight. Start more sessions the same way, in any project, and they all join the same view.
-
-The mod has two options under `pluginConfigs` in settings, which you can also change from the config menu:
+The plugin has two options. Change them with `/plugin configure agent-office@modsarena`, or under `pluginConfigs` in settings:
 
 | Option | Default | |
 | --- | --- | --- |
 | `port` | `7337` | The port the bridge listens on |
 | `autoStart` | `true` | Start the bundled bridge when none answers |
 
-**With plain settings hooks (any Claude Code version).** Start the bridge yourself:
-
-```sh
-node agent-cluster-3d/server/server.mjs
-```
-
-Then merge `agent-cluster-3d/fallback/settings.json` into `~/.claude/settings.json`. It pipes each hook's stdin to the bridge with `curl`, waiting at most one second, and it never blocks or fails a tool call. Subagents come from `SubagentStart`/`SubagentStop`, tool calls are attributed through the hooks' `agent_id`, and session context is read from the transcript after each turn. The breakdown, per-agent context, cost and rate limits need the mod.
-
-**Demo, no Claude Code needed:**
-
-```sh
-node agent-cluster-3d/server/server.mjs --demo
-# open http://127.0.0.1:7337
-```
-
-Bridge options: `--port 7337` and `--history-days 14`.
+The bridge on its own: `node agent-office/server/server.mjs [--port 7337] [--history-days 14] [--demo]`.
 
 ### Develop
 
 ```sh
-cd visualizer && npm install && npm run build   # or: npm run watch
-claude plugin validate agent-cluster-3d          # what the engine will load
-claude plugin test agent-cluster-3d              # mod tests (hooks/register.test.ts)
-node --test agent-cluster-3d/server/*.test.mjs   # bridge: schema, history, projects
+git clone https://github.com/tharun-se95/ModsArena && cd ModsArena
+claude --plugin-dir ./agent-office               # load the plugin from your checkout
+cd visualizer && npm install && npm run build    # rebuild the page (or: npm run watch)
+claude plugin validate .                         # the marketplace
+claude plugin validate agent-office              # the plugin, as the engine will load it
+claude plugin test agent-office                  # mod tests (hooks/register.test.ts)
+node --test agent-office/server/*.test.mjs       # bridge and CLI: schema, history, projects, settings hooks
+node scripts/build-demo-site.mjs                 # the hosted demo, into site/
 ```
 
-The bridge's event schema is documented at the top of `agent-cluster-3d/server/normalize.mjs`. Any other producer, such as an OpenTelemetry receiver, can `POST` the same shapes.
+CI (`.github/workflows/ci.yml`) runs all of these on every pull request. `.github/workflows/pages.yml` publishes the demo to GitHub Pages from `main`. When you release, bump `version` in `agent-office/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` so `marketplace update` picks it up.
+
+The bridge's event schema is documented at the top of `agent-office/server/normalize.mjs`. Any other producer, such as an OpenTelemetry receiver, can `POST` the same shapes.

@@ -24,7 +24,7 @@ function liveHelpers(session) {
 
 function summary(running) {
   const live = [...nodes.values()].filter(isLive)
-  if (!live.length) return ['Nothing is running right now.', 'Start a Claude Code session and it will appear on the table.']
+  if (!live.length) return ['Nothing is running right now.', 'Start a Claude Code session and it will walk into the office.']
   const working = live.filter(n => isBusy(n, running)).length
   const helpers = [...nodes.values()].filter(n => n.kind === 'agent' && n.status === 'active').length
   const lead = working === live.length && live.length > 1 ? `All ${live.length}` : `${working} of ${live.length}`
