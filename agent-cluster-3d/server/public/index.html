@@ -35,6 +35,7 @@
     --wood: #e6cfae; --wood-dark: #8a6446; --trim: #fbf6ec; --glow: #ffcf7a; --window: #bfe3f7; --gem: #f2c14e;
     --room-a: #f6d8c6; --room-b: #cfe9dd; --room-c: #dcdaf5; --room-d: #f5e4b0; --room-e: #f3d0dc; --room-f: #cfe2f3;
     /* The office around the rooms: carpet, outer walls, desks and the coffee corner */
+    --night: #23345e; --dawn: #f7c59c; --dusk: #d993a6;
     --carpet: #c9d3cf; --outer-wall: #efe9df; --desk: #f1e6d4; --tile: #f4efe6; --counter: #8fb8b0; --fridge: #f7f5f0;
     --serif: "Source Serif 4", "Iowan Old Style", Georgia, serif;
     --sans: "Geist", -apple-system, "Segoe UI", system-ui, sans-serif;
@@ -48,7 +49,7 @@
       --coral: #f08a6e; --teal: #4cc0b4; --mustard: #f0bb4f; --lilac: #ac90ea; --sky: #66aeea; --leaf: #7cc677; --pink: #ee8ab0;
       --wood: #6b5442; --wood-dark: #3f2f24; --trim: #5e564c; --glow: #ffc266; --window: #3f6f96; --gem: #f5c95a;
       --room-a: #5a443a; --room-b: #36504a; --room-c: #45425e; --room-d: #594f33; --room-e: #573f4b; --room-f: #364b5c;
-    --carpet: #343c3a; --outer-wall: #3b3732; --desk: #7a6552; --tile: #4a4540; --counter: #3e5f5a; --fridge: #b9b4ab;
+      --night: #121a33; --dawn: #a8705a; --dusk: #7a4f66;
       --carpet: #343c3a; --outer-wall: #3b3732; --desk: #7a6552; --tile: #4a4540; --counter: #3e5f5a; --fridge: #b9b4ab;
       color-scheme: dark;
     }
@@ -60,6 +61,7 @@
     --coral: #f08a6e; --teal: #4cc0b4; --mustard: #f0bb4f; --lilac: #ac90ea; --sky: #66aeea; --leaf: #7cc677; --pink: #ee8ab0;
     --wood: #6b5442; --wood-dark: #3f2f24; --trim: #5e564c; --glow: #ffc266; --window: #3f6f96; --gem: #f5c95a;
     --room-a: #5a443a; --room-b: #36504a; --room-c: #45425e; --room-d: #594f33; --room-e: #573f4b; --room-f: #364b5c;
+    --night: #121a33; --dawn: #a8705a; --dusk: #7a4f66;
     --carpet: #343c3a; --outer-wall: #3b3732; --desk: #7a6552; --tile: #4a4540; --counter: #3e5f5a; --fridge: #b9b4ab;
     color-scheme: dark;
   }
@@ -94,15 +96,14 @@
   #stage canvas { display: block; }
   .labels { position: absolute; inset: 0; pointer-events: none; }
   .hint { position: absolute; left: 16px; bottom: 14px; font-size: 12px; color: var(--muted); background: color-mix(in srgb, var(--paper) 80%, transparent); padding: 4px 10px; border-radius: 999px; }
-  .tag { pointer-events: auto; cursor: pointer; white-space: nowrap; font-size: 12px; }
-  .tag.project { display: inline-flex; align-items: baseline; padding: 3px 12px; border-radius: 8px; background: var(--paper); border: 1px solid var(--line); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); }
-  .tag .pname { font: 600 13.5px var(--serif); color: var(--ink); letter-spacing: 0.01em; }
-  .tag.session { display: inline-flex; gap: 8px; align-items: baseline; padding: 4px 10px; border-radius: 999px; background: var(--paper); border: 1px solid var(--line); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); }
-  .tag.session.selected { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
-  .tag .sname { font-weight: 500; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
-  .tag.agent { font: 11px var(--mono); color: var(--muted); }
-  .tag.agent.selected { color: var(--accent); }
+  .tag { pointer-events: auto; cursor: pointer; white-space: nowrap; font-size: 10.5px; }
+  .tag.project { display: inline-flex; align-items: baseline; padding: 1px 8px; border-radius: 6px; background: color-mix(in srgb, var(--paper) 72%, transparent); backdrop-filter: blur(3px); }
+  .tag .pname { font: 600 11.5px var(--serif); color: color-mix(in srgb, var(--ink) 80%, transparent); letter-spacing: 0.01em; }
+  .tag.session { display: inline-flex; gap: 5px; align-items: baseline; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--paper) 62%, transparent); backdrop-filter: blur(3px); color: color-mix(in srgb, var(--ink) 78%, transparent); }
+  .tag.session.selected { background: var(--paper); color: var(--ink); box-shadow: 0 0 0 1.5px var(--accent); }
+  .tag .sname { font-weight: 500; max-width: 96px; overflow: hidden; text-overflow: ellipsis; }
   .pct { font: 500 12px var(--mono); }
+  .tag .pct { font-size: 9.5px; }
   .pct.ok { color: var(--ok); } .pct.warn { color: var(--warn); } .pct.crit { color: var(--crit); }
 
   #side { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
@@ -140,11 +141,11 @@
   .toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; cursor: pointer; }
   .toggle input { accent-color: var(--accent); margin: 0; }
   .tag.project { pointer-events: auto; cursor: pointer; }
-  .tag.project.focused { border-color: var(--accent); }
+  .tag.project.focused { box-shadow: 0 0 0 1.5px var(--accent); }
   .tag.project.coffee { pointer-events: none; }
   .tag.project.focused .pname { color: var(--accent); }
-  .tag .pmore { margin-left: 8px; font-size: 11.5px; color: var(--muted); }
-  .tag.session.past { opacity: 0.72; }
+  .tag .pmore { margin-left: 6px; font-size: 10px; color: var(--muted); }
+  .tag.session.past { opacity: 0.6; }
   .tag.session.crowded .sname { display: none; }
   .tag.session.covered { visibility: hidden; }
   .tag.session.past .sname { font-weight: 400; }
@@ -153,6 +154,28 @@
   .dtitle .dot { width: 10px; height: 10px; vertical-align: middle; }
   #look button, #moments span { text-align: left; }
   #look li.muted button { font-weight: 400; color: var(--muted); }
+
+  /* The hover bubble over a critter, and the marks that float over one. */
+  .bubble { position: absolute; z-index: 3; pointer-events: none; transform: translate(-50%, calc(-100% - 10px)); max-width: 260px; padding: 9px 12px; border-radius: 12px; background: var(--paper); border: 1px solid var(--line); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14); font-size: 12px; line-height: 1.4; }
+  .bubble::after { content: ""; position: absolute; left: 50%; bottom: -6px; width: 10px; height: 10px; background: var(--paper); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); transform: translateX(-50%) rotate(45deg); }
+  .bubble b { display: block; font: 600 13px/1.3 var(--serif); }
+  .bubble b .dot { width: 8px; height: 8px; margin-right: 6px; vertical-align: 1px; }
+  .bubble p { margin: 2px 0 0; color: var(--muted); }
+  .bubble dl { margin: 6px 0 0; display: grid; gap: 2px; }
+  .bubble dl div { display: flex; gap: 8px; }
+  .bubble dt { color: var(--muted); min-width: 62px; }
+  .bubble dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px; font-family: var(--mono); font-size: 11px; }
+  .flag { pointer-events: none; opacity: 0; transition: opacity 0.3s; }
+  .flag.on { opacity: 1; }
+  .flag.zzz { font: 600 12px var(--serif); color: var(--muted); }
+  .flag.zzz i { display: inline-block; font-style: normal; animation: zzz 2.4s ease-in-out infinite; }
+  .flag.zzz i:nth-child(2) { font-size: 10px; animation-delay: 0.4s; }
+  .flag.zzz i:nth-child(3) { font-size: 8px; animation-delay: 0.8s; }
+  @keyframes zzz { 0% { transform: translate(0, 4px); opacity: 0; } 30% { opacity: 1; } 100% { transform: translate(6px, -14px); opacity: 0; } }
+  .flag.oops { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--crit); color: #fff; font: 700 11px var(--sans); transform: scale(0.6); transition: opacity 0.2s, transform 0.2s; }
+  .flag.oops.on { transform: scale(1); }
+  .flag.oops.small { width: 13px; height: 13px; font-size: 9px; }
+  @media (prefers-reduced-motion: reduce) { .flag.zzz i { animation: none; } }
   @media (max-width: 1080px) {
     .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 52vh auto auto; height: auto; padding-inline: 16px; gap: 20px; }
     html, body { height: auto; }
@@ -162,8 +185,7 @@
   }
   @media (max-width: 600px) {
     .hint .more { display: none; }
-    .tag .sname { max-width: 84px; }
-    .tag.session { padding: 3px 8px; gap: 6px; }
+    .tag .sname { max-width: 72px; }
   }
   @media (prefers-reduced-motion: reduce) { .scard { transition: none; } }
 </style>

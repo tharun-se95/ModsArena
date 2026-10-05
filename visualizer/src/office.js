@@ -89,6 +89,11 @@ function seeded(text) {
 
 const mat = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.7, ...extra })
 
+// Shared by every window and every lamp, so the time of day can repaint
+// them all at once (see daylight() in table.js).
+export const glassMat = new THREE.MeshStandardMaterial({ color: '#bfe3f7', emissive: '#bfe3f7', emissiveIntensity: 0.4, roughness: 0.15 })
+export const lampMat = new THREE.MeshStandardMaterial({ color: '#fbf6ec', emissive: '#ffcf7a', emissiveIntensity: 0.55, side: THREE.DoubleSide, roughness: 0.6 })
+
 function shadowed(obj) {
   obj.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true } })
   return obj
@@ -134,6 +139,7 @@ function bookshelf(colors, rand) {
 
 function plant(colors, rand) {
   const g = new THREE.Group()
+  g.userData.plant = rand() * 10 // a phase for its sway
   const pot = new THREE.Mesh(new THREE.CylinderGeometry(5, 3.8, 8, 20), mat(colors.pot))
   pot.position.y = 4
   g.add(pot)
@@ -156,10 +162,7 @@ function lamp(colors) {
   base.position.y = 0.6
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 26, 8), metal)
   pole.position.y = 13
-  const shade = new THREE.Mesh(
-    new THREE.CylinderGeometry(3.4, 6, 7, 24, 1, true),
-    new THREE.MeshStandardMaterial({ color: colors.shade, emissive: colors.glow, emissiveIntensity: 0.55, side: THREE.DoubleSide, roughness: 0.6 }),
-  )
+  const shade = new THREE.Mesh(new THREE.CylinderGeometry(3.4, 6, 7, 24, 1, true), lampMat)
   shade.position.y = 28
   g.add(base, pole, shade)
   shadowed(g)
@@ -170,7 +173,7 @@ function lamp(colors) {
 function windowPane(colors, w) {
   const g = new THREE.Group()
   const frame = mat(colors.trim)
-  const glass = new THREE.Mesh(new THREE.PlaneGeometry(w, 15), new THREE.MeshStandardMaterial({ color: colors.sky, emissive: colors.sky, emissiveIntensity: 0.35, roughness: 0.2 }))
+  const glass = new THREE.Mesh(new THREE.PlaneGeometry(w, 15), glassMat)
   glass.position.set(0, 18, 0.3)
   g.add(glass)
   for (const [x, y, fw, fh] of [[0, 25.8, w + 2, 1.6], [0, 10.2, w + 3, 1.8], [-w / 2 - 0.4, 18, 1.6, 17], [w / 2 + 0.4, 18, 1.6, 17], [0, 18, 1, 15], [0, 18, w, 1]]) {
@@ -257,7 +260,13 @@ export function buildRoom({ w, d, name, colors }) {
   place(lamp(colors), w / 2 - 16, FLOOR_TOP, d / 2 - 18, PROP * 0.9)
   if (w > 380 && rand() < 0.8) place(couch(colors, rand), w * 0.27, FLOOR_TOP, back + 18)
 
-  return { group: room, floor, wallMat }
+  return { group: room, floor, wallMat, plants: plantsIn(room) }
+}
+
+const plantsIn = group => {
+  const out = []
+  group.traverse(o => { if (o.userData.plant !== undefined) out.push(o) })
+  return out
 }
 
 // A rug under each session: a soft oval in a lighter shade of its color.
@@ -352,7 +361,22 @@ export function desk(colors, tint) {
     ctx.globalAlpha = 1
     texture.needsUpdate = true
   }
-  return { group: g, draw, mug }
+  // Two wisps over the mug while the session works.
+  const wisps = [0, 0.5].map(offset => {
+    const p = new THREE.Mesh(new THREE.SphereGeometry(1.1, 10, 10), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0, depthWrite: false }))
+    p.userData.offset = offset
+    g.add(p)
+    return p
+  })
+  function steam(t, on) {
+    for (const p of wisps) {
+      const k = (t * 0.5 + p.userData.offset) % 1
+      p.position.set(20 + Math.sin(k * 7 + p.userData.offset * 5), 23 + k * 10, 4)
+      p.scale.setScalar(0.6 + k)
+      p.material.opacity = on ? 0.5 * (1 - k) * Math.min(1, k * 5) : 0
+    }
+  }
+  return { group: g, draw, steam, mug }
 }
 
 // ---------------------------------------------------------------------------
@@ -460,7 +484,14 @@ export function coffeeCorner(colors) {
       p.material.opacity = 0.45 * (1 - k) * Math.min(1, k * 6)
     }
   }
-  return { group: g, animate, front: COFFEE_D / 2 }
+  // Where a critter on its break can stand: around the table, then along
+  // the counter. Local to the corner, on its floor.
+  const spots = [
+    ...[0.25, 1.0, 1.75, 2.5, -0.5, 3.4].map(a => new THREE.Vector3(-10 + Math.cos(a) * 38, 1.4, 38 + Math.sin(a) * 30)),
+    ...[-62, -30, 2].map(x => new THREE.Vector3(x, 1.4, back + 34)),
+  ]
+  const tableAt = new THREE.Vector3(-10, 1.4, 38)
+  return { group: g, animate, spots, tableAt }
 }
 
 // ---------------------------------------------------------------------------
@@ -478,7 +509,7 @@ export function officeShell({ W, D, colors }) {
 
   const wallMat = mat(colors.outerWall, { roughness: 0.95 })
   const trimMat = mat(colors.trim)
-  const glass = new THREE.MeshStandardMaterial({ color: colors.sky, emissive: colors.sky, emissiveIntensity: 0.4, roughness: 0.15 })
+  const glass = glassMat
   const T = 5
   for (const [len, x, z, alongX] of [[W + T * 2, 0, -D / 2 - T / 2, true], [D, -W / 2 - T / 2, 0, false], [D, W / 2 + T / 2, 0, false]]) {
     const wall = new THREE.Mesh(alongX ? rounded(len, SHELL_H, T, 1) : rounded(T, SHELL_H, len, 1), wallMat)
@@ -517,7 +548,36 @@ export function officeShell({ W, D, colors }) {
   cooler.add(stand, bottle)
   cooler.position.set(W / 2 - 16, 0.4, D / 2 - 22)
   g.add(cooler)
+  // A wall clock between the first two windows, showing your local time.
+  const face = new THREE.Group()
+  const rim = new THREE.Mesh(new THREE.CylinderGeometry(9, 9, 1.6, 32), mat(colors.woodDark))
+  rim.rotation.x = Math.PI / 2
+  const dial = new THREE.Mesh(new THREE.CircleGeometry(7.8, 32), mat(colors.trim))
+  dial.position.z = 0.9
+  face.add(rim, dial)
+  for (let i = 0; i < 12; i++) {
+    const tick = new THREE.Mesh(new THREE.BoxGeometry(0.6, i % 3 ? 1 : 1.8, 0.2), mat('#2b2a2e'))
+    const a = (i / 12) * Math.PI * 2
+    tick.position.set(Math.sin(a) * 6.6, Math.cos(a) * 6.6, 1)
+    tick.rotation.z = -a
+    face.add(tick)
+  }
+  const hand = (len, width, color) => {
+    const pivot = new THREE.Group()
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(width, len, 0.3), mat(color))
+    bar.position.y = len / 2 - 0.6
+    pivot.add(bar)
+    pivot.position.z = 1.2
+    face.add(pivot)
+    return pivot
+  }
+  const hour = hand(4.4, 1, '#2b2a2e')
+  const minute = hand(6.4, 0.6, '#2b2a2e')
+  const second = hand(6.8, 0.25, '#e0573f')
+  face.position.set(-W / 2 + W / panes, 46, -D / 2 + 1.2)
+  g.add(face)
+
   shadowed(g)
   carpet.castShadow = false
-  return g
+  return { group: g, plants: plantsIn(g), clock: { hour, minute, second } }
 }
