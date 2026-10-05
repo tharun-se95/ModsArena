@@ -3,8 +3,7 @@
 // knows nothing about Three.js.
 
 export const TOOL_LINGER_MS = 6000 // a finished tool stays visible this long
-const AGENT_LINGER_MS = 20000 // a finished agent stays visible this long
-const FINISHED_KEEP = 30
+const FINISHED_AGENT_LIMIT = 12
 const PROMPT_KEEP = 25
 export const DEFAULT_WINDOW = 200000
 export const WARN_AT = 0.8
@@ -206,14 +205,7 @@ const handlers = {
     if (!node) return
     node.status = 'done'
     node.endedAt = ev.t
-    // The session keeps a record once the node itself has faded out.
-    const session = nodes.get(sid(ev.session))
-    if (session) {
-      session.finishedAgents = [
-        { type: node.type, description: node.description, tools: node.history, context: node.context?.tokens, t: ev.t },
-        ...(session.finishedAgents ?? []),
-      ].slice(0, FINISHED_KEEP)
-    }
+    trimFinishedAgents()
   },
   'tool.start'(ev) {
     const own = owner(ev)
@@ -243,17 +235,21 @@ const handlers = {
   },
 }
 
+function trimFinishedAgents() {
+  const finished = [...nodes.values()]
+    .filter(n => n.kind === 'agent' && n.status === 'done')
+    .sort((a, b) => a.endedAt - b.endedAt)
+  for (const n of finished.slice(0, Math.max(0, finished.length - FINISHED_AGENT_LIMIT))) removeNode(n.id)
+}
+
 export function apply(ev) {
   handlers[ev.kind]?.(ev)
 }
 
-// Finished tools and agents fade out after a while.
+// Finished tools fold into their owner's history ring.
 export function sweep(now) {
   for (const n of nodes.values()) {
-    if (!n.endedAt) continue
-    if (n.kind === 'tool' && now - n.endedAt > TOOL_LINGER_MS) removeNode(n.id)
-    // An agent goes once its own tools have, so nothing is left orphaned.
-    if (n.kind === 'agent' && now - n.endedAt > AGENT_LINGER_MS && !links.some(l => idOf(l.source) === n.id)) removeNode(n.id)
+    if (n.kind === 'tool' && n.endedAt && now - n.endedAt > TOOL_LINGER_MS) removeNode(n.id)
   }
 }
 
@@ -300,33 +296,19 @@ export function applyHistory(summaries, show) {
   dirty = true
 }
 
-// What a view shows. The overview: every project with its sessions, no
-// agents or tools. A project view: that project's sessions, agents and tools.
-export function visible(projectFilter, showPast = true) {
+// Which nodes the current project filter shows.
+export function visible(projectFilter) {
   const all = [...nodes.values()]
-  const projectOf = n => (n.kind === 'project' ? n.projectId : nodes.get(sid(n.session))?.project)
+  if (!projectFilter) return { nodes: all, links: [...links] }
   const keep = new Set()
   for (const n of all) {
-    if (n.past && !showPast) continue
-    if (!projectFilter) {
-      if (n.kind === 'project' || (n.kind === 'session' && n.project)) keep.add(n.id)
-    } else if (n.kind !== 'project' && projectOf(n) === projectFilter) {
-      keep.add(n.id)
-    }
+    const project = n.kind === 'project' ? n.projectId : nodes.get(sid(n.session))?.project
+    if (project === projectFilter) keep.add(n.id)
   }
   return {
     nodes: all.filter(n => keep.has(n.id)),
     links: links.filter(l => keep.has(idOf(l.source)) && keep.has(idOf(l.target))),
   }
-}
-
-// One line per project for the overview: live sessions and the fullest window.
-export function projectSummary(projectId) {
-  const sessions = sessionsOf(projectId)
-  const live = sessions.filter(s => !s.past && s.status === 'active')
-  const fullest = Math.max(0, ...live.map(fill))
-  const agents = [...nodes.values()].filter(n => n.kind === 'agent' && n.status === 'active' && live.some(s => s.session === n.session)).length
-  return { live: live.length, past: sessions.filter(s => s.past).length, agents, fullest }
 }
 
 export function projects() {

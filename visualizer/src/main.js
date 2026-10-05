@@ -7,7 +7,7 @@ import * as THREE from 'three'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { startDemo, demoHistory } from '../../agent-cluster-3d/server/demo.mjs'
 import * as model from './model.js'
-import { buildObject, animate, view } from './scene.js'
+import { buildObject, animate } from './scene.js'
 import * as hud from './hud.js'
 import { place } from './layout.js'
 
@@ -33,11 +33,12 @@ const graph = ForceGraph3D({ controlType: 'orbit' })(stage)
   .nodeThreeObject(n => buildObject(n))
   .linkColor(l => LINK_STYLE[l.kind].color)
   .linkWidth(l => LINK_STYLE[l.kind].width)
+  .linkCurvature(l => (l.kind === 'spawn' ? 0.25 : 0))
   .linkDirectionalParticles(l => (isLinkActive(l) ? LINK_STYLE[l.kind].particles : 0))
   .linkDirectionalParticleSpeed(l => (l.kind === 'spawn' ? 0.006 : 0.02))
   .linkDirectionalParticleWidth(l => (l.kind === 'spawn' ? 2.2 : 1.4))
   .linkDirectionalParticleColor(l => (l.kind === 'spawn' ? '#d7c2ff' : '#bfe3ff'))
-  .onNodeClick(n => onNodeClick(n))
+  .onNodeClick(n => select(n))
   .onBackgroundClick(() => hud.showDetail(null, pick))
 
 const LINK_STYLE = {
@@ -57,7 +58,7 @@ graph.d3VelocityDecay(0.55)
 // ?bloom=0 turns the glow off for GPUs that struggle with post-processing.
 const bloom = params.get('bloom') === '0'
   ? null
-  : new UnrealBloomPass(new THREE.Vector2(stage.clientWidth, stage.clientHeight), 0.75, 0.4, 0.45)
+  : new UnrealBloomPass(new THREE.Vector2(stage.clientWidth, stage.clientHeight), 1.1, 0.5, 0.35)
 if (bloom) graph.postProcessingComposer().addPass(bloom)
 // Paint the background in the scene so the bloom composer keeps it dark.
 graph.scene().background = new THREE.Color('#05060d')
@@ -77,33 +78,20 @@ function tooltip(n) {
   return `<div class="tip">${lines.join('<br>')}</div>`
 }
 
-const projectOf = n => (n.kind === 'project' ? n.projectId : model.nodes.get(model.sid(n.session))?.project)
-
-// Look at a node head-on from in front; everything lies near the z = 0 plane.
-function lookAt(n, distance) {
-  graph.cameraPosition({ x: n.fx ?? n.x, y: n.fy ?? n.y, z: (n.fz ?? n.z) + distance }, { x: n.fx ?? n.x, y: n.fy ?? n.y, z: n.fz ?? n.z }, 1000)
-}
-
 function select(n) {
+  const distance = { project: 260, session: 150 }[n.kind] ?? 80
+  const ratio = 1 + distance / Math.hypot(n.x || 1, n.y || 1, n.z || 1)
+  graph.cameraPosition({ x: n.x * ratio, y: n.y * ratio, z: n.z * ratio }, n, 1200)
   hud.showDetail(n, pick)
-  if (n.kind === 'session') lookAt(n, 520)
-  else if (n.kind === 'agent') lookAt(n, 260)
-}
-
-// From the overview, a project or session opens that project's own view.
-function onNodeClick(n) {
-  if (!projectFilter && n.kind === 'project') return setFilter(n.projectId, n)
-  if (!projectFilter && n.kind === 'session') return setFilter(n.project, n)
-  select(n)
 }
 
 function pick(id) {
   const n = model.nodes.get(id)
   if (!n) return
-  const project = projectOf(n)
-  if (n.kind === 'project') return setFilter(project, n)
-  if (project !== projectFilter) return setFilter(project, n)
-  select(n)
+  // A node outside the filtered project brings its project into view.
+  const project = n.kind === 'project' ? n.projectId : model.nodes.get(model.sid(n.session))?.project
+  if (projectFilter && project !== projectFilter) setFilter('')
+  setTimeout(() => select(n), 50)
 }
 
 // ---------------------------------------------------------------------------
@@ -116,14 +104,13 @@ function render() {
   model.sweep(now)
   if (model.isDirty()) {
     model.clean()
-    const shown = model.visible(projectFilter, showPast)
-    place(model.nodes, shown, projectFilter, stage.clientHeight > stage.clientWidth * 1.15)
-    graph.graphData(shown)
-    // Frame again only when the structure itself grows or shrinks.
-    const structure = `${projectFilter}|${shown.nodes.filter(n => n.kind !== 'agent' && n.kind !== 'tool').length}`
-    if (structure !== framedStructure) {
-      framedStructure = structure
-      setTimeout(() => frame(), 60)
+    place(model.nodes)
+    graph.graphData(model.visible(projectFilter))
+    // A new project widens the structure: frame it once.
+    const count = model.projects().length
+    if (count !== framedProjects) {
+      framedProjects = count
+      setTimeout(() => frame(), 100)
     }
   }
   animate(model.nodes.values(), now)
@@ -139,93 +126,46 @@ function render() {
 // ---------------------------------------------------------------------------
 // Controls
 
-// Frame the structure (projects and sessions in the overview, sessions in a
-// project view) with room for the agent rings, never the busy parts.
+// Frame the pinned structure (projects and sessions), which does not move,
+// rather than everything, so busy agents never pull the camera around.
 function frame(ms = 900) {
-  const core = model.visible(projectFilter, showPast).nodes
-    .filter(n => n.fx !== undefined && (n.kind === 'session' || n.kind === 'project'))
+  const core = model.visible(projectFilter).nodes.filter(n => n.fx !== undefined)
   if (!core.length) return
-  const lo = [Infinity, Infinity]
-  const hi = [-Infinity, -Infinity]
+  const lo = [Infinity, Infinity, Infinity]
+  const hi = [-Infinity, -Infinity, -Infinity]
   for (const n of core) {
-    lo[0] = Math.min(lo[0], n.fx); hi[0] = Math.max(hi[0], n.fx)
-    lo[1] = Math.min(lo[1], n.fy); hi[1] = Math.max(hi[1], n.fy)
+    ;[n.fx, n.fy, n.fz].forEach((v, i) => { lo[i] = Math.min(lo[i], v); hi[i] = Math.max(hi[i], v) })
   }
-  const margin = projectFilter ? 330 : 240
-  const w = hi[0] - lo[0] + margin
-  const h = hi[1] - lo[1] + margin
+  const c = lo.map((v, i) => (v + hi[i]) / 2)
+  const extent = Math.max(hi[0] - lo[0], hi[1] - lo[1], 160) + 180
   const fov = (graph.camera().fov * Math.PI) / 180
-  const aspect = stage.clientWidth / Math.max(1, stage.clientHeight)
-  const distance = Math.max(h, w / aspect) / 2 / Math.tan(fov / 2)
-  const c = { x: (lo[0] + hi[0]) / 2, y: (lo[1] + hi[1]) / 2, z: 0 }
-  graph.cameraPosition({ ...c, z: distance }, c, ms)
+  const distance = extent / 2 / Math.tan(fov / 2)
+  graph.cameraPosition({ x: c[0], y: c[1], z: c[2] + distance }, { x: c[0], y: c[1], z: c[2] }, ms)
 }
 
-let framedStructure = ''
+let framedProjects = 0
 
-function setFilter(value, focus) {
-  projectFilter = value ?? ''
-  view.overview = !projectFilter
-  document.getElementById('project-filter').value = projectFilter
-  hud.setViewTitle(projectFilter ? model.nodes.get(`p:${projectFilter}`)?.label ?? projectFilter : '')
-  hud.showDetail(focus ?? null, pick)
-  framedStructure = ''
+function setFilter(value) {
+  projectFilter = value
+  document.getElementById('project-filter').value = value
   model.touch()
+  setTimeout(() => frame(), 100)
 }
 
 document.getElementById('project-filter').addEventListener('change', e => setFilter(e.target.value))
 document.getElementById('show-past').addEventListener('change', e => {
   showPast = e.target.checked
-  model.touch()
+  model.applyHistory(history, showPast)
 })
 document.getElementById('detail-close').addEventListener('click', () => hud.showDetail(null, pick))
-document.getElementById('back').addEventListener('click', () => setFilter(''))
-addEventListener('keydown', e => {
-  if (e.key === 'Escape' && projectFilter) setFilter('')
-})
 
-// On a narrow screen the panels stack above and below the view, so the
-// canvas takes exactly the gap between them instead of hiding under them.
-function fitStage() {
-  if (innerWidth <= 760) {
-    const top = document.querySelector('header').getBoundingClientRect().bottom + 8
-    const bottom = innerHeight - document.getElementById('side').getBoundingClientRect().top + 8
-    stage.style.top = `${top}px`
-    stage.style.bottom = `${bottom}px`
-  } else {
-    stage.style.top = stage.style.bottom = ''
-  }
+addEventListener('resize', () => {
   graph.width(stage.clientWidth).height(stage.clientHeight)
   bloom?.setSize(stage.clientWidth, stage.clientHeight)
-}
-
-// Phones start with the activity panel folded to one line.
-const side = document.getElementById('side')
-const sideToggle = document.getElementById('side-toggle')
-if (innerWidth <= 760) side.classList.add('collapsed')
-sideToggle.addEventListener('click', () => {
-  const isOpen = side.classList.toggle('collapsed') === false
-  sideToggle.setAttribute('aria-expanded', String(isOpen))
-  fitStage()
-  framedStructure = ''
-  model.touch()
 })
-
-let wasPortrait = null
-addEventListener('resize', () => {
-  fitStage()
-  // Turning the screen re-lays sessions as a row or a column.
-  const portrait = stage.clientHeight > stage.clientWidth
-  if (portrait !== wasPortrait) {
-    wasPortrait = portrait
-    framedStructure = ''
-    model.touch()
-  }
-})
-fitStage()
 
 setInterval(() => {
-  hud.refreshStats(projectFilter)
+  hud.refreshStats()
   hud.refreshProjects(projectFilter, setFilter)
   hud.refreshAlerts(pick)
   hud.renderDetail(pick)
@@ -245,7 +185,7 @@ async function loadHistory() {
   } catch {
     history = []
   }
-  model.applyHistory(history, true)
+  model.applyHistory(history, showPast)
 }
 
 function connect() {
@@ -262,7 +202,7 @@ function connect() {
     const events = JSON.parse(msg.data)
     for (const ev of events) model.apply(ev)
     for (const ev of events.slice(-60)) hud.feedLine(ev)
-    model.applyHistory(history, true)
+    model.applyHistory(history, showPast)
   })
   source.addEventListener('message', msg => ingest(JSON.parse(msg.data)))
   source.addEventListener('error', () => {

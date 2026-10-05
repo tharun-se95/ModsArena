@@ -2,10 +2,7 @@
 
 import * as THREE from 'three'
 import SpriteText from 'three-spritetext'
-import { TOOL_LINGER_MS, DEFAULT_WINDOW, WARN_AT, fill, projectSummary } from './model.js'
-
-// Which view is drawn: the overview hides everything but projects and sessions.
-export const view = { overview: true }
+import { TOOL_LINGER_MS, DEFAULT_WINDOW, WARN_AT, fill } from './model.js'
 
 export const COLORS = {
   project: '#8fa3c7',
@@ -100,14 +97,16 @@ export function buildObject(n) {
   group.add(parts.rings)
 
   if (n.kind === 'project') {
-    parts.core = new THREE.Mesh(new THREE.SphereGeometry(6, 20, 20), glowMaterial(color, 0.8))
-    parts.track = ring(30, 0.4, color, Math.PI * 2, 0.35)
-    parts.label = label(n.label, 13, '#dbe6f7', -155)
-    group.add(parts.core, parts.track, parts.label)
+    parts.core = new THREE.Mesh(
+      new THREE.DodecahedronGeometry(30, 0),
+      new THREE.MeshBasicMaterial({ color, wireframe: true, transparent: true, opacity: 0.12 }),
+    )
+    parts.label = label(n.label, 9, '#c9d6ee', 44)
+    group.add(parts.core, parts.label)
   } else if (n.kind === 'session' && n.past) {
     parts.core = new THREE.Mesh(new THREE.SphereGeometry(5, 20, 20), glowMaterial(color, 0.75))
     parts.track = ring(RADIUS.past, 0.25, COLORS.track)
-    parts.label = label(n.label, 5, '#9fb0cc', -21)
+    parts.label = label(n.label, 3.2, '#9fb0cc', 17)
     group.add(parts.core, parts.track, parts.label)
   } else if (n.kind === 'session') {
     parts.core = new THREE.Mesh(new THREE.SphereGeometry(9, 32, 32), glowMaterial(color))
@@ -116,15 +115,15 @@ export function buildObject(n) {
       new THREE.MeshBasicMaterial({ color, wireframe: true, transparent: true, opacity: 0.35 }),
     )
     parts.track = ring(RADIUS.session, 0.35, COLORS.track)
-    parts.label = label(n.label, 7, '#e8fbff', -34)
+    parts.label = label(n.label, 6, '#e8fbff', 28)
     group.add(parts.core, parts.shell, parts.track, parts.label)
   } else if (n.kind === 'agent') {
-    parts.core = new THREE.Mesh(new THREE.SphereGeometry(4.5, 24, 24), glowMaterial(color))
+    parts.core = new THREE.Mesh(new THREE.SphereGeometry(5, 24, 24), glowMaterial(color))
     parts.track = ring(RADIUS.agent, 0.3, COLORS.track)
-    parts.label = label(n.label, 4.6, '#f0e8ff', -15)
+    parts.label = label(n.label, 4, '#f0e8ff', 15)
     group.add(parts.core, parts.track, parts.label)
   } else {
-    parts.core = new THREE.Mesh(new THREE.OctahedronGeometry(1.8), glowMaterial(color))
+    parts.core = new THREE.Mesh(new THREE.OctahedronGeometry(2.2), glowMaterial(color))
     group.add(parts.core)
   }
 
@@ -222,25 +221,13 @@ function updateShockwave(n, now) {
   }
 }
 
-function labelText(n) {
-  if (n.kind !== 'project') return n.label
-  const s = projectSummary(n.projectId)
-  const parts = [`${s.live} live`]
-  if (s.agents) parts.push(`${s.agents} agent${s.agents === 1 ? '' : 's'}`)
-  if (s.live) parts.push(`fullest ${Math.round(s.fullest * 100)}%`)
-  return `${n.label}\n${parts.join(' · ')}`
-}
-
 export function animate(nodes, now) {
   for (const n of nodes) {
     if (!n.parts) continue
     const { core, shell, rings, group, label: tag } = n.parts
     setColor(n, baseColor(n))
     if (tag) {
-      const text = labelText(n)
-      if (tag.text !== text) tag.text = text
-      // Session names would crowd the overview; projects speak for them there.
-      tag.visible = !(view.overview && n.kind === 'session')
+      if (tag.text !== n.label) tag.text = n.label
       tag.material.opacity = n.status === 'done' || n.past ? 0.45 : 1
     }
 
@@ -248,14 +235,15 @@ export function animate(nodes, now) {
     const pulse = sincePulse < 1200 ? 1 + 0.35 * Math.sin((sincePulse / 1200) * Math.PI) : 1
 
     if (n.kind === 'project') {
-      const { fullest } = projectSummary(n.projectId)
-      setColor(n, fullest >= WARN_AT ? COLORS.error : COLORS.project)
+      core.rotation.y += 0.0012
+      core.rotation.x += 0.0006
       continue
     }
     if (n.kind === 'session' || n.kind === 'agent') {
       updateRings(n)
       updateHalo(n, now)
       updateShockwave(n, now)
+      rings.rotation.x = n.kind === 'agent' ? 0.5 : 0
     }
     if (n.kind === 'session') {
       if (shell) {
