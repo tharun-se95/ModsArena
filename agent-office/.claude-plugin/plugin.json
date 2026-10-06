@@ -8,6 +8,7 @@
   "homepage": "https://github.com/tharun-se95/ModsArena",
   "repository": "https://github.com/tharun-se95/ModsArena",
   "license": "MIT",
+  "icon": "./icon.png",
   "keywords": [
     "visualizer",
     "subagents",
