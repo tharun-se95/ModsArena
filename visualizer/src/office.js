@@ -281,7 +281,9 @@ export function buildRoom({ w, d, name, colors }) {
     wall.castShadow = wall.receiveShadow = true
     const cap = new THREE.Mesh(kind === 'back' ? rounded(len + 1, 1.6, WALL_T + 1.2, 0.4) : rounded(WALL_T + 1.2, 1.6, len + 1, 0.4), trimMat)
     cap.position.set(x, WALL_H + 0.6, z)
-    const skirting = new THREE.Mesh(kind === 'back' ? rounded(len, 2.4, WALL_T + 0.8, 0.3) : rounded(WALL_T + 0.8, 2.4, len, 0.3), trimMat)
+    // A touch longer than its wall, so their ends never share a plane and
+    // flicker where the room is cut open at the front.
+    const skirting = new THREE.Mesh(kind === 'back' ? rounded(len + 0.6, 2.4, WALL_T + 0.8, 0.3) : rounded(WALL_T + 0.8, 2.4, len + 0.6, 0.3), trimMat)
     skirting.position.set(x, FLOOR_TOP + 1.2, z)
     room.add(wall, cap, skirting)
   }
@@ -571,11 +573,12 @@ export function officeShell({ W, D, colors }) {
   for (let i = 0; i < panes; i++) {
     const x = -W / 2 + (W / panes) * (i + 0.5)
     const pane = new THREE.Mesh(new THREE.PlaneGeometry(56, 36), glass)
-    pane.position.set(x, 34, -D / 2 + 0.2)
+    // Clear of the wall, so the two never fight over which is in front.
+    pane.position.set(x, 34, -D / 2 + 0.8)
     g.add(pane)
     for (const [fx, fy, fw, fh] of [[0, 52.5, 60, 2.4], [0, 15.5, 62, 3], [-29, 34, 2.4, 38], [29, 34, 2.4, 38], [0, 34, 1.6, 36]]) {
       const bar = new THREE.Mesh(rounded(fw, fh, 2, 0.4), trimMat)
-      bar.position.set(x + fx, fy, -D / 2 + 1)
+      bar.position.set(x + fx, fy, -D / 2 + 1.4)
       g.add(bar)
     }
   }

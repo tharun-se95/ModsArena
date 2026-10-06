@@ -161,6 +161,10 @@ export function mount(el, { pick }) {
   sun.shadow.mapSize.set(2048, 2048)
   sun.shadow.radius = 6
   sun.shadow.bias = -0.0005
+  // A shadow-map texel is close to a unit across a big office; nudging the
+  // lookup along each surface's normal keeps walls from shading themselves
+  // in flickering stripes.
+  sun.shadow.normalBias = 0.6
   scene.add(sun, sun.target)
 
   floor = new THREE.Mesh(new THREE.PlaneGeometry(8000, 8000), new THREE.MeshBasicMaterial())
@@ -1055,6 +1059,7 @@ export function animate() {
   controls.dampingFactor = 1 - Math.pow(1 - DAMPING, dt * 60)
   controls.update()
   if (!camGoal) keepInOffice()
+  fitDepth()
   if (tick % 2 === 0) renderer.shadowMap.needsUpdate = true
   sharpness(now, dt)
   renderer.render(scene, camera)
@@ -1081,6 +1086,19 @@ function zoom(dt) {
   const next = Math.abs(zoomTo / d - 1) < 0.001 ? zoomTo : d * Math.pow(zoomTo / d, 1 - Math.pow(ZOOM_EASE, dt))
   camera.position.copy(controls.target).add(v.setLength(next))
   if (next === zoomTo) zoomTo = null
+}
+
+// The depth buffer's precision is spread from the near plane out, so a near
+// plane at 1 left too little of it this far away: windows and trim close in
+// front of a wall flickered through it. Nothing ever comes nearer the camera
+// than a tenth of its distance to the floor, so the near plane sits there.
+function fitDepth() {
+  const d = camera.position.distanceTo(controls.target)
+  const near = Math.max(1, d * 0.1)
+  if (Math.abs(near - camera.near) < near * 0.01) return
+  camera.near = near
+  camera.far = d * 3 + 1500
+  camera.updateProjectionMatrix()
 }
 
 // Zoomed all the way out, the office fills the view and there is nowhere
