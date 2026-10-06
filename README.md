@@ -7,7 +7,7 @@ Claude Code mods and the tools around them.
 
 ## <img src="agent-office/icon.svg" width="28" height="28" alt="" align="top"> Agent Office
 
-A live office of everything Claude Code is doing on your machine. Each project gets its own cozy room. Your chat sessions are colorful critters, each at its own desk whose monitor scrolls code while it works. Each subagent is a smaller critter standing behind the session that started it, and every tool call makes its caller hop. A pinned notice says what's happening, sticky notes flag what needs a look, and a directory lists every session by room.
+A live office of everything Claude Code is doing on your machine. Each project gets its own cozy room. Your chat sessions are colorful critters, each at its own desk whose monitor scrolls code while it works. Each subagent is a smaller critter standing behind the session that started it, and every tool call makes its caller hop. A pinned notice says what's happening, sticky notes flag what needs a look, and a directory lists every session by room. Click any critter to read its conversation as it happens and send it a message, without leaving the office.
 
 **[Try the demo in your browser](https://tharun-se95.github.io/ModsArena/)**: sample activity, nothing to install.
 
@@ -24,6 +24,7 @@ You need Claude Code and [Node](https://nodejs.org) 18 or newer. In Claude Code:
 
 Then type **`/office`**. It starts the office's bridge if it isn't running and opens the office in your browser. Every Claude Code session on your machine, in any project, joins the same office. That's all.
 
+- Click a critter, then **Transcript**, to follow its conversation and message it. See [Talk to your agents](#talk-to-your-agents).
 - `/office status` says whether the bridge is running, what it has seen, and what this session is doing.
 - `claude plugin marketplace update modsarena` fetches new versions.
 - The status line shows `◉ office N agents · M tools` while work is in flight.
@@ -31,7 +32,7 @@ Then type **`/office`**. It starts the office's bridge if it isn't running and o
 <details>
 <summary><b>Your Claude Code doesn't have mods?</b> Use settings hooks instead.</summary>
 
-Older Claude Code builds can't load the plugin's hooks. Settings hooks get most of the picture: sessions, prompts, subagents, tool calls, and context from the transcript after each turn. The `/context` breakdown, per-subagent context, cost and rate limits need the plugin.
+Older Claude Code builds can't load the plugin's hooks. Settings hooks get most of the picture: sessions, prompts, subagents, tool calls, and context from the transcript after each turn. The `/context` breakdown, per-subagent context, cost and rate limits need the plugin, and so does sending messages: transcripts still show, but the message box can't deliver.
 
 ```sh
 npx github:tharun-se95/ModsArena install-hooks   # adds the hooks to ~/.claude/settings.json (backed up first)
@@ -106,8 +107,13 @@ The box at the bottom sends it a message:
 
 - **To a session:** the message becomes its next prompt, marked as from Agent Office. If the session is mid-turn, it waits until that turn ends.
 - **To a subagent:** the message goes to that subagent directly. A finished one is resumed to answer, which uses tokens.
+- **Past sessions** show their transcript but no message box. Resume one in Claude Code to talk to it again.
 
-The message stays on the clipboard with its status until it shows up in the transcript, and the reply appears below it. Tool approvals still pop up in Claude Code itself: chat can't do anything your permission settings don't already allow. It needs the plugin; the settings-hooks fallback can't receive messages.
+Enter sends and Shift+Enter starts a new line.
+
+![The Transcript tab: a session's prompts, replies and tool calls, a message from the office, and the session's answer](docs/agent-office-chat.png)
+
+The message stays on the clipboard with its status until it shows up in the transcript, and the reply appears below it. Tool approvals still pop up in Claude Code itself: chat can't do anything your permission settings don't already allow. It needs the plugin; the settings-hooks fallback can't receive messages. In the demo, messages get a sample reply.
 
 **How it's kept safe.** The bridge only listens on `127.0.0.1`, but any web page you visit can send requests there, so:
 
