@@ -2,9 +2,42 @@
 
 Versions of the Agent Office plugin (`agent-office@modsarena`). Each one is a
 git tag (`v0.2.1`) with a GitHub Release, and the same version is in
-`agent-office/.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`
-and both `package.json` files. `claude plugin marketplace update modsarena`
-picks up a new one.
+`agent-office/.claude-plugin/plugin.json`, the marketplace's
+`metadata.version` and both `package.json` files. With auto-update on for
+modsarena (`/plugin` → Marketplaces), a new one arrives on its own;
+otherwise `claude plugin update agent-office@modsarena` fetches it.
+
+## 0.4.0
+
+- **Updates that take.** After an update, the next session swaps the
+  running bridge for the new one (or `/office` does, if the office is
+  open), so you see the new page. `/office status` shows the bridge's
+  version. Bridges you start yourself are never touched.
+- The README, the release notes and the first-run toast say how to turn on
+  auto-update, which Claude Code leaves off for this marketplace.
+- The plugin's version lives in `plugin.json` only, not in its marketplace
+  entry, where Claude Code would ignore it.
+- **Chat reads cleanly.** A message you send from the office shows as you
+  wrote it, without the framing Claude Code adds, and its "Queued" or
+  "Sent" placeholder goes once it lands. Messages to a subagent now show
+  in its transcript too.
+- **Finished subagents can be picked.** A session's clipboard lists the
+  subagents that have finished, so you can open one's transcript and ask
+  it something.
+- **No phantom helpers.** An agent seen only through its tool calls, like
+  Claude Code's own helpers, no longer stays "helping" forever.
+- **No "unknown" session.** A context reading the engine makes before the
+  session has started no longer shows up as a session of its own.
+- **What you asked is what you asked.** A background task reporting in no
+  longer shows up as a prompt, and a session the page first read from
+  history doesn't list its first prompt twice.
+- **Smooth, steady camera.** Moving and zooming around the office glides
+  instead of jumping, the view stays at one fixed angle, and walls and
+  trim no longer flicker as you move.
+- **An `office` skill.** `/office` only exists once the plugin's hooks run in
+  a session, so the Claude app's menu didn't list it. The `agent-office:office`
+  skill is always listed and starts the bridge and opens the office the same
+  way.
 
 ## 0.3.1
 

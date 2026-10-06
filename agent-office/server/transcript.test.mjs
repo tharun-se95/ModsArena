@@ -16,7 +16,8 @@ const rows = [
   { type: 'assistant', timestamp: at, message: { role: 'assistant', content: [{ type: 'tool_use', id: 'tu1', name: 'Read', input: { file_path: '/w/ci.yml' } }] } },
   { type: 'user', timestamp: at, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'jobs: ...' }] } },
   { type: 'user', isMeta: true, timestamp: at, message: { role: 'user', content: [{ type: 'text', text: 'meta' }] } },
-  { type: 'user', origin: { kind: 'plugin', name: 'agent-office' }, timestamp: at, message: { role: 'user', content: 'Also check the retries.' } },
+  { type: 'user', origin: { kind: 'plugin', name: 'agent-office' }, timestamp: at, message: { role: 'user', content: 'The agent-office plugin sent a message:\nAlso check the retries.\n\nThis is how Claude Code surfaces a prompt a plugin submits between turns — it starts this turn in the user\'s place. Address the message above.' } },
+  { type: 'user', isMeta: true, isSidechain: true, origin: { kind: 'coordinator', plugin: 'agent-office' }, timestamp: at, message: { role: 'user', content: 'The coordinator sent a message while you were working:\nWhich file was it?\n\nAddress this before completing your current task.' } },
   { type: 'user', origin: { kind: 'human' }, timestamp: at, message: { role: 'user', content: '<command-name>/office</command-name><command-args></command-args>' } },
   { type: 'system', subtype: 'compact_boundary', timestamp: at },
   { type: 'user', isCompactSummary: true, timestamp: at, message: { role: 'user', content: 'Summary of the conversation...' } },
@@ -25,16 +26,20 @@ const rows = [
 
 test('rows become the entries the transcript tab draws', () => {
   const entries = rows.flatMap(entriesOf)
-  assert.deepEqual(entries.map(e => e.kind), ['you', 'say', 'tool', 'result', 'chat', 'note', 'note', 'result'])
+  assert.deepEqual(entries.map(e => e.kind), ['you', 'say', 'tool', 'result', 'chat', 'chat', 'note', 'note', 'result'])
   assert.equal(entries[0].text, 'Why is the build flaky?')
   assert.equal(entries[2].name, 'Read')
   assert.equal(entries[2].summary, '/w/ci.yml')
   assert.equal(entries[3].id, 'tu1')
   assert.equal(entries[3].ok, true)
+  // Office messages show as written, without Claude Code's framing.
   assert.equal(entries[4].from, 'agent-office')
-  assert.equal(entries[5].text, 'Ran /office')
-  assert.equal(entries[6].text, 'Context compacted')
-  assert.equal(entries[7].ok, false)
+  assert.equal(entries[4].text, 'Also check the retries.')
+  assert.equal(entries[5].from, 'agent-office')
+  assert.equal(entries[5].text, 'Which file was it?')
+  assert.equal(entries[6].text, 'Ran /office')
+  assert.equal(entries[7].text, 'Context compacted')
+  assert.equal(entries[8].ok, false)
 })
 
 test('a transcript is found by session id, its subagents beside it, and nothing outside', async () => {

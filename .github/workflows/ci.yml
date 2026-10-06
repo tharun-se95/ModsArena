@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --test agent-office/server/*.test.mjs scripts/*.test.mjs
+      - run: node --test agent-office/server/*.test.mjs scripts/*.test.mjs visualizer/src/*.test.mjs
 
   page:
     name: Page is built from its source
@@ -50,6 +50,6 @@ jobs:
         with:
           node-version: 22
       - run: npm install -g @anthropic-ai/claude-code
-      - run: claude plugin validate .
-      - run: claude plugin validate agent-office
+      - run: claude plugin validate --strict .
+      - run: claude plugin validate --strict agent-office
       - run: claude plugin test agent-office

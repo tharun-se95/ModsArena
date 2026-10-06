@@ -16,6 +16,7 @@ import { open, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { projectsDir } from './history.mjs'
 import { summarize } from './normalize.mjs'
+import { unwrapPrompt } from './prompts.mjs'
 
 const ID = /^[\w-]{1,100}$/
 const FIRST_READ = 512 * 1024 // a long session opens at its last half megabyte
@@ -59,7 +60,14 @@ export function entriesOf(row) {
       return []
     })
   }
-  if (row.type !== 'user' || row.isMeta || row.isCompactSummary) return []
+  if (row.type !== 'user' || row.isCompactSummary) return []
+  // A message the office sent a subagent is kept as a meta row from "the
+  // coordinator"; it's still something you said, so it shows.
+  if (row.origin?.kind === 'coordinator' && row.origin.plugin) {
+    const { text } = unwrapPrompt(textOf(content).trim())
+    return text ? [{ kind: 'chat', text: clip(text, TEXT_LIMIT), t, from: row.origin.plugin }] : []
+  }
+  if (row.isMeta) return []
   if (Array.isArray(content) && content.some(b => b.type === 'tool_result')) {
     return content.filter(b => b.type === 'tool_result').map(b => ({
       kind: 'result', id: b.tool_use_id, ok: !b.is_error, text: clip(textOf(b.content).trim(), RESULT_LIMIT),
@@ -68,7 +76,10 @@ export function entriesOf(row) {
   const text = textOf(content).trim()
   if (!text) return []
   const origin = row.origin?.kind
-  if (origin === 'plugin') return [{ kind: 'chat', text: clip(text, TEXT_LIMIT), t, from: row.origin.name ?? 'a plugin' }]
+  if (origin === 'plugin') {
+    const from = row.origin.name ?? 'a plugin'
+    return [{ kind: 'chat', text: clip(unwrapPrompt(text, from).text, TEXT_LIMIT), t, from }]
+  }
   if (origin === 'task-notification') return [{ kind: 'note', text: 'A background task reported in', t }]
   // Slash commands are stored as markup; show the command itself.
   const command = /<command-name>([^<]+)<\/command-name>/.exec(text)?.[1]

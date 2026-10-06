@@ -36,6 +36,7 @@ const link = {
   teammates: new Set<string>(),
   activeTools: 0,
   isCheckingInbox: false,
+  version: undefined as string | undefined,
 }
 
 const bridgeUrl = () => `http://127.0.0.1:${link.port}`
@@ -64,8 +65,10 @@ export function projectOf(cwd: string, repo: { root: string; name: string | null
   return { id: root, name: repo?.name ?? base, remote: repo?.remote ?? null }
 }
 
+// Stamped with the session when sent, not now: the engine can report (a
+// context reading, say) before session.start has told us whose it is.
 function emit(ev: ClusterEvent) {
-  const stamped = { t: Date.now(), session: link.session, ...ev }
+  const stamped = { t: Date.now(), ...ev }
   if (GAUGES.has(ev.kind)) {
     const i = link.queue.findIndex(q => q.kind === ev.kind && q.agent === ev.agent)
     if (i >= 0) {
@@ -87,12 +90,53 @@ function showStatus($: EngineInterface) {
   )
 }
 
-async function isHealthy($: EngineInterface) {
+type Health = { ok?: boolean; version?: string; managed?: boolean; events?: number; viewers?: number }
+
+// What the bridge on the port says about itself, or undefined if none answers.
+async function health($: EngineInterface): Promise<Health | undefined> {
   try {
-    return (await $.http.fetch(`${bridgeUrl()}/healthz`)).ok
+    const res = await $.http.fetch(`${bridgeUrl()}/healthz`)
+    if (!res.ok) return undefined
+    try {
+      return JSON.parse(res.text) as Health
+    } catch {
+      return { ok: true }
+    }
   } catch {
-    return false
+    return undefined
   }
+}
+
+const isHealthy = async ($: EngineInterface) => (await health($)) !== undefined
+
+// Whether version `a` is newer than `b` (plain x.y.z).
+export function isNewer(a: string, b: string): boolean {
+  const pa = a.split('.').map(Number)
+  const pb = b.split('.').map(Number)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0)
+    if (d !== 0) return d > 0
+  }
+  return false
+}
+
+// This copy's version, from its own plugin.json.
+async function ownVersion($: EngineInterface) {
+  if (link.version === undefined) {
+    try {
+      link.version = (JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`)) as { version?: string }).version
+    } catch {
+      link.version = undefined
+    }
+  }
+  return link.version
+}
+
+// A bridge this plugin started from an older copy: the bridge outlives the
+// session that started it, so after an update it would go on serving the old
+// page. Bridges people start themselves (npx, node server.mjs) are left alone.
+export function isStale(found: Health | undefined, mine: string | undefined) {
+  return Boolean(found?.managed && found.version && mine && isNewer(mine, found.version))
 }
 
 // The bridge runs on Node; say plainly when it's missing or too old.
@@ -109,12 +153,13 @@ async function nodeVersion($: EngineInterface) {
 }
 
 // The child lives as long as this loop, which lives as long as the module.
-function startBridge($: EngineInterface) {
+// With `replace`, it asks a stale bridge on the port to step down and takes over.
+function startBridge($: EngineInterface, replace = false) {
   link.lastSpawnAt = Date.now()
   void (async () => {
     try {
       const child = $.process.spawn({
-        argv: ['node', `${$.plugin.root}/server/server.mjs`, '--port', String(link.port)],
+        argv: ['node', `${$.plugin.root}/server/server.mjs`, '--port', String(link.port), '--managed', ...(replace ? ['--replace'] : [])],
       })
       for await (const { text } of child) $.ui.log(text.trimEnd(), { to: 'debug' })
     } catch (err) {
@@ -124,9 +169,9 @@ function startBridge($: EngineInterface) {
 }
 
 async function flush($: EngineInterface) {
-  if (link.isFlushing || link.queue.length === 0) return
+  if (link.isFlushing || link.queue.length === 0 || link.session === 'unknown') return
   link.isFlushing = true
-  const batch = link.queue
+  const batch = link.queue.map(ev => ({ session: link.session, ...ev }))
   link.queue = []
   try {
     const res = await $.http.fetch(`${bridgeUrl()}/event`, {
@@ -150,11 +195,13 @@ async function flush($: EngineInterface) {
 async function status($: EngineInterface) {
   const url = bridgeUrl()
   const lines: string[] = []
-  try {
-    const res = await $.http.fetch(`${url}/healthz`)
-    const health = JSON.parse(res.text) as { events?: number; viewers?: number }
-    lines.push(`Bridge: running on ${url}, ${health.events ?? 0} events so far, ${health.viewers ?? 0} page${health.viewers === 1 ? '' : 's'} open.`)
-  } catch {
+  const found = await health($)
+  const mine = await ownVersion($)
+  if (found) {
+    lines.push(`Bridge: running on ${url}${found.version ? ` (${found.version})` : ''}, ${found.events ?? 0} events so far, ${found.viewers ?? 0} page${found.viewers === 1 ? '' : 's'} open.`)
+    if (isStale(found, mine)) lines.push(`It's from an older Agent Office than this one (${mine}); /office restarts it.`)
+    else if (mine && !found.version) lines.push(`It's from an older Agent Office than this one (${mine}). It stops when the session that started it ends.`)
+  } else {
     const problem = nodeProblem(await nodeVersion($))
     lines.push(`Bridge: not running on ${url}.${problem ? ` ${problem}` : link.autoStart ? ' /office starts it.' : ` Start one with: node ${$.plugin.root}/server/server.mjs --port ${link.port}`}`)
   }
@@ -245,8 +292,11 @@ export const register: Register = (on, options) => {
       project: projectOf(e.cwd, repo),
     })
 
-    link.isBridgeUp = await isHealthy($)
+    const found = await health($)
+    link.isBridgeUp = found !== undefined
     if (!link.isBridgeUp && link.autoStart) startBridge($)
+    // After an update, swap out the old bridge, unless someone is watching it.
+    else if (link.autoStart && isStale(found, await ownVersion($)) && !found?.viewers) startBridge($, true)
 
     await $.command.register({
       name: 'office',
@@ -258,7 +308,7 @@ export const register: Register = (on, options) => {
     // Once per machine: say how to open it.
     if (!(await $.store.get(WELCOMED).catch(() => true))) {
       await $.store.set(WELCOMED, true).catch(() => undefined)
-      $.ui.toast('Agent Office is on. Type /office to watch your sessions at work.', { timeoutMs: 8000 })
+      $.ui.toast('Agent Office is on. Type /office to watch your sessions at work. For updates, turn on auto-update for modsarena under /plugin → Marketplaces.', { timeoutMs: 12000 })
     }
     return started
   })
@@ -269,14 +319,21 @@ export const register: Register = (on, options) => {
     if (arg === 'status') return { text: await status($) }
     if (arg && arg !== 'open') return { text: 'Usage: /office (open the office) or /office status' }
 
-    if (!(await isHealthy($))) {
+    const found = await health($)
+    const mine = await ownVersion($)
+    const isOutdated = link.autoStart && isStale(found, mine)
+    if (!found || isOutdated) {
       if (!link.autoStart) return { text: `No bridge on ${url}. Start one with: node ${$.plugin.root}/server/server.mjs --port ${link.port}` }
       const problem = nodeProblem(await nodeVersion($))
       if (problem) return { text: problem }
-      startBridge($)
-      // Wait for it to answer, then carry on and open the page.
+      startBridge($, isOutdated)
+      // Wait for this copy's bridge to answer, then carry on and open the page.
       const until = Date.now() + BRIDGE_WAIT_MS
-      while (!(await isHealthy($))) {
+      const isReady = async () => {
+        const now = await health($)
+        return now !== undefined && !isStale(now, mine)
+      }
+      while (!(await isReady())) {
         if (Date.now() > until) return { text: `The bridge didn't answer on ${url}. Is port ${link.port} taken by something else? Try /office status, or set another port in this plugin's options.` }
         await $.clock.sleep(250)
       }

@@ -19,9 +19,18 @@ const title = n => n.prompts?.[0]?.text ?? n.label
 const isLive = n => n.kind === 'session' && !n.past && n.status !== 'done'
 const isBusy = (n, running) => running.has(n.id) || Date.now() - (n.lastAt ?? 0) < BUSY_MS
 
-function liveHelpers(session) {
-  return [...nodes.values()].filter(n => n.kind === 'agent' && n.session === session.session && n.status !== 'done')
+function helpersOf(session) {
+  return [...nodes.values()].filter(n => n.kind === 'agent' && n.session === session.session)
 }
+const liveHelpers = session => helpersOf(session).filter(n => n.status !== 'done')
+
+// A helper you can pick: its clipboard has its transcript and a message box,
+// and a finished one is resumed to answer.
+function helperLine(a, extra) {
+  return `<button class="line pick" data-pick="${escapeHtml(a.id)}"><i class="dot ${tintOf(a.type)}"></i>${escapeHtml(a.label ?? a.type)}${extra ? `<span class="muted">· ${extra}</span>` : ''}</button>`
+}
+
+const asked = p => `${p.from ? `<span class="muted from">${p.from === 'agent-office' ? 'From the office' : `From ${escapeHtml(p.from)}`}</span>` : ''}${escapeHtml(p.text)}`
 
 function summary(running) {
   const live = [...nodes.values()].filter(isLive)
@@ -121,6 +130,7 @@ function sessionDetail(n) {
   const act = activity.get(n.id)
   const files = act ? [...act.files].sort((a, b) => (b[1].edits * 3 + b[1].reads) - (a[1].edits * 3 + a[1].reads)).slice(0, 8) : []
   const helpers = live ? liveHelpers(n) : (n.pastAgents ?? [])
+  const finished = live ? helpersOf(n).filter(a => a.status === 'done').sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0)) : []
   const where = [n.projectName, n.gitBranch].filter(Boolean).join(' · ')
   const facts = [
     n.turns !== undefined && plural(n.turns, 'turn'),
@@ -141,10 +151,13 @@ function sessionDetail(n) {
     ${facts ? `<p class="dmeta">${escapeHtml(facts)}</p>` : ''}
     ${live ? breakdown(n) + limits(n) : ''}
     <h3>${live ? 'Helping now' : 'Who helped'}</h3>
-    ${helpers.map(a => line(`<i class="dot ${tintOf(a.type)}"></i>${escapeHtml(a.label ?? a.type)}`, live ? (a.context?.tokens ? `${pct(fill(a))} of its own window` : escapeHtml(a.description ?? '')) : escapeHtml(a.description ?? ''))).join('') || '<p class="muted">No subagents.</p>'}
+    ${live
+      ? helpers.map(a => helperLine(a, a.context?.tokens ? `${pct(fill(a))} of its own window` : escapeHtml(a.description ?? ''))).join('') || '<p class="muted">No subagents.</p>'
+      : helpers.map(a => line(`<i class="dot ${tintOf(a.type)}"></i>${escapeHtml(a.label ?? a.type)}`, escapeHtml(a.description ?? ''))).join('') || '<p class="muted">No subagents.</p>'}
+    ${finished.length ? `<h3>Finished</h3>${finished.map(a => helperLine(a, `${escapeHtml(a.description ?? '')}${a.description ? ' · ' : ''}${ago(a.endedAt)}`)).join('')}` : ''}
     ${files.length ? `<h3>Files it has worked on</h3>${files.map(fileLine).join('')}` : ''}
     ${act?.actions.length ? `<h3>Recently</h3>${act.actions.slice(0, 8).map(x => line(escapeHtml(x.text), ago(x.t), x.ok ? '' : 'bad')).join('')}` : ''}
-    ${n.prompts?.length ? `<h3>What you asked</h3>${[...n.prompts].reverse().slice(0, 6).map(p => line(escapeHtml(p.text), ago(p.t))).join('')}` : ''}`
+    ${n.prompts?.length ? `<h3>What you asked</h3>${[...n.prompts].reverse().slice(0, 6).map(p => line(asked(p), ago(p.t))).join('')}` : ''}`
 }
 
 function agentDetail(n) {
