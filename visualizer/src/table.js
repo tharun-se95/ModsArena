@@ -138,11 +138,14 @@ export function mount(el, { pick }) {
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = true
   controls.dampingFactor = DAMPING
-  controls.minPolarAngle = 0.35
-  controls.maxPolarAngle = 1.15
+  // The view angle stays put: dragging slides across the office instead of
+  // turning it, and keepInOffice() stops it at the walls.
+  controls.enableRotate = false
+  controls.screenSpacePanning = false
+  controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN }
+  controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.PAN }
   controls.minDistance = 120
   controls.maxDistance = 4000
-  controls.enablePan = false
   // The wheel eases the camera in and out (see zoom()); the controls would
   // jump a step per wheel tick.
   controls.enableZoom = false
@@ -513,6 +516,8 @@ function frame(jump = false) {
     dist *= Math.max(0.6, reach)
   }
   const goal = { pos: new THREE.Vector3(c.x, Math.sin(TILT) * dist, c.z + Math.cos(TILT) * dist), target }
+  // Zoomed all the way out shows the whole office and no more.
+  if (!t) controls.maxDistance = dist
   if (jump || !framedOnce) {
     framedOnce = true
     camera.position.copy(goal.pos)
@@ -1049,6 +1054,7 @@ export function animate() {
   // frames come.
   controls.dampingFactor = 1 - Math.pow(1 - DAMPING, dt * 60)
   controls.update()
+  if (!camGoal) keepInOffice()
   if (tick % 2 === 0) renderer.shadowMap.needsUpdate = true
   sharpness(now, dt)
   renderer.render(scene, camera)
@@ -1075,6 +1081,20 @@ function zoom(dt) {
   const next = Math.abs(zoomTo / d - 1) < 0.001 ? zoomTo : d * Math.pow(zoomTo / d, 1 - Math.pow(ZOOM_EASE, dt))
   camera.position.copy(controls.target).add(v.setLength(next))
   if (next === zoomTo) zoomTo = null
+}
+
+// Zoomed all the way out, the office fills the view and there is nowhere
+// to slide; the closer in, the further you can go, out to its walls.
+function keepInOffice() {
+  const room = 1 - camera.position.distanceTo(controls.target) / controls.maxDistance
+  const x = Math.max(0, room) * size.W / 2, z = Math.max(0, room) * size.D / 2
+  const dx = THREE.MathUtils.clamp(controls.target.x, -x, x) - controls.target.x
+  const dz = THREE.MathUtils.clamp(controls.target.z, -z, z) - controls.target.z
+  if (!dx && !dz) return
+  controls.target.x += dx
+  controls.target.z += dz
+  camera.position.x += dx
+  camera.position.z += dz
 }
 
 // A big, sharp screen can ask more of the GPU than it draws smoothly. When
@@ -1195,4 +1215,4 @@ function bindPointer() {
   renderer.domElement.addEventListener('pointerleave', () => { hoverPick = null; hovered = null })
 }
 // ?debug reaches these through window.cluster.table.debug.
-export const debug = { get renderer() { return renderer }, sessionViews, agentViews, rooms, get camera() { return camera }, get stage() { return stage }, get controls() { return controls }, get coffee() { return coffee }, greeted }
+export const debug = { get renderer() { return renderer }, get size() { return size }, sessionViews, agentViews, rooms, get camera() { return camera }, get stage() { return stage }, get controls() { return controls }, get coffee() { return coffee }, greeted }
