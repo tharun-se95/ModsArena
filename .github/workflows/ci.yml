@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --test agent-office/server/*.test.mjs scripts/*.test.mjs
+      - run: node --test agent-office/server/*.test.mjs scripts/*.test.mjs visualizer/src/*.test.mjs
 
   page:
     name: Page is built from its source

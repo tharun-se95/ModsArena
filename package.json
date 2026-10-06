@@ -20,7 +20,7 @@
   "scripts": {
     "start": "node agent-office/server/cli.mjs",
     "demo": "node agent-office/server/cli.mjs demo",
-    "test": "node --test agent-office/server/*.test.mjs scripts/*.test.mjs",
+    "test": "node --test agent-office/server/*.test.mjs scripts/*.test.mjs visualizer/src/*.test.mjs",
     "build": "npm --prefix visualizer run build",
     "build:demo-site": "node scripts/build-demo-site.mjs"
   },

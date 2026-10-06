@@ -46,6 +46,28 @@ test('tool calls and spawns reach the bridge as cluster events', async ($, on) =
   expect(posted.every(ev => ev.session === 'sess-test')).toBe(true)
 })
 
+test('a reading made before the session has started still carries its session', async ($, on) => {
+  const clock = mock.clock(on, { now: 1000 })
+  const posted: Array<Record<string, unknown>> = []
+  on('http.fetch', async (_$, e) => {
+    if (e.url.endsWith('/event')) posted.push(...JSON.parse(e.init?.body ?? '[]'))
+    return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }
+  })
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  on('session.id', async () => ({ value: 'sess-early' }))
+  on('session.model', async () => ({ value: 'test-model' }))
+  on('command.register', async () => ({ value: { command: 'office' } }))
+  on('ui.status', async () => ({ value: undefined }))
+  on('session.measure', async (_$, e) => ({ changed: e.changed }))
+
+  await $.session.measure({ context: { tokens: 1000, window: 200000, percent: 0 }, rateLimits: [], changed: ['context'] })
+  await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+  await clock.advance(300)
+
+  expect(posted.map(ev => ev.kind)).toContain('context.measure')
+  expect(posted.every(ev => ev.session === 'sess-early')).toBe(true)
+})
+
 test('contextTokens and projectOf read what the engine reports', async () => {
   expect(contextTokens({ input_tokens: 5, cache_read_input_tokens: 90000, cache_creation_input_tokens: 2000 })).toBe(92005)
   expect(projectOf('/w/app/src', { root: '/w/app', name: 'acme/app', remote: 'git@x:acme/app.git' }))

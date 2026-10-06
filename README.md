@@ -171,7 +171,7 @@ cd visualizer && npm install && npm run build    # rebuild the page (or: npm run
 claude plugin validate --strict .                # the marketplace
 claude plugin validate --strict agent-office     # the plugin, as the engine will load it
 claude plugin test agent-office                  # mod tests (hooks/register.test.ts)
-node --test agent-office/server/*.test.mjs       # bridge and CLI: schema, history, projects, settings hooks
+npm test                                         # bridge, CLI and page model: schema, history, transcripts, settings hooks
 node scripts/build-demo-site.mjs                 # the hosted demo, into site/
 ```
 
