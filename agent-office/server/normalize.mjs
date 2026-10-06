@@ -22,11 +22,14 @@
 //   agent.context     { agent?, tokens, window?, model? }   one request's input
 // And:
 //   context.compact   { agent?, trigger, before?, after? }
+//   chat.sent         { agent?, id, text }       the office sent a message (the bridge emits it)
+//   chat.delivered    { agent?, id, ok, how? }   the session's mod handed it over
 
 const KINDS = new Set([
   'session.start', 'session.end', 'turn.start', 'turn.complete',
   'agent.spawn', 'agent.end', 'agent.idle', 'tool.start', 'tool.end',
   'context.measure', 'context.breakdown', 'context.compact', 'agent.context',
+  'chat.sent', 'chat.delivered',
 ])
 
 export const GAUGES = new Set(['context.measure', 'context.breakdown', 'agent.context'])

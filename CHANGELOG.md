@@ -6,6 +6,17 @@ git tag (`v0.2.1`) with a GitHub Release, and the same version is in
 and both `package.json` files. `claude plugin marketplace update modsarena`
 picks up a new one.
 
+## Unreleased
+
+- **Talk to your agents.** A critter's clipboard has a Transcript tab: its
+  conversation, live, read from the transcript Claude Code keeps (past
+  sessions and subagents too). A box at the bottom sends a message: to a
+  session as its next prompt, to a subagent directly.
+- **The bridge is locked down.** Every request must be addressed to the
+  bridge itself (no DNS rebinding). Browser requests that change anything
+  must come from the office page. Sending a message needs a token made
+  fresh each run and given only to the office page.
+
 ## 0.2.1
 
 - The README opens with a demo GIF: the office at work, a glide into a room,

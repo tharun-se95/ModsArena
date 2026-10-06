@@ -6,6 +6,7 @@
 import { nodes, fill, warnings, sid, WARN_AT } from './model.js'
 import { moments, activity, lastAction, escapeHtml, quote, ago } from './words.js'
 import { pct, level, tintOf, sessionTint, roomKey } from './table.js'
+import * as transcript from './transcript.js'
 
 const $ = sel => document.querySelector(sel)
 const k = n => (n === undefined ? '—' : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : `${Math.round(n / 1000)}k`)
@@ -132,6 +133,7 @@ function sessionDetail(n) {
     <button class="back" data-back>← All sessions</button>
     <h2 class="dtitle"><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(title(n))}</h2>
     <p class="dmeta">${escapeHtml(where)}${live ? '' : ` · ended ${ago(n.endedAt ?? n.lastAt)}`}</p>
+    <!--tabs-->
     ${n.context?.tokens ? `
       <div class="dgauge"><span class="big ${level(f)}">${pct(f)}</span><span>of its context window ${live ? 'is' : 'was'} in use${live && f >= WARN_AT ? '. It will compact soon.' : '.'}</span></div>
       <span class="meter"><span class="${level(f)}" style="width:${(f * 100).toFixed(1)}%"></span></span>
@@ -152,6 +154,7 @@ function agentDetail(n) {
     <button class="back" data-pick="${escapeHtml(host?.id ?? '')}">← ${escapeHtml(host?.label ?? 'Session')}</button>
     <h2 class="dtitle"><i class="dot ${tintOf(n.type)}"></i>${escapeHtml(n.label)}</h2>
     <p class="dmeta">${escapeHtml(n.description ?? n.type)}</p>
+    <!--tabs-->
     ${n.context?.tokens ? `
       <div class="dgauge"><span class="big ${level(f)}">${pct(f)}</span><span>of its own context window.</span></div>
       <span class="meter"><span class="${level(f)}" style="width:${(f * 100).toFixed(1)}%"></span></span>` : ''}
@@ -165,6 +168,9 @@ function morph(from, to) {
     from.replaceWith(to)
     return
   }
+  // A part another module draws (the transcript) is left to it, as long as
+  // it's still for the same thing.
+  if (from.nodeType === Node.ELEMENT_NODE && from.hasAttribute('data-keep') && from.getAttribute('data-keep') === to.getAttribute('data-keep')) return
   if (from.nodeType !== Node.ELEMENT_NODE) {
     if (from.nodeValue !== to.nodeValue) from.nodeValue = to.nodeValue
     return
@@ -186,9 +192,22 @@ function patch(el, html) {
   morph(el, fresh)
 }
 
+// The clipboard's two tabs: the details, or the conversation (transcript.js).
+let tab = 'details'
+let lastArgs = null
+
+function withTabs(html, n) {
+  const [head, body] = html.split('<!--tabs-->')
+  const button = (name, label) => `<button type="button" role="tab" class="tab ${tab === name ? 'on' : ''}" aria-selected="${tab === name}" data-tab="${name}">${label}</button>`
+  const tabs = `<div class="tabs" role="tablist">${button('details', 'Details')}${button('transcript', 'Transcript')}</div>`
+  return head + tabs + (tab === 'details' ? body : `<div class="transcript" data-keep="${escapeHtml(n.id)}"></div>`)
+}
+
 // Re-render what changed. `selected` is a node id or null; `hover` shows
 // a critter's bubble while its directory entry is under the pointer.
-export function render({ running, selected, pick, hover }) {
+export function render(args) {
+  lastArgs = args
+  const { running, selected, pick, hover } = args
   patch($('#now'), summary(running).map(p => `<p>${p}</p>`).join(''))
   patch($('#look'), needsALook())
   patch($('#moments'), moments.slice(0, 12).map(m =>
@@ -196,7 +215,11 @@ export function render({ running, selected, pick, hover }) {
   const n = selected && nodes.get(selected)
   const detail = n && (n.kind === 'agent' || n.kind === 'session')
   $('#side').classList.toggle('clipboard', Boolean(detail))
-  patch($('#side'), !detail ? directory(running, selected) : n.kind === 'agent' ? agentDetail(n) : sessionDetail(n))
+  $('#side').classList.toggle('talking', Boolean(detail) && tab === 'transcript')
+  patch($('#side'), !detail ? directory(running, selected) : withTabs(n.kind === 'agent' ? agentDetail(n) : sessionDetail(n), n))
+  if (detail && tab === 'transcript') transcript.attach($('#side .transcript'), n)
+  else transcript.detach()
+  for (const b of document.querySelectorAll('[data-tab]')) b.onclick = () => { tab = b.dataset.tab; render(lastArgs) }
   for (const b of document.querySelectorAll('[data-pick]')) b.onclick = () => pick(b.dataset.pick || null)
   for (const b of document.querySelectorAll('[data-back]')) b.onclick = () => pick(null)
   for (const b of document.querySelectorAll('[data-hover]')) {

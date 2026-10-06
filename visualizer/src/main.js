@@ -9,6 +9,7 @@ import * as words from './words.js'
 import * as table from './table.js'
 import * as panels from './panels.js'
 import { unlock, isMuted, setMuted } from './sound.js'
+import * as transcript from './transcript.js'
 
 const HISTORY_REFRESH_MS = 60000
 const PANEL_REFRESH_MS = 700
@@ -113,6 +114,7 @@ function ingest(ev) {
   model.apply(ev)
   words.ingest(ev)
   table.pulse(ev)
+  transcript.onEvent(ev)
 }
 
 async function loadHistory() {
@@ -153,6 +155,13 @@ function connect() {
 function playDemo() {
   setStatus('Sample activity', 'live')
   startDemo(events => events.forEach(ingest))
+}
+
+// A bridge started with --demo has sample sessions and no transcripts on
+// disk: its transcript tab plays the demo's too.
+transcript.setDemo(isDemo)
+if (!isDemo) {
+  fetch('/healthz').then(r => r.json()).then(h => { if (h.demo) transcript.setDemo(true) }).catch(() => {})
 }
 
 await loadHistory()
