@@ -16,6 +16,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto'
 
 export const TOKEN_HEADER = 'x-agent-office-token'
 export const INBOX_HEADER = 'x-agent-office-inbox'
+export const CONTROL_HEADER = 'x-agent-office-control'
 
 export const newToken = () => randomBytes(24).toString('hex')
 

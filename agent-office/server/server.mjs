@@ -2,12 +2,17 @@
 // Agent Office bridge: takes events from Claude Code, streams them to the
 // office page over Server-Sent Events. Node built-ins only, no install step.
 //
-//   node server.mjs [--port 7337] [--demo] [--history-days 14]
+//   node server.mjs [--port 7337] [--demo] [--history-days 14] [--managed] [--replace]
+//
+//   --managed   started by the plugin's mod, which may replace it after an update
+//   --replace   take over the port from a managed bridge already holding it
 //
 //   POST /event    one event or an array (mod schema or classic hook stdin)
 //   GET  /stream   SSE: replays the recent log and gauges, then every new event
 //   GET  /history  past sessions read from ~/.claude/projects transcripts
-//   GET  /healthz  liveness probe the mod uses before spawning a bridge
+//   GET  /healthz  liveness probe the mod uses before spawning a bridge, with
+//                  this bridge's version, so a newer mod can replace it
+//   POST /shutdown a newer bridge taking over the port (managed bridges only)
 //   GET  /transcript?session=&agent=&after=   a conversation, read from its transcript
 //   POST /chat     a message for a session or subagent (the office page only)
 //   GET  /inbox?session=   a session's mod picking up its messages
@@ -17,6 +22,7 @@
 // token only the office page gets (guard.mjs says why).
 
 import { createServer } from 'node:http'
+import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { extname, join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -24,7 +30,7 @@ import { normalize, GAUGES, gaugeKey } from './normalize.mjs'
 import { findProject } from './projects.mjs'
 import { readHistory, tailContext } from './history.mjs'
 import { startDemo } from './demo.mjs'
-import { refusal, newToken, tokenMatches, TOKEN_HEADER, INBOX_HEADER } from './guard.mjs'
+import { refusal, newToken, tokenMatches, TOKEN_HEADER, INBOX_HEADER, CONTROL_HEADER } from './guard.mjs'
 import * as chat from './chat.mjs'
 import { findTranscript, readTranscript } from './transcript.mjs'
 
@@ -42,7 +48,20 @@ const LOG_LIMIT = 8000
 // A fresh secret each run, handed to the office page in its HTML.
 const TOKEN = newToken()
 const MAX_BODY = 1024 * 1024
-const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), 'public')
+const HERE = dirname(fileURLToPath(import.meta.url))
+const PUBLIC = join(HERE, 'public')
+// The plugin version this bridge is from, so a mod from a newer one can tell
+// it's stale: the bridge outlives the session that started it, and an update
+// leaves it serving the old page from the old copy.
+const VERSION = (() => {
+  try {
+    return JSON.parse(readFileSync(join(HERE, '..', '.claude-plugin', 'plugin.json'), 'utf8')).version
+  } catch {
+    return undefined
+  }
+})()
+const MANAGED = flag('managed')
+const REPLACE_MS = 5000
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -203,7 +222,21 @@ const server = createServer(async (req, res) => {
   }
 
   if (pathname === '/healthz') {
-    json(res, 200, { ok: true, name: 'agent-office', demo: flag('demo'), chat: true, events: log.length, viewers: clients.size })
+    json(res, 200, { ok: true, name: 'agent-office', version: VERSION, managed: MANAGED, demo: flag('demo'), chat: true, events: log.length, viewers: clients.size })
+    return
+  }
+
+  if (req.method === 'POST' && pathname === '/shutdown') {
+    // A custom header: a web page can't send it to another origin unasked.
+    if (req.headers[CONTROL_HEADER] !== '1') return json(res, 403, { error: 'missing control header' })
+    // One you started yourself (npx, node server.mjs) stays yours to stop.
+    if (!MANAGED) return json(res, 409, { error: 'not started by the plugin' })
+    json(res, 200, { ok: true })
+    console.log('[agent-office] stepping down for a newer bridge')
+    for (const client of clients) client.end()
+    // Closing stops listening at once; open connections get a moment to end.
+    server.close(() => process.exit(0))
+    setTimeout(() => process.exit(0), 1000).unref()
     return
   }
 
@@ -211,16 +244,35 @@ const server = createServer(async (req, res) => {
   res.writeHead(405).end()
 })
 
+let replaceUntil = 0
+
 server.on('error', err => {
-  // Another session's bridge already holds the port: that one serves us too.
   if (err.code === 'EADDRINUSE') {
+    // Taking over: the old bridge is stepping down, so try again shortly.
+    if (Date.now() < replaceUntil) return void setTimeout(() => server.listen(PORT, HOST), 50)
+    // Another session's bridge already holds the port: that one serves us too.
     console.error(`[agent-office] port ${PORT} in use, assuming a bridge is already running`)
     process.exit(0)
   }
   throw err
 })
 
-server.listen(PORT, HOST, () => {
-  console.log(`[agent-office] office on http://${HOST}:${PORT}`)
+server.on('listening', () => {
+  console.log(`[agent-office] office on http://${HOST}:${PORT}${VERSION ? ` (${VERSION})` : ''}`)
   if (flag('demo')) startDemo(publish)
 })
+
+// Ask the bridge on the port to step down. This process is already running,
+// so it gets the port before the old bridge's own session can start that one
+// again.
+async function askToStepDown() {
+  try {
+    const res = await fetch(`http://127.0.0.1:${PORT}/shutdown`, { method: 'POST', headers: { [CONTROL_HEADER]: '1' } })
+    if (res.ok) replaceUntil = Date.now() + REPLACE_MS
+  } catch {
+    // Nothing there: the port is free.
+  }
+}
+
+if (flag('replace')) await askToStepDown()
+server.listen(PORT, HOST)

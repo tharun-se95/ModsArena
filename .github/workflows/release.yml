@@ -34,6 +34,9 @@ jobs:
           node scripts/version.mjs check "$tag"
           echo "TAG=$tag" >> "$GITHUB_ENV"
       - run: node --test agent-office/server/*.test.mjs scripts/*.test.mjs
+      - run: npm install -g @anthropic-ai/claude-code
+      - run: claude plugin validate --strict .
+      - run: claude plugin validate --strict agent-office
       - name: Build the offline demo
         run: |
           node scripts/build-demo-site.mjs site
@@ -43,7 +46,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           node scripts/version.mjs notes "$TAG" > notes.md
-          printf '\n\n**Install or update:** `/plugin marketplace add tharun-se95/ModsArena`, then `/plugin install agent-office@modsarena` (or `claude plugin marketplace update modsarena`). **Try it:** https://tharun-se95.github.io/ModsArena/\n' >> notes.md
+          printf '\n\n**Install:** `/plugin marketplace add tharun-se95/ModsArena`, then `/plugin install agent-office@modsarena`. **Update:** `claude plugin update agent-office@modsarena`, or turn on auto-update once under `/plugin` → Marketplaces → modsarena. **Try it:** https://tharun-se95.github.io/ModsArena/\n' >> notes.md
           # A pushed tag must already exist; a manual run creates it on this commit.
           if [ "$GITHUB_EVENT_NAME" = push ]; then where=--verify-tag
           else where="--target=$GITHUB_SHA"; fi
