@@ -1,8 +1,11 @@
+<img src="docs/brand/modsarena.svg" width="72" height="72" alt="" align="left">
+
 # ModsArena
 
 Claude Code mods and the tools around them.
+<br clear="left">
 
-## Agent Office
+## <img src="agent-office/icon.svg" width="28" height="28" alt="" align="top"> Agent Office
 
 A live office of everything Claude Code is doing on your machine. Each project gets its own cozy room. Your chat sessions are colorful critters, each at its own desk whose monitor scrolls code while it works. Each subagent is a smaller critter standing behind the session that started it, and every tool call makes its caller hop. A pinned notice says what's happening, sticky notes flag what needs a look, and a directory lists every session by room.
 
