@@ -9,7 +9,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 const cache = new Map()
 function box(w, h, d, r = 0.08) {
   const key = `${w}|${h}|${d}|${r}`
-  if (!cache.has(key)) cache.set(key, new RoundedBoxGeometry(w, h, d, 3, Math.min(r, w / 2, h / 2, d / 2)))
+  if (!cache.has(key)) cache.set(key, new RoundedBoxGeometry(w, h, d, 4, Math.min(r, w / 2, h / 2, d / 2)))
   return cache.get(key)
 }
 
@@ -29,9 +29,9 @@ export function makeCharacter({ build = 'general-purpose', bodyColor, inkColor, 
   const rig = new THREE.Group()
   root.add(rig)
 
-  const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.62 })
-  const inkMat = new THREE.MeshStandardMaterial({ color: inkColor, roughness: 0.5 })
-  const accentMat = new THREE.MeshStandardMaterial({ color: accentColor, roughness: 0.45 })
+  const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.42 })
+  const inkMat = new THREE.MeshStandardMaterial({ color: inkColor, roughness: 0.2 })
+  const accentMat = new THREE.MeshStandardMaterial({ color: accentColor, roughness: 0.3 })
 
   // Legs: short blocks along the underside, front and back rows.
   const legs = []

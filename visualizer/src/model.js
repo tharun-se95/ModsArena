@@ -2,9 +2,22 @@
 // built from bridge events and /history summaries. Rendering reads it; it
 // knows nothing about Three.js.
 
+import { unwrapPrompt, isEngineNote } from '../../agent-office/server/prompts.mjs'
+
 export const TOOL_LINGER_MS = 6000 // a finished tool stays visible this long
 const FINISHED_AGENT_LIMIT = 12
 const PROMPT_KEEP = 25
+// An agent seen only through its tool calls (never spawned, like Claude
+// Code's own helpers) leaves once it's been quiet this long.
+const UNANNOUNCED_MS = 30000
+// A prompt from /history and the same one from a live event: their clocks
+// differ a little, and either text may be cut short.
+const SAME_PROMPT_MS = 60000
+const bare = s => s.replace(/\s+/g, ' ').replace(/(\.\.\.|…)$/, '').trim()
+const samePrompt = (a, b) => {
+  const [x, y] = [bare(a), bare(b)]
+  return x.startsWith(y) || y.startsWith(x)
+}
 export const DEFAULT_WINDOW = 200000
 export const WARN_AT = 0.8
 
@@ -155,10 +168,15 @@ const handlers = {
       node.lastReason = undefined
     }
     if (node.kind === 'session' && ev.text) {
-      // Sessions are named by what they were first asked, as /resume lists them.
-      if (!node.prompts.length) node.label = promptLabel(ev.text)
       node.turns++
-      node.prompts.push({ t: ev.t, text: ev.text })
+      // A background task reporting in isn't something you asked.
+      if (isEngineNote(ev.text)) return
+      const { text, from } = unwrapPrompt(ev.text)
+      // A session the page first met in /history already has this prompt.
+      if (node.prompts.some(p => !p.live && Math.abs(p.t - ev.t) < SAME_PROMPT_MS && samePrompt(p.text, text))) return
+      // Sessions are named by what they were first asked, as /resume lists them.
+      if (!node.prompts.length) node.label = promptLabel(text)
+      node.prompts.push({ t: ev.t, text, from, live: true })
       if (node.prompts.length > PROMPT_KEEP) node.prompts.shift()
     }
   },
@@ -234,6 +252,7 @@ const handlers = {
       label: ev.name || ev.type, name: ev.name, type: ev.type, description: ev.description, model: ev.model,
       background: ev.background, teammate: ev.teammate, teammateId: ev.teammateId, fork: ev.fork, cwd: ev.cwd,
       parent, status: 'active', startedAt: ev.t,
+      announced: true,
     })
     nodes.get(parent).pulseAt = ev.t
   },
@@ -264,6 +283,7 @@ const handlers = {
       session: ev.session, owner: own.id, status: 'active', startedAt: ev.t,
     })
     addLink(own.id, id, 'tool')
+    own.lastAt = ev.t
     stats.calls++
     const session = nodes.get(sid(ev.session))
     session.toolCalls++
@@ -279,7 +299,10 @@ const handlers = {
       nodes.get(sid(ev.session)).errors++
     }
     const own = nodes.get(node.owner)
-    if (own) own.history++
+    if (own) {
+      own.history++
+      if (own.kind === 'agent') own.lastAt = ev.t
+    }
   },
 }
 
@@ -294,10 +317,15 @@ export function apply(ev) {
   handlers[ev.kind]?.(ev)
 }
 
-// Finished tools fold into their owner's history ring.
+// Finished tools fold into their owner's history ring, and an agent that
+// was never spawned goes once it's quiet: nothing will say it has ended.
 export function sweep(now) {
   for (const n of nodes.values()) {
     if (n.kind === 'tool' && n.endedAt && now - n.endedAt > TOOL_LINGER_MS) removeNode(n.id)
+  }
+  for (const n of nodes.values()) {
+    if (n.kind !== 'agent' || n.announced || n.status === 'done' || now - (n.lastAt ?? n.startedAt ?? 0) < UNANNOUNCED_MS) continue
+    if (!links.some(l => idOf(l.source) === n.id && l.kind === 'tool')) removeNode(n.id)
   }
 }
 

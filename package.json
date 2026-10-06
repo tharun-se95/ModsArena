@@ -1,6 +1,6 @@
 {
   "name": "agent-office",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "A live office of your Claude Code sessions and subagents: the bridge, the page, and a settings-hooks installer.",
   "type": "module",
   "bin": {
@@ -11,7 +11,8 @@
     "agent-office/fallback",
     "agent-office/.claude-plugin",
     "agent-office/hooks",
-    "agent-office/icon.png"
+    "agent-office/icon.png",
+    "agent-office/skills"
   ],
   "engines": {
     "node": ">=18"

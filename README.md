@@ -7,7 +7,7 @@ Claude Code mods and the tools around them.
 
 ## <img src="agent-office/icon.svg" width="28" height="28" alt="" align="top"> Agent Office
 
-A live office of everything Claude Code is doing on your machine. Each project gets its own cozy room. Your chat sessions are colorful critters, each at its own desk whose monitor scrolls code while it works. Each subagent is a smaller critter standing behind the session that started it, and every tool call makes its caller hop. The page is laid out the way Claude organizes work: **projects** hold **threads** (your sessions), and each thread has its **lead** and the **agents** it spawned, nested. Threads waiting on you collect in an inbox, where you can reply without leaving the page.
+A live office of everything Claude Code is doing on your machine. Each project gets its own cozy room. Your chat sessions are colorful critters, each at its own desk whose monitor scrolls code while it works. Each subagent is a smaller critter standing behind the session that started it, and every tool call makes its caller hop. The page is laid out the way Claude organizes work: **projects** hold **threads** (your sessions), and each thread has its **lead** and the **agents** it spawned, nested. Threads waiting on you collect in an inbox, where you can reply without leaving the page. Click any critter to read its conversation as it happens and send it a message, without leaving the office.
 
 **[Try the demo in your browser](https://tharun-se95.github.io/ModsArena/)**: sample activity, nothing to install.
 
@@ -22,16 +22,22 @@ You need Claude Code and [Node](https://nodejs.org) 18 or newer. In Claude Code:
 /plugin install agent-office@modsarena
 ```
 
+On Claude Code 2.1.275 or newer, one command does both: `/plugin install agent-office --marketplace tharun-se95/ModsArena`.
+
+**Turn on updates.** Claude Code doesn't update plugins from a marketplace like this one unless you ask it to. Type `/plugin`, open **Marketplaces**, pick **modsarena** and choose **Enable auto-update**, and new versions arrive on their own after a session starts.
+
 Then type **`/office`**. It starts the office's bridge if it isn't running and opens the office in your browser. Every Claude Code session on your machine, in any project, joins the same office. That's all.
 
+- Click a critter, then **Transcript**, to follow its conversation and message it. See [Talk to your agents](#talk-to-your-agents).
 - `/office status` says whether the bridge is running, what it has seen, and what this session is doing.
-- `claude plugin marketplace update modsarena` fetches new versions.
+- `/office` appears once a session has started and the plugin's hooks are running. Where it isn't listed (before the first message in the desktop app, or anywhere the hooks don't run), the `agent-office:office` skill opens the office instead.
+- Without auto-update, `claude plugin update agent-office@modsarena` fetches a new version. After an update, the next session (or `/office`) swaps the running bridge for the new one, unless the office is open in a browser; then `/office` does it.
 - The status line shows `◉ office N agents · M tools` while work is in flight.
 
 <details>
 <summary><b>Your Claude Code doesn't have mods?</b> Use settings hooks instead.</summary>
 
-Older Claude Code builds can't load the plugin's hooks. Settings hooks get most of the picture: sessions, prompts, subagents, tool calls, and context from the transcript after each turn. The `/context` breakdown, per-subagent context, cost and rate limits need the plugin.
+Older Claude Code builds can't load the plugin's hooks. Settings hooks get most of the picture: sessions, prompts, subagents, tool calls, and context from the transcript after each turn. The `/context` breakdown, per-subagent context, cost and rate limits need the plugin, and so does sending messages: transcripts still show, but the message box can't deliver.
 
 ```sh
 npx github:tharun-se95/ModsArena install-hooks   # adds the hooks to ~/.claude/settings.json (backed up first)
@@ -60,6 +66,7 @@ npx github:tharun-se95/ModsArena demo            # sample activity on http://127
 | No sound | Browsers only allow sound after you click the page once. Check the **Sound** button in the top bar. |
 | A message says "Waiting for the session to pick it up" | The session doesn't have the plugin loaded (settings hooks can't receive messages), or it has ended. Messages are picked up within a second by a session running the plugin. |
 | A message says "Queued as the next prompt" but nothing happens | The session is mid-turn; it reads your message as soon as that turn ends. |
+| `/office status` says the bridge is from an older Agent Office | Run `/office`: it restarts the bridge from the version you have now. A bridge from 0.3.1 or earlier can't be swapped; it stops when the session that started it ends. |
 | Plugin options say "not yet set" | The defaults (port 7337, start the bridge automatically) are fine; you only need to set them to change them. |
 
 ### What you're looking at
@@ -112,8 +119,13 @@ The box at the bottom sends it a message:
 
 - **To a session:** the message becomes its next prompt, marked as from Agent Office. If the session is mid-turn, it waits until that turn ends.
 - **To a subagent:** the message goes to that subagent directly. A finished one is resumed to answer, which uses tokens.
+- **Past sessions** show their transcript but no message box. Resume one in Claude Code to talk to it again.
 
-The message stays on the clipboard with its status until it shows up in the transcript, and the reply appears below it. Tool approvals still pop up in Claude Code itself: chat can't do anything your permission settings don't already allow. It needs the plugin; the settings-hooks fallback can't receive messages.
+Enter sends and Shift+Enter starts a new line.
+
+![The Transcript tab: a session's prompts, replies and tool calls, a message from the office, and the session's answer](docs/agent-office-chat.png)
+
+The message stays on the clipboard with its status until it shows up in the transcript, and the reply appears below it. Tool approvals still pop up in Claude Code itself: chat can't do anything your permission settings don't already allow. It needs the plugin; the settings-hooks fallback can't receive messages. In the demo, messages get a sample reply.
 
 **How it's kept safe.** The bridge only listens on `127.0.0.1`, but any web page you visit can send requests there, so:
 
@@ -142,7 +154,7 @@ Claude Code ──(mod hooks / settings hooks)──► bridge :7337 ──(SSE)
 ```
 
 - **`agent-office/`** is the Claude Code plugin (a mod), listed in this repository's marketplace (`.claude-plugin/marketplace.json`). It hooks `session.start`, `session.measure`, `session.compact`, `turn.step`, `turn.start`, `turn.complete`, `agent.spawn` and `tool.call`. Every tool call is attributed to the agent loop that made it (`agentId`), and every subagent to its parent (`parentAgentId`). Hooks run in a sandbox without Node, so events are queued in memory and flushed to the bridge every 250 ms with `$.http.fetch`. Context readings are coalesced so only the newest is sent, and a tool call never waits on the visualizer. On session start the mod also starts the bridge (`$.process.spawn`) if none is running, and `/office` waits for it before opening the page.
-- **`agent-office/server/`** is the bridge, plus `cli.mjs` (what `npx github:tharun-se95/ModsArena` runs) and `settings-hooks.mjs` (the settings-hooks installer). It uses only Node built-ins and has no dependencies. It accepts events on `POST /event` and keeps the last 8,000, plus the newest context reading per session and agent. It streams them to browsers over Server-Sent Events and replays the backlog when a browser connects. `GET /history` summarizes recent transcripts, cached by file modification time. `GET /transcript` follows one session's or subagent's transcript from a byte offset (`transcript.mjs`). `POST /chat` queues a message from the office, and the session's mod collects it from `GET /inbox` (`chat.mjs`, with the checks in `guard.mjs`). One bridge serves every session on the machine. It strips any credentials from remote URLs before showing them.
+- **`agent-office/server/`** is the bridge, plus `cli.mjs` (what `npx github:tharun-se95/ModsArena` runs) and `settings-hooks.mjs` (the settings-hooks installer). It uses only Node built-ins and has no dependencies. It accepts events on `POST /event` and keeps the last 8,000, plus the newest context reading per session and agent. It streams them to browsers over Server-Sent Events and replays the backlog when a browser connects. `GET /history` summarizes recent transcripts, cached by file modification time. `GET /transcript` follows one session's or subagent's transcript from a byte offset (`transcript.mjs`). `POST /chat` queues a message from the office, and the session's mod collects it from `GET /inbox` (`chat.mjs`, with the checks in `guard.mjs`). One bridge serves every session on the machine. `GET /healthz` reports its version; a bridge the mod started (`--managed`) steps down on `POST /shutdown` when a newer copy's bridge starts with `--replace`, so an update doesn't leave the old one serving the old page. It strips any credentials from remote URLs before showing them.
 - **`visualizer/`** is the page's source, in plain Three.js: `model.js` turns events into projects, sessions, agents and tools; `words.js` turns the same events into sentences; `table.js` lays out the office and animates the critters (`office.js` builds the rooms, desks, coffee corner and office shell; `character.js` builds each critter); and `panels.js` writes the columns around it. Colors come from CSS tokens on the page, so it follows your light or dark setting. It's built into `agent-office/server/public/app.js`, which is committed, so running it needs only Node; CI checks the committed file matches its source.
 
 ### Options
@@ -162,14 +174,14 @@ The bridge on its own: `node agent-office/server/server.mjs [--port 7337] [--his
 git clone https://github.com/tharun-se95/ModsArena && cd ModsArena
 claude --plugin-dir ./agent-office               # load the plugin from your checkout
 cd visualizer && npm install && npm run build    # rebuild the page (or: npm run watch)
-claude plugin validate .                         # the marketplace
-claude plugin validate agent-office              # the plugin, as the engine will load it
+claude plugin validate --strict .                # the marketplace
+claude plugin validate --strict agent-office     # the plugin, as the engine will load it
 claude plugin test agent-office                  # mod tests (hooks/register.test.ts)
-node --test agent-office/server/*.test.mjs       # bridge and CLI: schema, history, projects, settings hooks
+npm test                                         # bridge, CLI and page model: schema, history, transcripts, settings hooks
 node scripts/build-demo-site.mjs                 # the hosted demo, into site/
 ```
 
-CI (`.github/workflows/ci.yml`) runs all of these on every pull request. `.github/workflows/pages.yml` publishes the demo to GitHub Pages from `main`. To release: bump `version` in `agent-office/.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` (both places) and both `package.json` files, add a `CHANGELOG.md` section, merge, then either tag `main` (`git tag v0.2.1 && git push origin v0.2.1`) or run **Actions → Release → Run workflow** on `main`, which creates the tag itself. `.github/workflows/release.yml` checks the tag against every manifest (`node scripts/version.mjs check`) and publishes a GitHub Release with that section as its notes; `marketplace update` picks the new version up.
+CI (`.github/workflows/ci.yml`) runs all of these on every pull request. `.github/workflows/pages.yml` publishes the demo to GitHub Pages from `main`. To release: bump `version` in `agent-office/.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` (`metadata.version`; the plugin's entry has none, so `plugin.json` is the one Claude Code reads) and both `package.json` files, add a `CHANGELOG.md` section, merge, then either tag `main` (`git tag v0.2.1 && git push origin v0.2.1`) or run **Actions → Release → Run workflow** on `main`, which creates the tag itself. `.github/workflows/release.yml` checks the tag against every manifest (`node scripts/version.mjs check`) and publishes a GitHub Release with that section as its notes; `marketplace update` picks the new version up.
 
 The bridge's event schema is documented at the top of `agent-office/server/normalize.mjs`. Any other producer, such as an OpenTelemetry receiver, can `POST` the same shapes.
 

@@ -100,7 +100,8 @@ async function poll() {
       v.entries = [...v.entries, ...entries].slice(-KEEP)
       v.next = next
       // A message we sent shows up in the transcript: drop its placeholder.
-      for (const e of entries) if (e.kind === 'chat') v.pending = v.pending.filter(p => p.text !== e.text)
+      // Matched loosely, in case Claude Code frames it in words of its own.
+      for (const e of entries) if (e.kind === 'chat') v.pending = v.pending.filter(p => p.text !== e.text && !e.text.includes(p.text))
       v.empty = 'Nothing said yet.'
     }
   } catch {

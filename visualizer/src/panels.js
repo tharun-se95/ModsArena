@@ -31,6 +31,8 @@ const STATE_WORDS = {
 }
 const pill = state => `<span class="pill ${state}">${STATE_WORDS[state]}</span>`
 
+const asked = p => `${p.from ? `<span class="muted from">${p.from === 'agent-office' ? 'From the office' : `From ${escapeHtml(p.from)}`}</span>` : ''}${escapeHtml(p.text)}`
+
 // ---------------------------------------------------------------------------
 // The order threads are listed in, shared by the directory and j/k.
 
@@ -379,7 +381,7 @@ function sessionDetails(n) {
     ${live ? breakdown(n) + limits(n) : ''}
     ${files.length ? `<h3>Files it has worked on</h3>${files.map(fileLine).join('')}` : ''}
     ${act?.actions.length ? `<h3>Recently</h3>${act.actions.slice(0, 8).map(x => line(escapeHtml(x.text), ago(x.t), x.ok ? '' : 'bad')).join('')}` : ''}
-    ${n.prompts?.length ? `<h3>What you asked</h3>${[...n.prompts].reverse().slice(0, 6).map(p => line(escapeHtml(p.text), ago(p.t))).join('')}` : ''}`
+    ${n.prompts?.length ? `<h3>What you asked</h3>${[...n.prompts].reverse().slice(0, 6).map(p => line(asked(p), ago(p.t))).join('')}` : ''}`
 }
 
 function agentDetails(n) {
