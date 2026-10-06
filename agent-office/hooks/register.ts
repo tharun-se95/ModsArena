@@ -64,8 +64,10 @@ export function projectOf(cwd: string, repo: { root: string; name: string | null
   return { id: root, name: repo?.name ?? base, remote: repo?.remote ?? null }
 }
 
+// Stamped with the session when sent, not now: the engine can report (a
+// context reading, say) before session.start has told us whose it is.
 function emit(ev: ClusterEvent) {
-  const stamped = { t: Date.now(), session: link.session, ...ev }
+  const stamped = { t: Date.now(), ...ev }
   if (GAUGES.has(ev.kind)) {
     const i = link.queue.findIndex(q => q.kind === ev.kind && q.agent === ev.agent)
     if (i >= 0) {
@@ -124,9 +126,9 @@ function startBridge($: EngineInterface) {
 }
 
 async function flush($: EngineInterface) {
-  if (link.isFlushing || link.queue.length === 0) return
+  if (link.isFlushing || link.queue.length === 0 || link.session === 'unknown') return
   link.isFlushing = true
-  const batch = link.queue
+  const batch = link.queue.map(ev => ({ session: link.session, ...ev }))
   link.queue = []
   try {
     const res = await $.http.fetch(`${bridgeUrl()}/event`, {

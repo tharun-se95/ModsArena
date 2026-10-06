@@ -6,6 +6,23 @@ git tag (`v0.2.1`) with a GitHub Release, and the same version is in
 and both `package.json` files. `claude plugin marketplace update modsarena`
 picks up a new one.
 
+## Unreleased
+
+- **Chat reads cleanly.** A message you send from the office shows as you
+  wrote it, without the framing Claude Code adds, and its "Queued" or
+  "Sent" placeholder goes once it lands. Messages to a subagent now show
+  in its transcript too.
+- **Finished subagents can be picked.** A session's clipboard lists the
+  subagents that have finished, so you can open one's transcript and ask
+  it something.
+- **No phantom helpers.** An agent seen only through its tool calls, like
+  Claude Code's own helpers, no longer stays "helping" forever.
+- **No "unknown" session.** A context reading the engine makes before the
+  session has started no longer shows up as a session of its own.
+- **What you asked is what you asked.** A background task reporting in no
+  longer shows up as a prompt, and a session the page first read from
+  history doesn't list its first prompt twice.
+
 ## 0.3.1
 
 - **Agent Office has a logo.** A floor plan of the office, a room per

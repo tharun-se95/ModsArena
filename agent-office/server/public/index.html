@@ -174,6 +174,10 @@
   .line.bad { color: var(--crit); }
   .muted { color: var(--muted); }
   .line .muted { margin-left: 6px; }
+  .line .muted.from { margin: 0 6px 0 0; }
+  .line.pick { width: calc(100% + 12px); margin: 0 -6px; padding: 3px 6px; border-radius: 8px; flex-wrap: nowrap; white-space: nowrap; transition: background 0.15s; }
+  .line.pick .muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .line.pick:hover { background: color-mix(in srgb, var(--line) 55%, transparent); }
 
   [hidden] { display: none !important; }
   .status.down i { background: var(--crit); box-shadow: 0 0 0 4px color-mix(in srgb, var(--crit) 20%, transparent); }
