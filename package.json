@@ -1,6 +1,6 @@
 {
   "name": "agent-office",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "A live office of your Claude Code sessions and subagents: the bridge, the page, and a settings-hooks installer.",
   "type": "module",
   "bin": {
