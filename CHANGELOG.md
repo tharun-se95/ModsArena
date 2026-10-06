@@ -7,7 +7,7 @@ git tag (`v0.2.1`) with a GitHub Release, and the same version is in
 modsarena (`/plugin` → Marketplaces), a new one arrives on its own;
 otherwise `claude plugin update agent-office@modsarena` fetches it.
 
-## Unreleased
+## 0.4.0
 
 - **Updates that take.** After an update, the next session swaps the
   running bridge for the new one (or `/office` does, if the office is
@@ -17,16 +17,6 @@ otherwise `claude plugin update agent-office@modsarena` fetches it.
   auto-update, which Claude Code leaves off for this marketplace.
 - The plugin's version lives in `plugin.json` only, not in its marketplace
   entry, where Claude Code would ignore it.
-
-## Unreleased
-
-- **An `office` skill.** `/office` only exists once the plugin's hooks run in
-  a session, so the Claude app's menu didn't list it. The `agent-office:office`
-  skill is always listed and starts the bridge and opens the office the same
-  way.
-
-## Unreleased
-
 - **Chat reads cleanly.** A message you send from the office shows as you
   wrote it, without the framing Claude Code adds, and its "Queued" or
   "Sent" placeholder goes once it lands. Messages to a subagent now show
@@ -41,6 +31,13 @@ otherwise `claude plugin update agent-office@modsarena` fetches it.
 - **What you asked is what you asked.** A background task reporting in no
   longer shows up as a prompt, and a session the page first read from
   history doesn't list its first prompt twice.
+- **Smooth, steady camera.** Moving and zooming around the office glides
+  instead of jumping, the view stays at one fixed angle, and walls and
+  trim no longer flicker as you move.
+- **An `office` skill.** `/office` only exists once the plugin's hooks run in
+  a session, so the Claude app's menu didn't list it. The `agent-office:office`
+  skill is always listed and starts the bridge and opens the office the same
+  way.
 
 ## 0.3.1
 
