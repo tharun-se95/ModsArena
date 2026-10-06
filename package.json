@@ -11,7 +11,8 @@
     "agent-office/fallback",
     "agent-office/.claude-plugin",
     "agent-office/hooks",
-    "agent-office/icon.png"
+    "agent-office/icon.png",
+    "agent-office/skills"
   ],
   "engines": {
     "node": ">=18"
