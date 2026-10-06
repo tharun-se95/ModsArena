@@ -123,6 +123,8 @@ export function makeCharacter({ build = 'general-purpose', bodyColor, inkColor, 
       if (pick) o.userData.pick = pick
     }
   })
+  // The eyes sit on the body's face, so their shadow would never show.
+  for (const e of eyes) e.castShadow = false
 
   return {
     root, rig, top, eyes, arms, legs, bulb, bodyMat, inkMat, accentMat, height,
