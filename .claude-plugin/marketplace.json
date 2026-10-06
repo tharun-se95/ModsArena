@@ -3,14 +3,14 @@
   "owner": { "name": "tharun-se95", "url": "https://github.com/tharun-se95" },
   "metadata": {
     "description": "Claude Code mods and the tools around them.",
-    "version": "0.3.0"
+    "version": "0.3.1"
   },
   "plugins": [
     {
       "name": "agent-office",
       "source": "./agent-office",
       "description": "A live office of your Claude Code sessions: a room per project, a critter per session, its subagents beside it, every tool call and context window as it happens. Type /office to open it.",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "category": "monitoring",
       "keywords": ["visualizer", "subagents", "monitoring", "context"]
     }
