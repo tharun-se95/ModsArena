@@ -45,6 +45,8 @@ const BREAK_S = 10 // how long a finished helper lingers over coffee
 const WAVE_S = 1.2
 const MEET = 38 // critters closer than this on the move wave at each other
 const PERSONAL = 21 // standing helpers keep at least this far apart
+const DAMPING = 0.08 // of a drag's spin let go each frame, at 60 frames a second
+const ZOOM_EASE = 1e-5 // of a wheel zoom still to go after a second
 // Where helpers stand behind their session's desk: a row of five, a
 // staggered row of four behind it, then either side of the session. All
 // within the session's own patch of floor, so neighbours never mingle.
@@ -103,6 +105,8 @@ let mountedAt = 0
 // leave free. Pixels from each edge of the stage.
 let insets = { left: 0, right: 0, top: 0, bottom: 0 }
 let camGoal = null // where the camera is gliding to, if anywhere
+let zoomTo = null // the distance a wheel zoom is easing to, if any
+let slowFrames = 0
 let last = 0
 let tick = 0
 const v = new THREE.Vector3()
@@ -116,6 +120,9 @@ export function mount(el, { pick }) {
   renderer.setPixelRatio(Math.min(2, devicePixelRatio))
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
+  // The light never moves, so the shadows only change as the critters do;
+  // animate() redraws them every other frame instead of every frame.
+  renderer.shadowMap.autoUpdate = false
   renderer.outputColorSpace = THREE.SRGBColorSpace
   stage.append(renderer.domElement)
   labels = new CSS2DRenderer()
@@ -130,14 +137,21 @@ export function mount(el, { pick }) {
   camera = new THREE.PerspectiveCamera(32, 1, 1, 6000)
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = true
-  controls.dampingFactor = 0.08
-  controls.minPolarAngle = 0.35
-  controls.maxPolarAngle = 1.15
+  controls.dampingFactor = DAMPING
+  // The view angle stays put: dragging slides across the office instead of
+  // turning it, and keepInOffice() stops it at the walls.
+  controls.enableRotate = false
+  controls.screenSpacePanning = false
+  controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN }
+  controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.PAN }
   controls.minDistance = 120
   controls.maxDistance = 4000
-  controls.enablePan = false
+  // The wheel eases the camera in and out (see zoom()); the controls would
+  // jump a step per wheel tick.
+  controls.enableZoom = false
   // Taking the camera yourself stops any glide in progress.
   controls.addEventListener('start', () => { camGoal = null })
+  renderer.domElement.addEventListener('wheel', wheel, { passive: false })
 
   sky = new THREE.HemisphereLight('#ffffff', '#d8cfc2', 1.6)
   scene.add(sky)
@@ -147,6 +161,10 @@ export function mount(el, { pick }) {
   sun.shadow.mapSize.set(2048, 2048)
   sun.shadow.radius = 6
   sun.shadow.bias = -0.0005
+  // A shadow-map texel is close to a unit across a big office; nudging the
+  // lookup along each surface's normal keeps walls from shading themselves
+  // in flickering stripes.
+  sun.shadow.normalBias = 0.6
   scene.add(sun, sun.target)
 
   floor = new THREE.Mesh(new THREE.PlaneGeometry(8000, 8000), new THREE.MeshBasicMaterial())
@@ -502,6 +520,8 @@ function frame(jump = false) {
     dist *= Math.max(0.6, reach)
   }
   const goal = { pos: new THREE.Vector3(c.x, Math.sin(TILT) * dist, c.z + Math.cos(TILT) * dist), target }
+  // Zoomed all the way out shows the whole office and no more.
+  if (!t) controls.maxDistance = dist
   if (jump || !framedOnce) {
     framedOnce = true
     camera.position.copy(goal.pos)
@@ -512,6 +532,7 @@ function frame(jump = false) {
     camera.quaternion.copy(keep.quat)
     camGoal = goal
   }
+  zoomTo = null
   controls.update()
   Object.assign(sun.shadow.camera, { left: -size.W / 2 - 80, right: size.W / 2 + 80, top: size.D / 2 + 100, bottom: -size.D / 2 - 100, near: 10, far: 900 })
   sun.shadow.camera.updateProjectionMatrix()
@@ -1032,11 +1053,76 @@ export function animate() {
     controls.target.lerp(camGoal.target, k)
     if (camera.position.distanceTo(camGoal.pos) < 0.5) camGoal = null
   }
+  zoom(dt)
+  // A drag's spin slows by the same amount each second, however fast the
+  // frames come.
+  controls.dampingFactor = 1 - Math.pow(1 - DAMPING, dt * 60)
   controls.update()
+  if (!camGoal) keepInOffice()
+  fitDepth()
+  if (tick % 2 === 0) renderer.shadowMap.needsUpdate = true
+  sharpness(now, dt)
   renderer.render(scene, camera)
   labels.render(scene, camera)
   placeBubble(tick % 10 === 1)
   if ((tick++ % 6) === 0) declutter()
+}
+
+// The wheel (or a trackpad pinch) sets where to zoom to, by as much as the
+// controls would have, and each frame eases the camera part of the way.
+function wheel(e) {
+  e.preventDefault()
+  camGoal = null
+  let dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1)
+  if (e.ctrlKey) dy *= 10
+  const from = zoomTo ?? camera.position.distanceTo(controls.target)
+  zoomTo = THREE.MathUtils.clamp(from * Math.pow(0.95, -dy * 0.01), controls.minDistance, controls.maxDistance)
+}
+
+function zoom(dt) {
+  if (zoomTo === null) return
+  v.subVectors(camera.position, controls.target)
+  const d = v.length()
+  const next = Math.abs(zoomTo / d - 1) < 0.001 ? zoomTo : d * Math.pow(zoomTo / d, 1 - Math.pow(ZOOM_EASE, dt))
+  camera.position.copy(controls.target).add(v.setLength(next))
+  if (next === zoomTo) zoomTo = null
+}
+
+// The depth buffer's precision is spread from the near plane out, so a near
+// plane at 1 left too little of it this far away: windows and trim close in
+// front of a wall flickered through it. Nothing ever comes nearer the camera
+// than a tenth of its distance to the floor, so the near plane sits there.
+function fitDepth() {
+  const d = camera.position.distanceTo(controls.target)
+  const near = Math.max(1, d * 0.1)
+  if (Math.abs(near - camera.near) < near * 0.01) return
+  camera.near = near
+  camera.far = d * 3 + 1500
+  camera.updateProjectionMatrix()
+}
+
+// Zoomed all the way out, the office fills the view and there is nowhere
+// to slide; the closer in, the further you can go, out to its walls.
+function keepInOffice() {
+  const room = 1 - camera.position.distanceTo(controls.target) / controls.maxDistance
+  const x = Math.max(0, room) * size.W / 2, z = Math.max(0, room) * size.D / 2
+  const dx = THREE.MathUtils.clamp(controls.target.x, -x, x) - controls.target.x
+  const dz = THREE.MathUtils.clamp(controls.target.z, -z, z) - controls.target.z
+  if (!dx && !dz) return
+  controls.target.x += dx
+  controls.target.z += dz
+  camera.position.x += dx
+  camera.position.z += dz
+}
+
+// A big, sharp screen can ask more of the GPU than it draws smoothly. When
+// frames keep running long, draw at a lower resolution, a step at a time.
+function sharpness(now, dt) {
+  if (now - mountedAt < 3 || dt >= 0.1) return
+  slowFrames = dt > 1 / 40 ? slowFrames + 1 : Math.max(0, slowFrames - 1)
+  if (slowFrames < 90 || renderer.getPixelRatio() <= 1) return
+  renderer.setPixelRatio(Math.max(1, renderer.getPixelRatio() - 0.5))
+  slowFrames = 0
 }
 
 // Room signs come first. A session label under a sign steps aside, and
@@ -1147,4 +1233,4 @@ function bindPointer() {
   renderer.domElement.addEventListener('pointerleave', () => { hoverPick = null; hovered = null })
 }
 // ?debug reaches these through window.cluster.table.debug.
-export const debug = { sessionViews, agentViews, rooms, get camera() { return camera }, get stage() { return stage }, get controls() { return controls }, get coffee() { return coffee }, greeted }
+export const debug = { get renderer() { return renderer }, get size() { return size }, sessionViews, agentViews, rooms, get camera() { return camera }, get stage() { return stage }, get controls() { return controls }, get coffee() { return coffee }, greeted }

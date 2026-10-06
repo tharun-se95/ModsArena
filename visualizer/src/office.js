@@ -7,6 +7,7 @@
 
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
 export const FLOOR_TOP = 2.4
 export const WALL_H = 46
@@ -99,6 +100,48 @@ function shadowed(obj) {
   return obj
 }
 
+// Every mesh costs a draw call each frame, and another for the shadow, so
+// a full office of books, bars and table legs adds up to thousands. Once a
+// piece is built, its still parts are merged into one mesh per look; `keep`
+// holds the parts that move or get repainted, which stay as they are.
+const SHARED = new Set([glassMat, lampMat])
+const look = (o, m) => `${SHARED.has(m) || m.map ? m.uuid : `${m.type}|${m.color?.getHex()}|${m.emissive?.getHex()}|${m.emissiveIntensity}|${m.roughness}|${m.metalness}|${m.side}`}|${o.castShadow}|${o.receiveShadow}`
+
+export function bake(root, keep = []) {
+  root.updateMatrixWorld(true)
+  const inverse = root.matrixWorld.clone().invert()
+  const kept = new Set()
+  for (const k of keep) k.traverse(o => kept.add(o))
+  const looks = new Map()
+  root.traverse(o => {
+    if (!o.isMesh || kept.has(o) || o === root || o.children.length || Array.isArray(o.material) || o.material.transparent) return
+    if (o.matrixWorld.determinant() < 0) return
+    const key = look(o, o.material)
+    if (!looks.has(key)) looks.set(key, [])
+    looks.get(key).push(o)
+  })
+  for (const meshes of looks.values()) {
+    if (meshes.length < 2) continue
+    const geos = meshes.map(o => {
+      const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone()
+      g.clearGroups()
+      return g.applyMatrix4(inverse.clone().multiply(o.matrixWorld))
+    })
+    const names = Object.keys(geos[0].attributes).filter(n => geos.every(g => g.attributes[n]))
+    for (const g of geos) for (const n of Object.keys(g.attributes)) if (!names.includes(n)) g.deleteAttribute(n)
+    const merged = mergeGeometries(geos)
+    for (const g of geos) g.dispose()
+    if (!merged) continue
+    const first = meshes[0]
+    const one = new THREE.Mesh(merged, first.material)
+    one.castShadow = first.castShadow
+    one.receiveShadow = first.receiveShadow
+    for (const o of meshes) o.removeFromParent()
+    root.add(one)
+  }
+  return root
+}
+
 // ---------------------------------------------------------------------------
 // Props, each standing on the floor at y = 0 of its own group.
 
@@ -152,7 +195,7 @@ function plant(colors, rand) {
     blob.scale.y = 1.3
     g.add(blob)
   }
-  return shadowed(g)
+  return bake(shadowed(g))
 }
 
 function lamp(colors) {
@@ -238,7 +281,9 @@ export function buildRoom({ w, d, name, colors }) {
     wall.castShadow = wall.receiveShadow = true
     const cap = new THREE.Mesh(kind === 'back' ? rounded(len + 1, 1.6, WALL_T + 1.2, 0.4) : rounded(WALL_T + 1.2, 1.6, len + 1, 0.4), trimMat)
     cap.position.set(x, WALL_H + 0.6, z)
-    const skirting = new THREE.Mesh(kind === 'back' ? rounded(len, 2.4, WALL_T + 0.8, 0.3) : rounded(WALL_T + 0.8, 2.4, len, 0.3), trimMat)
+    // A touch longer than its wall, so their ends never share a plane and
+    // flicker where the room is cut open at the front.
+    const skirting = new THREE.Mesh(kind === 'back' ? rounded(len + 0.6, 2.4, WALL_T + 0.8, 0.3) : rounded(WALL_T + 0.8, 2.4, len + 0.6, 0.3), trimMat)
     skirting.position.set(x, FLOOR_TOP + 1.2, z)
     room.add(wall, cap, skirting)
   }
@@ -260,7 +305,9 @@ export function buildRoom({ w, d, name, colors }) {
   place(lamp(colors), w / 2 - 16, FLOOR_TOP, d / 2 - 18, PROP * 0.9)
   if (w > 380 && rand() < 0.8) place(couch(colors, rand), w * 0.27, FLOOR_TOP, back + 18)
 
-  return { group: room, floor, wallMat, plants: plantsIn(room) }
+  const plants = plantsIn(room)
+  bake(room, plants)
+  return { group: room, floor, wallMat, plants }
 }
 
 const plantsIn = group => {
@@ -376,6 +423,7 @@ export function desk(colors, tint) {
       p.material.opacity = on ? 0.5 * (1 - k) * Math.min(1, k * 5) : 0
     }
   }
+  bake(g, [screen, mug, ...wisps])
   return { group: g, draw, steam, mug }
 }
 
@@ -491,6 +539,7 @@ export function coffeeCorner(colors) {
     ...[-62, -30, 2].map(x => new THREE.Vector3(x, 1.4, back + 34)),
   ]
   const tableAt = new THREE.Vector3(-10, 1.4, 38)
+  bake(g, puffs)
   return { group: g, animate, spots, tableAt }
 }
 
@@ -524,11 +573,12 @@ export function officeShell({ W, D, colors }) {
   for (let i = 0; i < panes; i++) {
     const x = -W / 2 + (W / panes) * (i + 0.5)
     const pane = new THREE.Mesh(new THREE.PlaneGeometry(56, 36), glass)
-    pane.position.set(x, 34, -D / 2 + 0.2)
+    // Clear of the wall, so the two never fight over which is in front.
+    pane.position.set(x, 34, -D / 2 + 0.8)
     g.add(pane)
     for (const [fx, fy, fw, fh] of [[0, 52.5, 60, 2.4], [0, 15.5, 62, 3], [-29, 34, 2.4, 38], [29, 34, 2.4, 38], [0, 34, 1.6, 36]]) {
       const bar = new THREE.Mesh(rounded(fw, fh, 2, 0.4), trimMat)
-      bar.position.set(x + fx, fy, -D / 2 + 1)
+      bar.position.set(x + fx, fy, -D / 2 + 1.4)
       g.add(bar)
     }
   }
@@ -579,5 +629,7 @@ export function officeShell({ W, D, colors }) {
 
   shadowed(g)
   carpet.castShadow = false
-  return { group: g, plants: plantsIn(g), clock: { hour, minute, second } }
+  const plants = plantsIn(g)
+  bake(g, [...plants, hour, minute, second])
+  return { group: g, plants, clock: { hour, minute, second } }
 }
