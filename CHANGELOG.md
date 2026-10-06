@@ -6,7 +6,7 @@ git tag (`v0.2.1`) with a GitHub Release, and the same version is in
 and both `package.json` files. `claude plugin marketplace update modsarena`
 picks up a new one.
 
-## Unreleased
+## 0.3.0
 
 - **Talk to your agents.** A critter's clipboard has a Transcript tab: its
   conversation, live, read from the transcript Claude Code keeps (past
