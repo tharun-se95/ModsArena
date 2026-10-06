@@ -17,65 +17,250 @@ const WALL_T = 3
 
 const rounded = (w, h, d, r = 0.8) => new RoundedBoxGeometry(w, h, d, 2, Math.min(r, w / 2, h / 2, d / 2))
 
-// Wooden planks, drawn once and tinted by each material's color.
-let planks = null
-function plankTexture() {
-  if (planks) return planks
-  const c = document.createElement('canvas')
-  c.width = c.height = 256
-  const g = c.getContext('2d')
-  g.fillStyle = '#ffffff'
-  g.fillRect(0, 0, 256, 256)
-  for (let row = 0; row < 8; row++) {
-    const y = row * 32
-    g.fillStyle = `rgba(0,0,0,${0.03 + (row % 3) * 0.015})`
-    g.fillRect(0, y, 256, 32)
-    g.fillStyle = 'rgba(0,0,0,0.12)'
-    g.fillRect(0, y, 256, 1.5)
-    const off = (row * 97) % 256
-    g.fillRect(off, y, 1.5, 32)
-    g.fillRect((off + 128) % 256, y, 1.5, 32)
-  }
-  planks = new THREE.CanvasTexture(c)
-  planks.wrapS = planks.wrapT = THREE.RepeatWrapping
-  planks.colorSpace = THREE.SRGBColorSpace
-  planks.anisotropy = 4
-  return planks
-}
+// Surfaces are drawn once on canvases, in white and grays that each
+// material's color tints. Each has a bump map from the same layout, so
+// seams, grout and grain catch the light. Drawn large, and sampled with
+// anisotropic filtering so the floor stays crisp at a glancing angle.
+const ANISO = 16 // three clamps it to what the GPU allows
 
-// Carpet tiles (soft squares) and kitchen tiles (a checkerboard).
-const patterns = {}
-function tileTexture(kind) {
-  if (patterns[kind]) return patterns[kind]
+function canvasTexture(size, draw, color = true) {
   const c = document.createElement('canvas')
-  c.width = c.height = 128
-  const g = c.getContext('2d')
-  g.fillStyle = '#ffffff'
-  g.fillRect(0, 0, 128, 128)
-  if (kind === 'checker') {
-    g.fillStyle = 'rgba(0,0,0,0.13)'
-    g.fillRect(0, 0, 64, 64)
-    g.fillRect(64, 64, 64, 64)
-  } else {
-    g.fillStyle = 'rgba(0,0,0,0.04)'
-    g.fillRect(0, 0, 64, 64)
-    g.fillRect(64, 64, 64, 64)
-    g.fillStyle = 'rgba(0,0,0,0.08)'
-    for (const v of [0, 64]) { g.fillRect(v, 0, 1, 128); g.fillRect(0, v, 128, 1) }
-  }
+  c.width = c.height = size
+  draw(c.getContext('2d'), size)
   const t = new THREE.CanvasTexture(c)
   t.wrapS = t.wrapT = THREE.RepeatWrapping
-  t.colorSpace = THREE.SRGBColorSpace
-  t.anisotropy = 4
-  return (patterns[kind] = t)
+  t.colorSpace = color ? THREE.SRGBColorSpace : THREE.NoColorSpace
+  t.anisotropy = ANISO
+  return t
+}
+
+const gray = (v, a = 1) => `rgba(${v},${v},${v},${a})`
+
+// Fine speckle, so flat color reads as a material up close.
+function speckle(g, size, amount, rand) {
+  const img = g.getImageData(0, 0, size, size)
+  for (let i = 0; i < img.data.length; i += 4) {
+    const n = (rand() - 0.5) * amount
+    img.data[i] += n
+    img.data[i + 1] += n
+    img.data[i + 2] += n
+  }
+  g.putImageData(img, 0, 0)
+}
+
+// Long grain lines with a slow wobble, drawn twice across the seam so the
+// texture tiles.
+function grain(g, x, y, w, h, rand, strength) {
+  const lines = Math.round(h / 2.5)
+  for (let i = 0; i < lines; i++) {
+    const ly = y + rand() * h
+    const amp = 0.6 + rand() * 2.2
+    const freq = 0.004 + rand() * 0.012
+    const phase = rand() * 10
+    g.strokeStyle = gray(rand() < 0.5 ? 0 : 255, strength * (0.4 + rand()))
+    g.lineWidth = 0.6 + rand() * 1.4
+    g.beginPath()
+    for (let px = 0; px <= w; px += 6) {
+      const py = ly + Math.sin(px * freq + phase) * amp
+      if (px === 0) g.moveTo(x + px, py)
+      else g.lineTo(x + px, py)
+    }
+    g.stroke()
+  }
+}
+
+// Planks in staggered rows, each a slightly different tone, with grain,
+// the odd knot, and dark seams between them.
+const PLANK_ROWS = 8
+function plankLayout(size) {
+  const rand = seeded('planks')
+  const rowH = size / PLANK_ROWS
+  const out = []
+  for (let r = 0; r < PLANK_ROWS; r++) {
+    let x = rand() * size
+    const end = x + size
+    while (x < end) {
+      const len = Math.min(end - x, size * (0.3 + rand() * 0.4))
+      out.push({ x, y: r * rowH, w: len, h: rowH, tone: 0.8 + rand() * 0.2, knot: rand() < 0.25 ? [rand(), rand()] : null, seed: rand() })
+      x += len
+    }
+  }
+  return out
+}
+
+function drawPlanks(g, size, bump) {
+  const planks = plankLayout(size)
+  g.fillStyle = gray(bump ? 128 : 255)
+  g.fillRect(0, 0, size, size)
+  for (const p of planks) {
+    for (const dx of [0, -size]) {
+      const x = p.x + dx
+      if (x + p.w < 0 || x > size) continue
+      const rand = seeded(p.seed)
+      g.save()
+      g.beginPath()
+      g.rect(x, p.y, p.w, p.h)
+      g.clip()
+      if (!bump) {
+        g.fillStyle = gray(Math.round(255 * p.tone))
+        g.fillRect(x, p.y, p.w, p.h)
+      }
+      grain(g, x, p.y, p.w, p.h, rand, bump ? 0.2 : 0.13)
+      if (p.knot) {
+        const kx = x + p.knot[0] * p.w, ky = p.y + 0.2 * p.h + p.knot[1] * 0.6 * p.h
+        for (let i = 4; i > 0; i--) {
+          g.strokeStyle = gray(0, bump ? 0.18 : 0.08)
+          g.lineWidth = 1.2
+          g.beginPath()
+          g.ellipse(kx, ky, i * 5, i * 2, 0, 0, Math.PI * 2)
+          g.stroke()
+        }
+      }
+      g.restore()
+      // The seam at the plank's end, and along the top of the row.
+      g.fillStyle = gray(0, bump ? 0.9 : 0.28)
+      g.fillRect(x - 1, p.y, 2, p.h)
+      g.fillRect(x, p.y, p.w, 2)
+      if (!bump) {
+        g.fillStyle = gray(255, 0.25)
+        g.fillRect(x, p.y + 2, p.w, 1)
+      }
+    }
+  }
+  if (!bump) speckle(g, size, 6, seeded('planks-speckle'))
+}
+
+// Carpet tiles: a soft fiber noise, alternate tiles a shade apart, and
+// fine seams.
+function drawCarpet(g, size, bump) {
+  const half = size / 2
+  g.fillStyle = gray(bump ? 128 : 255)
+  g.fillRect(0, 0, size, size)
+  if (!bump) {
+    g.fillStyle = gray(0, 0.035)
+    g.fillRect(0, 0, half, half)
+    g.fillRect(half, half, half, half)
+  }
+  speckle(g, size, bump ? 70 : 16, seeded('carpet'))
+  g.fillStyle = gray(0, bump ? 0.7 : 0.1)
+  for (const v of [0, half]) { g.fillRect(v, 0, 2, size); g.fillRect(0, v, size, 2) }
+}
+
+// Kitchen tiles: a glazed checkerboard with grout lines.
+function drawChecker(g, size, bump) {
+  const half = size / 2
+  g.fillStyle = gray(bump ? 160 : 255)
+  g.fillRect(0, 0, size, size)
+  if (!bump) {
+    g.fillStyle = gray(0, 0.14)
+    g.fillRect(0, 0, half, half)
+    g.fillRect(half, half, half, half)
+    speckle(g, size, 5, seeded('checker'))
+  }
+  g.fillStyle = bump ? gray(0) : gray(120, 0.55)
+  for (const v of [0, half]) { g.fillRect(v - 3, 0, 6, size); g.fillRect(0, v - 3, size, 6) }
+}
+
+// Grain alone, for furniture.
+function drawWood(g, size, bump) {
+  g.fillStyle = gray(bump ? 128 : 255)
+  g.fillRect(0, 0, size, size)
+  grain(g, 0, 0, size, size, seeded('wood'), bump ? 0.16 : 0.1)
+  if (!bump) speckle(g, size, 5, seeded('wood-speckle'))
+}
+
+// A soft weave for upholstery.
+function drawFabric(g, size, bump) {
+  g.fillStyle = gray(bump ? 128 : 255)
+  g.fillRect(0, 0, size, size)
+  for (let i = 0; i < size; i += 4) {
+    g.fillStyle = gray(0, bump ? 0.25 : 0.035)
+    g.fillRect(i, 0, 1, size)
+    g.fillRect(0, i, size, 1)
+  }
+  speckle(g, size, bump ? 40 : 10, seeded('fabric'))
+}
+
+const SURFACES = {
+  planks: { draw: drawPlanks, size: 1024, unit: 72, roughness: 0.5, bump: 2.5 },
+  carpet: { draw: drawCarpet, size: 512, unit: 70, roughness: 0.95, bump: 0.6 },
+  checker: { draw: drawChecker, size: 512, unit: 40, roughness: 0.3, bump: 1.5 },
+  wood: { draw: drawWood, size: 512, unit: 0, roughness: 0.5, bump: 0.5 },
+  fabric: { draw: drawFabric, size: 256, unit: 0, roughness: 0.9, bump: 0.6 },
+}
+const drawn = {}
+function surface(kind) {
+  if (!drawn[kind]) {
+    const { draw, size } = SURFACES[kind]
+    drawn[kind] = { map: canvasTexture(size, (g, n) => draw(g, n, false)), bump: canvasTexture(size, (g, n) => draw(g, n, true), false) }
+  }
+  return drawn[kind]
 }
 
 export function floorMaterial(color, w, d, pattern = 'planks') {
-  const map = (pattern === 'planks' ? plankTexture() : tileTexture(pattern)).clone()
-  map.needsUpdate = true
-  const unit = pattern === 'planks' ? 90 : pattern === 'checker' ? 40 : 70
-  map.repeat.set(w / unit, d / unit)
-  return new THREE.MeshStandardMaterial({ color, map, roughness: 0.8 })
+  const { unit, roughness, bump } = SURFACES[pattern]
+  const t = surface(pattern)
+  const map = t.map.clone()
+  const bumpMap = t.bump.clone()
+  for (const m of [map, bumpMap]) {
+    m.repeat.set(w / unit, d / unit)
+    m.needsUpdate = true
+  }
+  return new THREE.MeshStandardMaterial({ color, map, bumpMap, bumpScale: bump, roughness })
+}
+
+// Wood and upholstery share one texture each, so pieces in the same color
+// still merge in bake().
+function surfaceMat(kind, color, extra = {}) {
+  const { roughness, bump } = SURFACES[kind]
+  const t = surface(kind)
+  return new THREE.MeshStandardMaterial({ color, map: t.map, bumpMap: t.bump, bumpScale: bump, roughness, ...extra })
+}
+const woodMat = color => surfaceMat('wood', color)
+const fabricMat = color => surfaceMat('fabric', color)
+
+// Soft shade on the floor where it meets a wall, the way a real corner
+// gathers shadow. Each strip is a flat gradient, dark against the wall and
+// clear a little way out, in one mesh per piece so it costs one draw.
+let fade = null
+function fadeTexture() {
+  if (fade) return fade
+  const c = document.createElement('canvas')
+  c.width = 4
+  c.height = 64
+  const g = c.getContext('2d')
+  const grad = g.createLinearGradient(0, 0, 0, 64)
+  grad.addColorStop(0, '#fff')
+  grad.addColorStop(0.35, '#6a6a6a')
+  grad.addColorStop(1, '#000')
+  g.fillStyle = grad
+  g.fillRect(0, 0, 4, 64)
+  fade = new THREE.CanvasTexture(c)
+  return fade
+}
+
+// `strips` are [length, width, x, z, toward], `toward` the side the wall is
+// on: 'back' (-z), 'front' (+z), 'left' (-x) or 'right' (+x).
+const TOWARD = { back: 0, left: Math.PI / 2, right: -Math.PI / 2, front: Math.PI }
+function cornerShade(strips, y, opacity) {
+  const geos = strips.map(([len, width, x, z, toward]) =>
+    new THREE.PlaneGeometry(len, width).rotateX(-Math.PI / 2).rotateY(TOWARD[toward]).translate(x, y, z))
+  const m = new THREE.Mesh(mergeGeometries(geos), new THREE.MeshBasicMaterial({ color: '#000', alphaMap: fadeTexture(), transparent: true, opacity, depthWrite: false }))
+  for (const g of geos) g.dispose()
+  return m
+}
+
+// Walls shade a little darker toward the floor, the way a corner gathers
+// shadow, so they don't read as flat cards.
+function shadeUp(geo, height) {
+  const pos = geo.attributes.position
+  const colors = new Float32Array(pos.count * 3)
+  for (let i = 0; i < pos.count; i++) {
+    const k = THREE.MathUtils.smoothstep(pos.getY(i) / height + 0.5, 0, 0.55)
+    colors.fill(0.74 + 0.26 * k, i * 3, i * 3 + 3)
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+  return geo
 }
 
 function seeded(text) {
@@ -105,7 +290,7 @@ function shadowed(obj) {
 // piece is built, its still parts are merged into one mesh per look; `keep`
 // holds the parts that move or get repainted, which stay as they are.
 const SHARED = new Set([glassMat, lampMat])
-const look = (o, m) => `${SHARED.has(m) || m.map ? m.uuid : `${m.type}|${m.color?.getHex()}|${m.emissive?.getHex()}|${m.emissiveIntensity}|${m.roughness}|${m.metalness}|${m.side}`}|${o.castShadow}|${o.receiveShadow}`
+const look = (o, m) => `${SHARED.has(m) ? m.uuid : `${m.type}|${m.color?.getHex()}|${m.emissive?.getHex()}|${m.emissiveIntensity}|${m.roughness}|${m.metalness}|${m.side}|${m.map?.uuid}|${m.bumpMap?.uuid}|${m.vertexColors}`}|${o.castShadow}|${o.receiveShadow}`
 
 export function bake(root, keep = []) {
   root.updateMatrixWorld(true)
@@ -147,7 +332,7 @@ export function bake(root, keep = []) {
 
 function bookshelf(colors, rand) {
   const g = new THREE.Group()
-  const wood = mat(colors.woodDark)
+  const wood = woodMat(colors.woodDark)
   const frame = new THREE.Mesh(rounded(44, 30, 11, 1), wood)
   frame.position.y = 15
   g.add(frame)
@@ -156,7 +341,7 @@ function bookshelf(colors, rand) {
     while (x < 17) {
       const w = 2.2 + rand() * 2.2
       const h = 7 + rand() * 3
-      const book = new THREE.Mesh(rounded(w, h, 7.5, 0.4), mat(colors.books[Math.floor(rand() * colors.books.length)]))
+      const book = new THREE.Mesh(rounded(w, h, 7.5, 0.4), mat(colors.books[Math.floor(rand() * colors.books.length)], { roughness: 0.55 }))
       book.position.set(x + w / 2, y + h / 2, 2.4)
       book.rotation.z = rand() < 0.12 ? 0.25 : 0
       g.add(book)
@@ -183,7 +368,7 @@ function bookshelf(colors, rand) {
 function plant(colors, rand) {
   const g = new THREE.Group()
   g.userData.plant = rand() * 10 // a phase for its sway
-  const pot = new THREE.Mesh(new THREE.CylinderGeometry(5, 3.8, 8, 20), mat(colors.pot))
+  const pot = new THREE.Mesh(new THREE.CylinderGeometry(5, 3.8, 8, 28), mat(colors.pot, { roughness: 0.35 }))
   pot.position.y = 4
   g.add(pot)
   const leaf = mat(colors.leaf, { roughness: 0.6 })
@@ -200,8 +385,8 @@ function plant(colors, rand) {
 
 function lamp(colors) {
   const g = new THREE.Group()
-  const metal = mat(colors.woodDark)
-  const base = new THREE.Mesh(new THREE.CylinderGeometry(3.6, 4, 1.2, 20), metal)
+  const metal = mat(colors.woodDark, { roughness: 0.3, metalness: 0.6 })
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(3.6, 4, 1.2, 28), metal)
   base.position.y = 0.6
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 26, 8), metal)
   pole.position.y = 13
@@ -215,7 +400,7 @@ function lamp(colors) {
 
 function windowPane(colors, w) {
   const g = new THREE.Group()
-  const frame = mat(colors.trim)
+  const frame = mat(colors.trim, { roughness: 0.4 })
   const glass = new THREE.Mesh(new THREE.PlaneGeometry(w, 15), glassMat)
   glass.position.set(0, 18, 0.3)
   g.add(glass)
@@ -229,7 +414,7 @@ function windowPane(colors, w) {
 
 function picture(colors, rand) {
   const g = new THREE.Group()
-  const frame = new THREE.Mesh(rounded(14, 11, 1, 0.3), mat(colors.woodDark))
+  const frame = new THREE.Mesh(rounded(14, 11, 1, 0.3), woodMat(colors.woodDark))
   frame.position.set(0, 20, 0.6)
   const art = new THREE.Mesh(new THREE.PlaneGeometry(11, 8), mat(colors.books[Math.floor(rand() * colors.books.length)]))
   art.position.set(0, 20, 1.15)
@@ -241,7 +426,7 @@ function picture(colors, rand) {
 
 function couch(colors, rand) {
   const g = new THREE.Group()
-  const fabric = mat(colors.books[Math.floor(rand() * colors.books.length)], { roughness: 0.9 })
+  const fabric = fabricMat(colors.books[Math.floor(rand() * colors.books.length)])
   const seat = new THREE.Mesh(rounded(30, 6, 13, 2.5), fabric)
   seat.position.y = 5
   const back = new THREE.Mesh(rounded(30, 10, 4, 2), fabric)
@@ -267,15 +452,15 @@ export function buildRoom({ w, d, name, colors }) {
   floor.receiveShadow = true
   room.add(floor)
 
-  const wallMat = mat(colors.wall, { roughness: 0.92 })
-  const trimMat = mat(colors.trim)
+  const wallMat = mat(colors.wall, { roughness: 0.85, vertexColors: true })
+  const trimMat = mat(colors.trim, { roughness: 0.4 })
   const walls = [
     [w + WALL_T * 2, 0, -d / 2 - WALL_T / 2, 'back'],
     [d, -w / 2 - WALL_T / 2, 0, 'side'],
     [d, w / 2 + WALL_T / 2, 0, 'side'],
   ]
   for (const [len, x, z, kind] of walls) {
-    const geo = kind === 'back' ? rounded(len, WALL_H, WALL_T, 0.6) : rounded(WALL_T, WALL_H, len, 0.6)
+    const geo = shadeUp(kind === 'back' ? rounded(len, WALL_H, WALL_T, 0.6) : rounded(WALL_T, WALL_H, len, 0.6), WALL_H)
     const wall = new THREE.Mesh(geo, wallMat)
     wall.position.set(x, WALL_H / 2, z)
     wall.castShadow = wall.receiveShadow = true
@@ -287,6 +472,21 @@ export function buildRoom({ w, d, name, colors }) {
     skirting.position.set(x, FLOOR_TOP + 1.2, z)
     room.add(wall, cap, skirting)
   }
+
+  const IN = 16, OUT = 14, T = WALL_T
+  room.add(
+    cornerShade([
+      [w, IN, 0, -d / 2 + IN / 2, 'back'],
+      [d, IN, -w / 2 + IN / 2, 0, 'left'],
+      [d, IN, w / 2 - IN / 2, 0, 'right'],
+    ], FLOOR_TOP + 0.08, 0.32),
+    cornerShade([
+      [w + 2 * T, OUT, 0, -d / 2 - T - OUT / 2, 'front'],
+      [w, OUT, 0, d / 2 + OUT / 2, 'back'],
+      [d + T, OUT, -w / 2 - T - OUT / 2, -T / 2, 'right'],
+      [d + T, OUT, w / 2 + T + OUT / 2, -T / 2, 'left'],
+    ], 0.48, 0.22),
+  )
 
   // Along the back wall, left to right: a shelf, a window or a picture,
   // and a plant in the corner; a lamp in a front corner, and a couch when
@@ -318,7 +518,7 @@ const plantsIn = group => {
 
 // A rug under each session: a soft oval in a lighter shade of its color.
 export function rug(color) {
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(30, 30, 0.6, 48), mat(color, { roughness: 1 }))
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(30, 30, 0.6, 64), fabricMat(color))
   m.scale.z = 0.82
   m.position.y = FLOOR_TOP + 0.3
   m.receiveShadow = true
@@ -335,8 +535,8 @@ const SYNTAX = ['#7cc4ff', '#f6a6c1', '#ffd479', '#a7e3a1', '#c9b6ff', '#e8e2d6'
 
 export function desk(colors, tint) {
   const g = new THREE.Group()
-  const wood = mat(colors.woodDark)
-  const top = new THREE.Mesh(rounded(58, 2.6, 22, 0.8), mat(colors.desk))
+  const wood = woodMat(colors.woodDark)
+  const top = new THREE.Mesh(rounded(58, 2.6, 22, 0.8), woodMat(colors.desk))
   top.position.y = 17
   g.add(top)
   for (const x of [-26, 26]) {
@@ -344,7 +544,7 @@ export function desk(colors, tint) {
     leg.position.set(x, 8, 0)
     g.add(leg)
   }
-  const bezel = mat('#2b2a2e', { roughness: 0.5 })
+  const bezel = mat('#2b2a2e', { roughness: 0.3, metalness: 0.4 })
   const stand = new THREE.Mesh(rounded(3, 6, 3, 0.6), bezel)
   stand.position.set(0, 21, -5)
   const foot = new THREE.Mesh(rounded(11, 1, 7, 0.4), bezel)
@@ -363,9 +563,9 @@ export function desk(colors, tint) {
   screen.position.set(0, 34, -3.9)
   g.add(screen)
 
-  const keyboard = new THREE.Mesh(rounded(18, 1, 6, 0.4), mat(colors.trim))
+  const keyboard = new THREE.Mesh(rounded(18, 1, 6, 0.4), mat(colors.trim, { roughness: 0.45 }))
   keyboard.position.set(-3, 18.8, 5)
-  const mug = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2, 4.4, 16), mat(tint))
+  const mug = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2, 4.4, 24), mat(tint, { roughness: 0.25 }))
   mug.position.set(20, 20.6, 4)
   g.add(keyboard, mug)
   shadowed(g)
@@ -443,22 +643,22 @@ export function coffeeCorner(colors) {
   g.add(tiles)
 
   const back = -COFFEE_D / 2 + 14
-  const counter = new THREE.Mesh(rounded(120, 22, 24, 1), mat(colors.counter))
+  const counter = new THREE.Mesh(rounded(120, 22, 24, 1), mat(colors.counter, { roughness: 0.45 }))
   counter.position.set(-25, 11, back)
-  const worktop = new THREE.Mesh(rounded(124, 2.4, 26, 0.6), mat(colors.woodDark))
+  const worktop = new THREE.Mesh(rounded(124, 2.4, 26, 0.6), woodMat(colors.woodDark))
   worktop.position.set(-25, 23, back)
   g.add(counter, worktop)
   for (const x of [-70, -40, -10, 20]) {
-    const handle = new THREE.Mesh(rounded(6, 1, 1, 0.3), mat(colors.trim))
+    const handle = new THREE.Mesh(rounded(6, 1, 1, 0.3), mat(colors.trim, { roughness: 0.25, metalness: 0.7 }))
     handle.position.set(x, 18, back + 12.4)
     g.add(handle)
   }
 
   // The machine: a body, a spout, a red light, a cup waiting under it.
   const machine = new THREE.Group()
-  const body = new THREE.Mesh(rounded(20, 24, 15, 2), mat('#3a3633', { roughness: 0.4 }))
+  const body = new THREE.Mesh(rounded(20, 24, 15, 2), mat('#3a3633', { roughness: 0.25, metalness: 0.5 }))
   body.position.y = 12
-  const hood = new THREE.Mesh(rounded(20, 4, 18, 1), mat('#4a4541'))
+  const hood = new THREE.Mesh(rounded(20, 4, 18, 1), mat('#4a4541', { roughness: 0.25, metalness: 0.6 }))
   hood.position.set(0, 23, 1.5)
   const light = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 12), new THREE.MeshBasicMaterial({ color: '#ff6a4d' }))
   light.position.set(6, 17, 7.6)
@@ -470,7 +670,7 @@ export function coffeeCorner(colors) {
 
   // Mugs in every color, a jar and a kettle.
   colors.mugs.forEach((c, i) => {
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2, 4.6, 14), mat(c))
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2, 4.6, 24), mat(c, { roughness: 0.25 }))
     m.position.set(-28 + i * 6.5, 26.5, back + 5 - (i % 2) * 4)
     g.add(m)
   })
@@ -478,29 +678,29 @@ export function coffeeCorner(colors) {
   jar.position.set(18, 29, back - 2)
   g.add(jar)
 
-  const fridge = new THREE.Mesh(rounded(28, 60, 24, 2), mat(colors.fridge))
+  const fridge = new THREE.Mesh(rounded(28, 60, 24, 2), mat(colors.fridge, { roughness: 0.3 }))
   fridge.position.set(55, 30, back)
-  const fhandle = new THREE.Mesh(rounded(1.6, 14, 1.6, 0.5), mat('#9a948c'))
+  const fhandle = new THREE.Mesh(rounded(1.6, 14, 1.6, 0.5), mat('#9a948c', { roughness: 0.2, metalness: 0.8 }))
   fhandle.position.set(44, 40, back + 12.6)
   g.add(fridge, fhandle)
 
   // A round table with stools, and a mug or two left on it.
   const table = new THREE.Group()
-  const tableTop = new THREE.Mesh(new THREE.CylinderGeometry(20, 20, 2.4, 32), mat(colors.desk))
+  const tableTop = new THREE.Mesh(new THREE.CylinderGeometry(20, 20, 2.4, 48), woodMat(colors.desk))
   tableTop.position.y = 20
-  const post = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 19, 10), mat(colors.woodDark))
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 19, 16), woodMat(colors.woodDark))
   post.position.y = 10
-  const base = new THREE.Mesh(new THREE.CylinderGeometry(8, 9, 1.4, 20), mat(colors.woodDark))
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(8, 9, 1.4, 32), woodMat(colors.woodDark))
   base.position.y = 0.7
   table.add(tableTop, post, base)
   for (let i = 0; i < 3; i++) {
     const a = -Math.PI / 2 + (i - 1) * 1.6 + Math.PI
-    const stool = new THREE.Mesh(new THREE.CylinderGeometry(6, 5.4, 12, 18), mat(colors.mugs[(i * 2 + 1) % colors.mugs.length]))
+    const stool = new THREE.Mesh(new THREE.CylinderGeometry(6, 5.4, 12, 28), fabricMat(colors.mugs[(i * 2 + 1) % colors.mugs.length]))
     stool.position.set(Math.cos(a) * 28, 6, Math.sin(a) * 28)
     table.add(stool)
   }
   for (let i = 0; i < 2; i++) {
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2, 4.4, 14), mat(colors.mugs[(i * 3) % colors.mugs.length]))
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2, 4.4, 24), mat(colors.mugs[(i * 3) % colors.mugs.length], { roughness: 0.25 }))
     m.position.set(-6 + i * 11, 23.4, 3 - i * 6)
     table.add(m)
   }
@@ -556,18 +756,24 @@ export function officeShell({ W, D, colors }) {
   carpet.receiveShadow = true
   g.add(carpet)
 
-  const wallMat = mat(colors.outerWall, { roughness: 0.95 })
-  const trimMat = mat(colors.trim)
+  const wallMat = mat(colors.outerWall, { roughness: 0.9, vertexColors: true })
+  const trimMat = mat(colors.trim, { roughness: 0.4 })
   const glass = glassMat
   const T = 5
   for (const [len, x, z, alongX] of [[W + T * 2, 0, -D / 2 - T / 2, true], [D, -W / 2 - T / 2, 0, false], [D, W / 2 + T / 2, 0, false]]) {
-    const wall = new THREE.Mesh(alongX ? rounded(len, SHELL_H, T, 1) : rounded(T, SHELL_H, len, 1), wallMat)
+    const wall = new THREE.Mesh(shadeUp(alongX ? rounded(len, SHELL_H, T, 1) : rounded(T, SHELL_H, len, 1), SHELL_H), wallMat)
     wall.position.set(x, SHELL_H / 2, z)
     wall.receiveShadow = wall.castShadow = true
     const cap = new THREE.Mesh(alongX ? rounded(len + 2, 2.4, T + 2, 0.6) : rounded(T + 2, 2.4, len + 2, 0.6), trimMat)
     cap.position.set(x, SHELL_H + 1, z)
     g.add(wall, cap)
   }
+  const S = 30
+  g.add(cornerShade([
+    [W, S, 0, -D / 2 + S / 2, 'back'],
+    [D, S, -W / 2 + S / 2, 0, 'left'],
+    [D, S, W / 2 - S / 2, 0, 'right'],
+  ], 0.45, 0.28))
   // Tall windows along the back wall.
   const panes = Math.max(2, Math.floor(W / 110))
   for (let i = 0; i < panes; i++) {
@@ -591,7 +797,7 @@ export function officeShell({ W, D, colors }) {
   }
   // A water cooler by the right wall, near the front.
   const cooler = new THREE.Group()
-  const stand = new THREE.Mesh(rounded(14, 26, 14, 1.5), mat(colors.fridge))
+  const stand = new THREE.Mesh(rounded(14, 26, 14, 1.5), mat(colors.fridge, { roughness: 0.3 }))
   stand.position.y = 13
   const bottle = new THREE.Mesh(new THREE.CylinderGeometry(6, 6, 16, 20), mat(colors.sky, { transparent: true, opacity: 0.7, roughness: 0.1 }))
   bottle.position.y = 34
@@ -600,7 +806,7 @@ export function officeShell({ W, D, colors }) {
   g.add(cooler)
   // A wall clock between the first two windows, showing your local time.
   const face = new THREE.Group()
-  const rim = new THREE.Mesh(new THREE.CylinderGeometry(9, 9, 1.6, 32), mat(colors.woodDark))
+  const rim = new THREE.Mesh(new THREE.CylinderGeometry(9, 9, 1.6, 48), woodMat(colors.woodDark))
   rim.rotation.x = Math.PI / 2
   const dial = new THREE.Mesh(new THREE.CircleGeometry(7.8, 32), mat(colors.trim))
   dial.position.z = 0.9

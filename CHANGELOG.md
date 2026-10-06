@@ -34,6 +34,9 @@ otherwise `claude plugin update agent-office@modsarena` fetches it.
 - **Smooth, steady camera.** Moving and zooming around the office glides
   instead of jumping, the view stays at one fixed angle, and walls and
   trim no longer flicker as you move.
+- **A finished look.** Hardwood floors, carpet and tile with real texture,
+  wood-grain furniture, glazed, metal and satin finishes, and a soft studio
+  light that glass and metal reflect.
 - **An `office` skill.** `/office` only exists once the plugin's hooks run in
   a session, so the Claude app's menu didn't list it. The `agent-office:office`
   skill is always listed and starts the bridge and opens the office the same

@@ -10,6 +10,7 @@
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
 import { makeCharacter, pose } from './character.js'
 import {
@@ -45,6 +46,9 @@ const BREAK_S = 10 // how long a finished helper lingers over coffee
 const WAVE_S = 1.2
 const MEET = 38 // critters closer than this on the move wave at each other
 const PERSONAL = 21 // standing helpers keep at least this far apart
+const SKY = 1.25 // the hemisphere light; the environment adds the rest
+const ENV = 0.2
+const SUN = 2.1
 const DAMPING = 0.08 // of a drag's spin let go each frame, at 60 frames a second
 const ZOOM_EASE = 1e-5 // of a wheel zoom still to go after a second
 // Where helpers stand behind their session's desk: a row of five, a
@@ -134,6 +138,12 @@ export function mount(el, { pick }) {
   stage.append(bubble)
 
   scene = new THREE.Scene()
+  // A soft studio environment for every surface to reflect: glazes, metal
+  // and glass get highlights, and shadows pick up a little bounce light.
+  const pmrem = new THREE.PMREMGenerator(renderer)
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+  scene.environmentIntensity = ENV
+  pmrem.dispose()
   camera = new THREE.PerspectiveCamera(32, 1, 1, 6000)
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = true
@@ -153,9 +163,9 @@ export function mount(el, { pick }) {
   controls.addEventListener('start', () => { camGoal = null })
   renderer.domElement.addEventListener('wheel', wheel, { passive: false })
 
-  sky = new THREE.HemisphereLight('#ffffff', '#d8cfc2', 1.6)
+  sky = new THREE.HemisphereLight('#ffffff', '#d8cfc2', SKY)
   scene.add(sky)
-  sun = new THREE.DirectionalLight('#fffaf2', 2.1)
+  sun = new THREE.DirectionalLight('#fffaf2', SUN)
   sun.position.set(-90, 220, 120)
   sun.castShadow = true
   sun.shadow.mapSize.set(2048, 2048)
@@ -805,9 +815,10 @@ function daylight(now) {
   glassMat.emissiveIntensity = 0.45 - dark * 0.15
   lampMat.emissive.copy(palette.glow)
   lampMat.emissiveIntensity = 0.45 + dark * 1.1
-  sun.intensity = 2.1 - dark * 0.7
+  sun.intensity = SUN - dark * 0.7
   sun.color.set('#fffaf2').lerp(new THREE.Color('#c9d4ff'), dark * 0.6)
-  sky.intensity = 1.6 - dark * 0.35
+  sky.intensity = SKY - dark * 0.3
+  scene.environmentIntensity = ENV * (1 - dark * 0.5)
 }
 
 // ---------------------------------------------------------------------------
