@@ -1,5 +1,5 @@
 import { test, expect, mock } from 'claude-code/testing'
-import { summarize, contextTokens, projectOf, nodeProblem } from './register'
+import { summarize, contextTokens, projectOf, nodeProblem, isNewer, isStale } from './register'
 
 test('summarize picks the most telling field and trims it', async () => {
   expect(summarize({ command: 'npm   test\n --watch' })).toBe('npm test --watch')
@@ -123,6 +123,43 @@ test('/office starts the bridge, waits for it, then opens the page', async ($, o
 
   const report = await $.command.run({ command: 'office', args: 'status' })
   expect(report.text).toContain('Bridge: running on http://127.0.0.1:7337, 3 events so far, 1 page open.')
+})
+
+test('isNewer and isStale spot a bridge left over from an older copy', async () => {
+  expect(isNewer('0.4.0', '0.3.1')).toBe(true)
+  expect(isNewer('0.3.10', '0.3.9')).toBe(true)
+  expect(isNewer('0.3.1', '0.3.1')).toBe(false)
+  expect(isNewer('0.3.0', '0.3.1')).toBe(false)
+  expect(isStale({ managed: true, version: '0.3.1' }, '0.4.0')).toBe(true)
+  expect(isStale({ managed: false, version: '0.3.1' }, '0.4.0')).toBe(false) // started by hand
+  expect(isStale({ managed: true }, '0.4.0')).toBe(false) // too old to say
+  expect(isStale({ managed: true, version: '0.4.0' }, '0.4.0')).toBe(false)
+  expect(isStale(undefined, '0.4.0')).toBe(false)
+})
+
+test('/office replaces a bridge from an older copy before opening the page', async ($, on) => {
+  let bridge = { version: '0.0.1', managed: true }
+  const spawned: string[][] = []
+  on('fs.read', async () => ({ value: '{"name":"agent-office","version":"9.9.9"}' }))
+  on('http.fetch', async (_$, e) => {
+    if (e.url.endsWith('/healthz')) return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true, events: 0, viewers: 0, ...bridge }) } }
+    return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }
+  })
+  on('process.run', async (_$, e) => ({ value: { exitCode: 0, stdout: e.argv[0] === 'node' ? 'v22.3.0\n' : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('process.spawn', async function* (_$, e) {
+    spawned.push([...e.argv])
+    bridge = { version: '9.9.9', managed: true } // the new bridge takes over
+    return { code: 0, signal: null }
+  })
+  on('clock.sleep', async () => ({ value: undefined }))
+
+  const report = await $.command.run({ command: 'office', args: 'status' })
+  expect(report.text).toContain('(0.0.1)')
+  expect(report.text).toContain('older Agent Office than this one (9.9.9); /office restarts it')
+
+  const opened = await $.command.run({ command: 'office', args: '' })
+  expect(opened.text).toContain('Agent Office')
+  expect(spawned.some(argv => argv.includes('--replace') && argv.includes('--managed'))).toBe(true)
 })
 
 test('/office says plainly when Node is missing', async ($, on) => {

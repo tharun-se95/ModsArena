@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// One version everywhere: the plugin manifest, the marketplace (its own and
-// the plugin's entry), and both package.json files, with a CHANGELOG.md
-// section for it. The release workflow uses this to check a tag and to take
+// One version everywhere: the plugin manifest, the marketplace's own, and
+// both package.json files, with a CHANGELOG.md section for it. The plugin's
+// marketplace entry carries no version: Claude Code reads plugin.json first
+// and silently ignores the entry's when they differ, so it lives there only. The release workflow uses this to check a tag and to take
 // the release notes.
 //
 //   node scripts/version.mjs check [v0.2.1]   every manifest agrees (and with the tag)
@@ -20,7 +21,6 @@ export function versions() {
   return {
     'agent-office/.claude-plugin/plugin.json': json('agent-office/.claude-plugin/plugin.json').version,
     '.claude-plugin/marketplace.json (metadata)': market.metadata?.version,
-    '.claude-plugin/marketplace.json (agent-office)': market.plugins.find(p => p.name === 'agent-office')?.version,
     'package.json': json('package.json').version,
     'visualizer/package.json': json('visualizer/package.json').version,
   }
@@ -40,6 +40,8 @@ export function problems(tag) {
   const found = versions()
   const unique = [...new Set(Object.values(found))]
   const out = []
+  const entry = json('.claude-plugin/marketplace.json').plugins.find(p => p.name === 'agent-office')
+  if (entry?.version !== undefined) out.push('.claude-plugin/marketplace.json: the agent-office entry sets "version"; keep it in plugin.json only')
   if (unique.length !== 1) out.push(`versions disagree: ${Object.entries(found).map(([file, v]) => `${file}=${v}`).join(', ')}`)
   const version = unique[0]
   if (tag && tag.replace(/^v/, '') !== version) out.push(`tag ${tag} doesn't match the version ${version}`)

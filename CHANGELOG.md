@@ -2,9 +2,21 @@
 
 Versions of the Agent Office plugin (`agent-office@modsarena`). Each one is a
 git tag (`v0.2.1`) with a GitHub Release, and the same version is in
-`agent-office/.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`
-and both `package.json` files. `claude plugin marketplace update modsarena`
-picks up a new one.
+`agent-office/.claude-plugin/plugin.json`, the marketplace's
+`metadata.version` and both `package.json` files. With auto-update on for
+modsarena (`/plugin` → Marketplaces), a new one arrives on its own;
+otherwise `claude plugin update agent-office@modsarena` fetches it.
+
+## Unreleased
+
+- **Updates that take.** After an update, the next session swaps the
+  running bridge for the new one (or `/office` does, if the office is
+  open), so you see the new page. `/office status` shows the bridge's
+  version. Bridges you start yourself are never touched.
+- The README, the release notes and the first-run toast say how to turn on
+  auto-update, which Claude Code leaves off for this marketplace.
+- The plugin's version lives in `plugin.json` only, not in its marketplace
+  entry, where Claude Code would ignore it.
 
 ## 0.3.1
 
