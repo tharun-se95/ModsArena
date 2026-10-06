@@ -51,6 +51,18 @@ export function summarize(input: Record<string, unknown>): string | undefined {
 }
 
 // What a request was answered over: the context that loop holds right now.
+// A turn's answer or a message, as one short line for the office.
+export function clip(text: string | undefined, limit = 240): string | undefined {
+  const line = (text ?? '').replace(/\s+/g, ' ').trim()
+  if (!line) return undefined
+  return line.length > limit ? `${line.slice(0, limit - 3)}...` : line
+}
+
+// Deliveries from outside this session: another session, the project's
+// coordinator, a channel. A send between this session's own loops is seen
+// at `session.send` instead, so it isn't counted twice.
+const OUTSIDE = new Set(['peer', 'peer-send-message', 'projects-relay', 'channel', 'slack-ping', 'scheduled-trigger', 'bridge'])
+
 export function contextTokens(usage: {
   input_tokens: number
   cache_read_input_tokens: number
@@ -207,6 +219,21 @@ async function status($: EngineInterface) {
   }
   lines.push(`This session: ${link.queue.length} event${link.queue.length === 1 ? '' : 's'} waiting to send, ${link.activeAgents.size} subagent${link.activeAgents.size === 1 ? '' : 's'} and ${link.activeTools} tool call${link.activeTools === 1 ? '' : 's'} in flight.`)
   return lines.join('\n')
+}
+
+const ENDED = new Set(['completed', 'failed', 'killed'])
+
+// Where a subagent stands after a run: finished (and how), or still holding
+// work, in which case it stays in the office.
+async function settleAgent($: EngineInterface, agent: string) {
+  const info = (await $.agent.list().catch(() => [])).find(a => a.id === agent)
+  if (!info || ENDED.has(info.status)) {
+    emit({ kind: 'agent.end', agent, ...(info && { status: info.status }) })
+    link.activeAgents.delete(agent)
+  } else {
+    emit({ kind: info.status === 'idle' ? 'agent.idle' : 'agent.waiting', agent })
+  }
+  showStatus($)
 }
 
 type ChatMessage = { id: string; agent?: string; text: string }
@@ -397,18 +424,54 @@ export const register: Register = (on, options) => {
 
   on('turn.complete', async ($, e, next) => {
     const agent = e.agentId
-    emit({ kind: 'turn.complete', agent, turnId: e.turnId, durationMs: e.durationMs, reason: e.reason })
+    emit({ kind: 'turn.complete', agent, turnId: e.turnId, durationMs: e.durationMs, reason: e.reason, answer: clip(e.answer) })
     if (agent === undefined) {
       await sendBreakdown($)
     } else if (link.teammates.has(agent)) {
       // A teammate waits for its next message rather than ending.
       emit({ kind: 'agent.idle', agent })
     } else {
-      // A subagent's loop completing is the subagent finishing.
-      emit({ kind: 'agent.end', agent })
-      link.activeAgents.delete(agent)
+      // A subagent's run ending: ask the engine where its loop stands, since
+      // one still holding background work or a plan isn't finished.
+      void settleAgent($, agent)
     }
     showStatus($)
+    return next(e)
+  })
+
+  // A delivery from outside: the project's coordinator handing this thread
+  // work, another session, a channel. It marks a project thread as one.
+  on('session.receive', async ($, e, next) => {
+    const kind = e.origin.kind
+    if (kind === 'projects-relay') emit({ kind: 'session.thread' })
+    const isOwnTeam = (kind === 'peer' || kind === 'coordinator') && 'isVerified' in e.origin && e.origin.isVerified
+    if (OUTSIDE.has(kind) || ((kind === 'peer' || kind === 'coordinator') && !isOwnTeam)) {
+      emit({
+        kind: 'agent.message', to: e.agentId, via: kind,
+        fromName: 'teammate' in e.origin ? e.origin.teammate : undefined,
+        text: clip(e.text, 160),
+      })
+    }
+    return next(e)
+  })
+
+  // One of this session's loops messaging another (SendMessage), or a
+  // plugin doing so: who talks to whom.
+  on('session.send', async ($, e, next) => {
+    const sent = await next(e)
+    // The office's own messages are already on the page as chat.
+    if (e.origin.kind === 'plugin' && e.origin.name === $.plugin.name) return sent
+    if (sent.isDelivered !== true) return sent
+    emit({
+      kind: 'agent.message', from: e.agentId, via: e.origin.kind,
+      ...(link.activeAgents.has(e.to) ? { to: e.to } : { toName: e.to }),
+      text: clip(e.text, 160),
+    })
+    return sent
+  })
+
+  on('prompt.submit', async ($, e, next) => {
+    if (e.origin.kind === 'projects-relay') emit({ kind: 'session.thread' })
     return next(e)
   })
 
@@ -425,6 +488,9 @@ export const register: Register = (on, options) => {
         model: spawned.model,
         background: e.background,
         teammate: e.isTeammate === true,
+        ...(spawned.teammateId && { teammateId: spawned.teammateId }),
+        ...(e.fork && { fork: true }),
+        ...(e.cwd && { cwd: e.cwd }),
       })
       link.activeAgents.add(spawned.agentId)
       if (e.isTeammate) link.teammates.add(spawned.agentId)

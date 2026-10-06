@@ -1,7 +1,9 @@
 // Synthetic Claude Code activity for `server.mjs --demo` and the hosted
 // preview: two projects, three live sessions that prompt, spawn subagents
-// (some nested), run tools, fill their context and compact, plus a few past
-// sessions for the history view. Only timers, so it runs in a browser too.
+// (some nested), message them, run tools, fill their context and compact,
+// then answer and wait on you a while. One is a thread a claude.ai
+// project's coordinator hands work to. Plus a few past sessions for the
+// history view. Only timers, so it runs in a browser too.
 
 const PROJECTS = [
   { id: '/work/payments-api', name: 'acme/payments-api', remote: 'git@github.com:acme/payments-api.git' },
@@ -17,6 +19,14 @@ const TOOLS = [
   ['Write', 'docs/ARCHITECTURE.md'], ['WebFetch', 'https://nodejs.org/api/crypto.html'],
   ['Bash', 'git diff --stat'], ['mcp__github__list_pull_requests', 'open PRs'],
 ]
+const ANSWERS = [
+  'Done. The retry wrapper is in, with tests. Should it also back off on 429s?',
+  'Found it: the build reads a stale cache key. I fixed it locally; want me to open a PR?',
+  'I added six tests for refunds. Partial refunds aren’t covered yet. Shall I add them?',
+  'The chart tokens are migrated. Two charts still hard-code colors; fix those too?',
+  'Review done: one race in session.ts and two nits. I left them as comments.',
+]
+const NUDGES = ['Also check the error path', 'Keep it to the auth module', 'Skip the snapshots', 'Note anything flaky']
 const AGENTS = [
   ['Explore', 'Map the auth module'], ['Plan', 'Design token rotation'],
   ['general-purpose', 'Write regression tests'], ['code-reviewer', 'Review session.ts'],
@@ -34,7 +44,7 @@ const rand = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo))
 export function startDemo(publish) {
   let seq = 0
 
-  function runSession(session, project, pace) {
+  function runSession(session, project, pace, asThread = false) {
     const emit = ev => publish([{ t: Date.now(), session, ...ev }])
     let messages = rand(8000, 40000)
     let cost = 0
@@ -83,14 +93,18 @@ export function startDemo(publish) {
       emit({ kind: 'agent.spawn', agent, parent, type, description, model: 'claude-haiku-4-5', background: Math.random() > 0.5 })
       let tokens = rand(9000, 20000)
       const steps = rand(3, 9)
+      const work = []
       for (let i = 0; i < steps; i++) {
-        if (depth < 1 && Math.random() < 0.15) void runAgent(agent, depth + 1)
+        if (depth < 2 && Math.random() < (depth ? 0.08 : 0.2)) work.push(runAgent(agent, depth + 1))
+        // Now and then its parent sends it a note while it works.
+        if (i === 1 && Math.random() < 0.4) emit({ kind: 'agent.message', from: parent, to: agent, via: 'model', text: pick(NUDGES) })
         await runTool(agent)
         tokens += rand(4000, 26000)
         emit({ kind: 'agent.context', agent, tokens, window: WINDOW, model: 'claude-haiku-4-5' })
       }
-      emit({ kind: 'turn.complete', agent, reason: 'answer' })
-      emit({ kind: 'agent.end', agent })
+      await Promise.all(work)
+      emit({ kind: 'turn.complete', agent, reason: 'answer', answer: `${description}: done.` })
+      emit({ kind: 'agent.end', agent, status: 'completed' })
     }
 
     async function loop() {
@@ -99,7 +113,12 @@ export function startDemo(publish) {
       breakdown()
       for (;;) {
         const turnId = `demo-turn-${++seq}`
-        emit({ kind: 'turn.start', turnId, text: pick(PROMPTS) })
+        const text = pick(PROMPTS)
+        if (asThread) {
+          emit({ kind: 'session.thread' })
+          emit({ kind: 'agent.message', via: 'projects-relay', text })
+        }
+        emit({ kind: 'turn.start', turnId, text })
         const work = []
         for (let i = 0; i < rand(0, 3); i++) work.push(runAgent(undefined, 0))
         for (let i = 0; i < rand(1, 4); i++) {
@@ -115,9 +134,11 @@ export function startDemo(publish) {
           emit({ kind: 'context.compact', trigger: 'auto', before, after: used() })
         }
         measure()
-        emit({ kind: 'turn.complete', turnId, reason: 'answer', durationMs: 9000 })
+        const reason = Math.random() < 0.08 ? 'error' : 'answer'
+        emit({ kind: 'turn.complete', turnId, reason, durationMs: 9000, ...(reason === 'answer' && { answer: pick(ANSWERS) }) })
         breakdown()
-        await sleep(rand(1500, 5000) * pace)
+        // Then it waits on you: sometimes briefly, sometimes a while.
+        await sleep((Math.random() < 0.5 ? rand(1500, 5000) : rand(9000, 20000)) * pace)
       }
     }
 
@@ -126,7 +147,7 @@ export function startDemo(publish) {
 
   runSession('demo-payments-1', PROJECTS[0], 1)
   setTimeout(() => runSession('demo-payments-2', PROJECTS[0], 1.6), 2500)
-  setTimeout(() => runSession('demo-dashboard-1', PROJECTS[1], 1.3), 5000)
+  setTimeout(() => runSession('demo-dashboard-1', PROJECTS[1], 1.3, true), 5000)
 }
 
 // Past sessions in the shape GET /history answers.

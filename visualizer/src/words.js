@@ -2,7 +2,7 @@
 // doing, the files it touched, and the moments worth telling you about.
 // Pure bookkeeping over model.js; it knows nothing about Three.js.
 
-import { nodes, sid, aid } from './model.js'
+import { nodes, sid, aid, mail } from './model.js'
 
 const ACTION_KEEP = 12
 const MOMENT_KEEP = 40
@@ -106,7 +106,25 @@ export function ingest(ev) {
       break
     case 'agent.end': {
       const n = nodes.get(aid(ev.session, ev.agent))
-      if (n) moment(ev, `${n.label} finished its work for ${quote(sessionName(ev.session))}.`)
+      if (n) moment(ev, n.endStatus === 'failed' || n.endStatus === 'killed'
+        ? `${n.label} stopped before finishing its work for ${quote(sessionName(ev.session))}.`
+        : `${n.label} finished its work for ${quote(sessionName(ev.session))}.`, n.endStatus === 'failed' ? 'bad' : '')
+      break
+    }
+    case 'agent.message': {
+      const m = mail[0]
+      if (!m || m.t !== ev.t || m.session !== ev.session) break
+      const from = m.fromName === 'Lead' ? 'The lead' : m.fromName ?? 'Someone'
+      const to = m.toName === 'Lead' ? quote(sessionName(ev.session)) : m.toName ?? 'someone'
+      moment(ev, `${from} → ${to}${m.text ? `: ${m.text}` : ''}`, 'mail', m.to ?? m.from ?? sid(ev.session))
+      break
+    }
+    case 'session.thread': {
+      const n = nodes.get(sid(ev.session))
+      if (n && !n.threadAnnounced) {
+        n.threadAnnounced = true
+        moment(ev, `${quote(sessionName(ev.session))} is working as a thread of a claude.ai project.`, 'mail')
+      }
       break
     }
     case 'context.compact':

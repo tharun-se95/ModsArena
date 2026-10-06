@@ -227,3 +227,48 @@ test('messages from the office reach the session and its subagents', async ($, o
   expect(delivered.map(ev => [ev.id, ev.ok])).toEqual([['m1', true], ['m2', true], ['m3', false]])
   expect(delivered[2].how).toBe('no agent by that id')
 })
+
+test('threads, messages and a subagent’s real status reach the bridge', async ($, on) => {
+  const clock = mock.clock(on, { now: 1000 })
+  const posted: Array<Record<string, unknown>> = []
+  let status = 'waiting'
+  on('http.fetch', async (_$, e) => {
+    if (e.url.endsWith('/event')) posted.push(...JSON.parse(e.init?.body ?? '[]'))
+    return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }
+  })
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  on('session.id', async () => ({ value: 'sess-team' }))
+  on('session.model', async () => ({ value: 'test-model' }))
+  on('command.register', async () => ({ value: { command: 'office' } }))
+  on('ui.status', async () => ({ value: undefined }))
+  on('agent.spawn', async () => ({ model: 'haiku', agentId: 'agent-1' }))
+  on('agent.list', async () => ({ value: [{ id: 'agent-1', description: 'Map auth', type: 'Explore', status }] }))
+  on('session.receive', async (_$, e) => ({ text: e.text }))
+  on('session.send', async () => ({ isDelivered: true }))
+  on('turn.complete', async (_$, e) => ({ text: e.answer }))
+
+  await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+  await $.agent.spawn({
+    tool_use_id: 'tu-1', prompt: 'look', description: 'Map auth', subagentType: 'Explore', name: 'scout',
+    provider: { plugin: 'engine', tier: 'core' }, parentModel: 'm', background: true, fork: true,
+  })
+  await $.session.receive({ origin: { kind: 'projects-relay' }, text: 'Look into the flaky build' })
+  await $.session.send({ to: 'agent-1', text: 'Check the CI logs too', origin: { kind: 'model' } })
+  await $.turn.complete({ agentId: 'agent-1', answer: 'Still waiting on a shell', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.advance(300)
+  status = 'completed'
+  await $.turn.complete({ agentId: 'agent-1', answer: 'Found it:   the cache key.', durationMs: 5, isAborted: false, turnId: 't2', reason: 'answer' })
+  await clock.advance(300)
+
+  const spawn = posted.find(ev => ev.kind === 'agent.spawn')
+  expect(spawn?.fork).toBe(true)
+  expect(posted.some(ev => ev.kind === 'session.thread')).toBe(true)
+  const messages = posted.filter(ev => ev.kind === 'agent.message')
+  expect(messages.map(m => [m.via, m.to, m.text])).toEqual([
+    ['projects-relay', undefined, 'Look into the flaky build'],
+    ['model', 'agent-1', 'Check the CI logs too'],
+  ])
+  expect(posted.find(ev => ev.kind === 'agent.waiting')?.agent).toBe('agent-1')
+  expect(posted.find(ev => ev.kind === 'agent.end')?.status).toBe('completed')
+  expect(posted.filter(ev => ev.kind === 'turn.complete').map(ev => ev.answer)).toContain('Found it: the cache key.')
+})

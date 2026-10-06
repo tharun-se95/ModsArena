@@ -7,7 +7,7 @@ Claude Code mods and the tools around them.
 
 ## <img src="agent-office/icon.svg" width="28" height="28" alt="" align="top"> Agent Office
 
-A live office of everything Claude Code is doing on your machine. Each project gets its own cozy room. Your chat sessions are colorful critters, each at its own desk whose monitor scrolls code while it works. Each subagent is a smaller critter standing behind the session that started it, and every tool call makes its caller hop. A pinned notice says what's happening, sticky notes flag what needs a look, and a directory lists every session by room. Click any critter to read its conversation as it happens and send it a message, without leaving the office.
+A live office of everything Claude Code is doing on your machine. Each project gets its own cozy room. Your chat sessions are colorful critters, each at its own desk whose monitor scrolls code while it works. Each subagent is a smaller critter standing behind the session that started it, and every tool call makes its caller hop. The page is laid out the way Claude organizes work: **projects** hold **threads** (your sessions), and each thread has its **lead** and the **agents** it spawned, nested. Threads waiting on you collect in an inbox, where you can reply without leaving the page. Click any critter to read its conversation as it happens and send it a message, without leaving the office.
 
 **[Try the demo in your browser](https://tharun-se95.github.io/ModsArena/)**: sample activity, nothing to install.
 
@@ -91,23 +91,29 @@ npx github:tharun-se95/ModsArena demo            # sample activity on http://127
 
 **Sounds:** soft key taps when a tool runs, a two-note chime when a turn finishes, a bonk when a call fails, a pop when a helper arrives, a chirp when critters wave, a clink at the coffee corner and a hush on compaction. They're synthesized in the browser (no audio files), start after your first click or key press, and the **Sound** button in the header mutes them (it remembers your choice).
 
-Hover any critter (or its line in the directory) for a bubble with what it is and what it's doing: its status, the tool it's running, its context use, model and tool calls, and who it works for. Session names and room signs stay small and quiet; a name that would collide with another, with a sign or with the bubble steps aside. Click a critter, a sticky note or a directory line and the camera glides to its room while the directory turns into a clipboard with its details:
-
-- its context use and what fills it (the `/context` breakdown);
-- turns, tool calls, errors, cost, model and rate limits;
-- who is helping now, the files it has read and edited, its recent actions in plain words, and what you asked it.
+Hover any critter (or its line in the directory) for a bubble with what it is and what it's doing: its status, the tool it's running, its context use, model and tool calls, and who it works for. Session names and room signs stay small and quiet; a name that would collide with another, with a sign or with the bubble steps aside.
 
 Floating over the office (and framed around, so the office always sits in the space they leave free):
 
-- **The notice card** (top left) says what's going on in a sentence or two, with a sticky note for each thing that **needs a look**: yellow for a context window past 80%, pink for a call that just failed.
-- **The tape** (bottom left) keeps the moments: subagents starting and finishing, failures, compactions.
-- **The directory** (right) lists sessions by room, each room marked with its wall color, with context use and what each session is up to. Picking one clips it to a clipboard with its details; **All sessions** or Esc puts it back and glides out to the whole office.
+- **Waiting on you** (top left): a letter for each thread whose next move is yours, longest waiting first, with what it last said and a reply line. Type and press Enter: the reply becomes that thread's next prompt. A thread whose last turn ended on an error is marked **Needs a look**; context windows past 80% are listed under the letters.
+- **Activity** (bottom left): the moments so far, filterable to **Messages** (who messaged whom: the lead to its agents, agents to each other, a claude.ai project's coordinator to its thread) or **Problems**.
+- **Projects** (right): each project's threads with their state (**Working**, **Waiting on you**, **Needs a look**), context use and what each is doing, and under each thread its live team, nested the way the lead spawned them.
 
-On a narrow screen the notice card becomes a strip under the top bar and the directory a sheet at the bottom.
+Click a critter, a letter or a line and the camera glides to its room while the directory turns into a clipboard, with a trail back up (project › thread › agent) and three tabs:
+
+- **Conversation:** its transcript, live, with a box to message it (see below).
+- **Team:** the lead and every agent it spawned, nested, with each one's state (working, waiting on its own background work, idle, done, stopped), and the messages between them.
+- **Details:** context use and what fills it (the `/context` breakdown); turns, tool calls, errors, cost, model and rate limits; the files it has read and edited, its recent actions in plain words, and what you asked it.
+
+**Keys:** <kbd>j</kbd>/<kbd>k</kbd> (or the arrows) walk every thread and agent in order, <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> switch tabs, <kbd>r</kbd> replies (to what's open, or to the thread that has waited longest), and <kbd>Esc</kbd> goes up a level.
+
+A session that a [claude.ai project](https://code.claude.com/docs/en/claude-projects) runs on your computer (through Remote Control) is marked as a **thread**, and its coordinator's messages show up as mail. Threads that run in the cloud never touch your machine, so the office can't see them.
+
+On a narrow screen the inbox becomes a strip under the top bar and the directory a sheet at the bottom.
 
 ### Talk to your agents
 
-Open a critter's clipboard and switch to **Transcript**: its conversation, live. Your prompts sit on the right and its replies on the left. Tool calls are one line each, green or red once they finish; click one to see what came back. It's read from the transcript Claude Code keeps, so past sessions and subagents have one too.
+Open a critter's clipboard: the **Conversation** tab is its transcript, live. Your prompts sit on the right and its replies on the left. Tool calls are one line each, green or red once they finish; click one to see what came back. It's read from the transcript Claude Code keeps, so past sessions and subagents have one too.
 
 The box at the bottom sends it a message:
 

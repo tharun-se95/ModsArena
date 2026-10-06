@@ -1,10 +1,16 @@
-// The office's paperwork: the notice card (right now, with a sticky note
-// for each thing that needs a look), the tape of moments, and the
-// directory of sessions by room, which turns into a clipboard for the
-// session or subagent you pick.
+// The office's paperwork, laid out the way Claude organizes work: projects
+// hold threads (sessions), a thread has its lead (the main conversation)
+// and the agents it spawned, nested.
+//
+//   waiting on you (left)  threads whose next move is yours, with their last
+//                          answer and a box to reply right there
+//   activity (left)        the moments so far, messages between agents among them
+//   projects (right)       every project's threads and their live team,
+//                          which turns into a clipboard for the thread or
+//                          agent you pick: Conversation, Team, Details
 
-import { nodes, fill, warnings, sid, WARN_AT } from './model.js'
-import { moments, activity, lastAction, escapeHtml, quote, ago } from './words.js'
+import { nodes, fill, warnings, sid, WARN_AT, threadState, agentState, teamOf, lineage, mailOf } from './model.js'
+import { moments, activity, escapeHtml, quote, ago } from './words.js'
 import { pct, level, tintOf, sessionTint, roomKey } from './table.js'
 import * as transcript from './transcript.js'
 
@@ -12,95 +18,271 @@ const $ = sel => document.querySelector(sel)
 const k = n => (n === undefined ? '—' : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : `${Math.round(n / 1000)}k`)
 const usd = n => (n === undefined ? undefined : `$${n.toFixed(2)}`)
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
-const BUSY_MS = 2500
+const INBOX_KEEP = 4
+const PAST_PER_PROJECT = 3
 
 // Cards and details use the whole first prompt; the table keeps it short.
 const title = n => n.prompts?.[0]?.text ?? n.label
 const isLive = n => n.kind === 'session' && !n.past && n.status !== 'done'
-const isBusy = (n, running) => running.has(n.id) || Date.now() - (n.lastAt ?? 0) < BUSY_MS
 
-function helpersOf(session) {
-  return [...nodes.values()].filter(n => n.kind === 'agent' && n.session === session.session)
+const STATE_WORDS = {
+  working: 'Working', waiting: 'Waiting on you', stuck: 'Needs a look', ended: 'Ended',
+  idle: 'Idle', done: 'Done', failed: 'Stopped',
 }
-const liveHelpers = session => helpersOf(session).filter(n => n.status !== 'done')
-
-// A helper you can pick: its clipboard has its transcript and a message box,
-// and a finished one is resumed to answer.
-function helperLine(a, extra) {
-  return `<button class="line pick" data-pick="${escapeHtml(a.id)}"><i class="dot ${tintOf(a.type)}"></i>${escapeHtml(a.label ?? a.type)}${extra ? `<span class="muted">· ${extra}</span>` : ''}</button>`
-}
+const pill = state => `<span class="pill ${state}">${STATE_WORDS[state]}</span>`
 
 const asked = p => `${p.from ? `<span class="muted from">${p.from === 'agent-office' ? 'From the office' : `From ${escapeHtml(p.from)}`}</span>` : ''}${escapeHtml(p.text)}`
 
-function summary(running) {
-  const live = [...nodes.values()].filter(isLive)
-  if (!live.length) return ['Nothing is running right now.', 'Start a Claude Code session and it will walk into the office.']
-  const working = live.filter(n => isBusy(n, running)).length
-  const helpers = [...nodes.values()].filter(n => n.kind === 'agent' && n.status === 'active').length
-  const lead = working === live.length && live.length > 1 ? `All ${live.length}` : `${working} of ${live.length}`
-  const verb = live.length === 1 ? (working ? 'Your session is working right now' : 'Your session is waiting for you') : `${lead} sessions are working right now`
-  const parts = [`${verb}${helpers ? `, with ${plural(helpers, 'subagent')} helping` : ''}.`]
-  const fullest = live.filter(n => n.context?.tokens).sort((a, b) => fill(b) - fill(a))[0]
-  if (fullest && fill(fullest) >= WARN_AT) parts.push(`${quote(fullest.label)} is ${pct(fill(fullest))} full and will likely compact soon.`)
-  else if (fullest) parts.push('Every context window still has room.')
-  if (lastAction) {
-    const host = nodes.get(lastAction.session)
-    const text = lastAction.text.charAt(0).toLowerCase() + lastAction.text.slice(1)
-    parts.push(`Most recently, ${escapeHtml(text)}${host && live.length > 1 ? ` in ${escapeHtml(quote(host.label))}` : ''}.`)
-  }
-  return parts
-}
+// ---------------------------------------------------------------------------
+// The order threads are listed in, shared by the directory and j/k.
 
-// Sticky notes: yellow for a context window nearly full, pink for a call
-// that just failed. Each one takes you to the critter it's about.
-function needsALook() {
-  const full = warnings().map(n => {
-    const host = n.kind === 'agent' ? nodes.get(sid(n.session)) : null
-    return `<li class="warn"><button data-pick="${escapeHtml(n.id)}">${escapeHtml(n.kind === 'agent' ? `${n.label} in ${quote(host?.label ?? '')}` : quote(n.label))} is ${pct(fill(n))} full</button></li>`
-  })
-  const failures = moments.filter(m => m.tone === 'bad' && Date.now() - m.t < 120000).slice(0, 4 - Math.min(2, full.length))
-    // A note is short: the session's name is already on the critter it points at.
-    .map(m => `<li class="bad"><button data-pick="${escapeHtml(m.target)}">${escapeHtml(m.text.replace(/ in “[^”]*”\.$/, '.'))}</button></li>`)
-  return [...full.slice(0, 2), ...failures].join('') || '<li class="calm"><span>Nothing needs you right now.</span></li>'
-}
-
-// One line in the directory: color, name, context, and what it's up to.
-function entry(n, running, selected) {
-  const f = fill(n)
-  const live = isLive(n)
-  const helpers = live ? liveHelpers(n).length : 0
-  const last = activity.get(n.id)?.actions[0]?.text
-  const state = !live ? `ended ${ago(n.endedAt ?? n.lastAt)}` : isBusy(n, running) ? (last ?? 'working') : 'waiting for you'
-  return `
-    <button class="entry ${live ? '' : 'past'} ${selected === n.id ? 'on' : ''}" data-pick="${escapeHtml(n.id)}" data-hover="${escapeHtml(n.id)}">
-      <i class="dot ${sessionTint(n.session)}"></i>
-      <span class="ename">${escapeHtml(title(n))}</span>
-      ${n.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span>` : '<span></span>'}
-      <span class="estate">${helpers ? `${plural(helpers, 'helper')} · ` : ''}${escapeHtml(state)}</span>
-    </button>`
-}
-
-// The office directory: sessions by room, in each room's wall color.
-function directory(running, selected) {
-  const byRoom = new Map()
+function projectsList() {
+  const byProject = new Map()
   for (const n of nodes.values()) {
     if (n.kind !== 'session') continue
     const key = n.projectName ?? 'Elsewhere'
-    if (!byRoom.has(key)) byRoom.set(key, [])
-    byRoom.get(key).push(n)
+    if (!byProject.has(key)) byProject.set(key, [])
+    byProject.get(key).push(n)
   }
-  const rooms = [...byRoom].map(([name, list]) => {
+  return [...byProject].map(([name, list]) => {
     const live = list.filter(isLive).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0))
-    const past = list.filter(n => !isLive(n)).sort((a, b) => (b.endedAt ?? b.lastAt ?? 0) - (a.endedAt ?? a.lastAt ?? 0)).slice(0, 3)
+    const past = list.filter(n => !isLive(n)).sort((a, b) => (b.endedAt ?? b.lastAt ?? 0) - (a.endedAt ?? a.lastAt ?? 0)).slice(0, PAST_PER_PROJECT)
     return { name, live, past }
   }).sort((a, b) => (b.live.length > 0) - (a.live.length > 0) || a.name.localeCompare(b.name))
-  const liveCount = rooms.reduce((a, r) => a + r.live.length, 0)
-  return `
-    <h2 class="sideh">Directory <small>${liveCount} live</small></h2>
-    ${rooms.map(r => `
-      <p class="room"><i class="room-${roomKey(r.name)}"></i>${escapeHtml(r.name)}</p>
-      ${[...r.live, ...r.past].map(n => entry(n, running, selected)).join('')}`).join('') || '<p class="muted">No sessions yet.</p>'}`
 }
+
+// Every thread and agent in directory order, for moving with the keyboard.
+export function order() {
+  const out = []
+  const walk = branch => branch.forEach(({ node, children }) => { out.push(node.id); walk(children) })
+  for (const p of projectsList()) {
+    for (const n of [...p.live, ...p.past]) {
+      out.push(n.id)
+      if (isLive(n)) walk(teamOf(n))
+    }
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// Waiting on you: threads whose next move is yours, longest waiting first.
+
+function inboxThreads(running) {
+  return [...nodes.values()]
+    .filter(n => isLive(n) && ['waiting', 'stuck'].includes(threadState(n, running)))
+    .sort((a, b) => (a.answeredAt ?? a.startedAt ?? 0) - (b.answeredAt ?? b.startedAt ?? 0))
+}
+
+function headline(running) {
+  const live = [...nodes.values()].filter(isLive)
+  if (!live.length) return 'Nothing is running. Start a Claude Code session and it walks into the office.'
+  const yours = live.filter(n => threadState(n, running) !== 'working').length
+  const working = live.length - yours
+  const agents = [...nodes.values()].filter(n => n.kind === 'agent' && agentState(n) === 'working').length
+  const helping = agents ? `, with ${plural(agents, 'agent')} helping` : ''
+  if (!yours) return `${live.length === 1 ? 'Your thread is' : `All ${live.length} threads are`} working${helping}.`
+  if (!working) return `${live.length === 1 ? 'Your thread is' : `All ${live.length} threads are`} waiting on you.`
+  return `${yours} waiting on you, ${working} working${helping}.`
+}
+
+function cardInfo(n, running) {
+  const state = threadState(n, running)
+  const said = n.answer?.text
+  const blurb = state === 'stuck'
+    ? (n.lastReason === 'aborted' ? 'You stopped its last turn.' : n.lastReason === 'refusal' ? 'Its last turn ended on a refusal.' : 'Its last turn ended on an error.')
+    : state === 'working' ? 'Back at work.'
+      : said ? quote(said) : n.turns ? 'Done with your last request.' : 'Ready for its first prompt.'
+  return `
+    <button class="card-head" data-pick="${escapeHtml(n.id)}" data-hover="${escapeHtml(n.id)}" title="Open the conversation">
+      <span class="card-where"><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(n.projectName ?? 'Elsewhere')}${n.thread ? '<span class="badge">thread</span>' : ''}<time>${ago(n.answeredAt ?? n.startedAt)}</time></span>
+      <b>${escapeHtml(title(n))}</b>
+      <span class="card-said">${escapeHtml(blurb)}</span>
+    </button>`
+}
+
+const drafts = new Map() // node id -> unsent reply text
+const sending = new Map() // node id -> { ok, status }
+
+function cardElement(n) {
+  const li = document.createElement('li')
+  li.className = 'card'
+  li.dataset.card = n.id
+  li.innerHTML = `
+    <div class="card-info"></div>
+    <form class="card-reply">
+      <textarea rows="1" aria-label="Reply to ${escapeHtml(title(n))}" placeholder="Reply…"></textarea>
+      <button type="submit" aria-label="Send">↵</button>
+      <p class="card-status" hidden></p>
+    </form>`
+  const form = li.querySelector('form')
+  const field = form.querySelector('textarea')
+  field.value = drafts.get(n.id) ?? ''
+  field.addEventListener('input', () => drafts.set(n.id, field.value))
+  field.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault()
+      form.requestSubmit()
+    }
+  })
+  form.addEventListener('submit', async e => {
+    e.preventDefault()
+    const node = nodes.get(n.id)
+    const text = field.value
+    if (!node || !text.trim()) return
+    field.value = ''
+    drafts.delete(n.id)
+    sending.set(n.id, { status: 'Sending…' })
+    showStatus(li, n.id)
+    const result = await transcript.sendTo(node, text)
+    sending.set(n.id, result)
+    showStatus(li, n.id)
+    if (!result.ok) {
+      field.value = text
+      drafts.set(n.id, text)
+    }
+  })
+  return li
+}
+
+function showStatus(li, id) {
+  const s = sending.get(id)
+  const el = li.querySelector('.card-status')
+  el.hidden = !s
+  if (!s) return
+  el.textContent = s.status
+  el.classList.toggle('bad', s.ok === false)
+}
+
+// Keyed by thread so a reply you're typing stays with its thread when the
+// list changes around it.
+function renderInbox(running) {
+  const list = $('#inbox')
+  const threads = inboxThreads(running)
+  const shown = threads.slice(0, INBOX_KEEP)
+  const want = new Set(shown.map(n => n.id))
+  for (const li of [...list.querySelectorAll('[data-card]')]) {
+    const keep = nodes.has(li.dataset.card) && (want.has(li.dataset.card) || li.contains(document.activeElement) || li.querySelector('textarea')?.value)
+    if (!keep) {
+      li.remove()
+      sending.delete(li.dataset.card)
+    }
+  }
+  list.querySelector('.calm')?.remove()
+  shown.forEach((n, i) => {
+    let li = list.querySelector(`[data-card="${CSS.escape(n.id)}"]`)
+    if (!li) li = cardElement(n)
+    if (list.children[i] !== li && !li.contains(document.activeElement)) list.insertBefore(li, list.children[i] ?? null)
+    li.classList.remove('gone')
+    li.classList.toggle('stuck', threadState(n, running) === 'stuck')
+    patch(li.querySelector('.card-info'), cardInfo(n, running))
+    li.querySelector('form').hidden = !transcript.canMessage()
+  })
+  // A thread you're still replying to that went back to work keeps its
+  // card, dimmed, until you're done with it.
+  for (const li of list.querySelectorAll('[data-card]')) {
+    if (want.has(li.dataset.card)) continue
+    li.classList.add('gone')
+    patch(li.querySelector('.card-info'), cardInfo(nodes.get(li.dataset.card), running))
+  }
+  if (!list.children.length) list.insertAdjacentHTML('beforeend', '<li class="calm">Nothing is waiting on you. Threads land here when they answer.</li>')
+  const more = threads.length - shown.length
+  patch($('#inbox-more'), more > 0 ? `<button data-pick="${escapeHtml(threads[INBOX_KEEP].id)}">${plural(more, 'more thread')} waiting</button>` : '')
+  patch($('#inbox-count'), threads.length ? String(threads.length) : '')
+}
+
+// Context windows close to full, one line each.
+function fullWindows() {
+  return warnings().slice(0, 3).map(n => {
+    const host = n.kind === 'agent' ? nodes.get(sid(n.session)) : null
+    const name = n.kind === 'agent' ? `${n.label} in ${quote(host?.label ?? '')}` : quote(n.label)
+    return `<li><button data-pick="${escapeHtml(n.id)}"><span class="pct ${level(fill(n))}">${pct(fill(n))}</span> ${escapeHtml(name)} will compact soon</button></li>`
+  }).join('')
+}
+
+// ---------------------------------------------------------------------------
+// Activity: every moment, or only messages, or only problems.
+
+let feed = 'all'
+const FEEDS = { all: () => true, mail: m => m.tone === 'mail', bad: m => m.tone === 'bad' }
+
+function activityList() {
+  const list = moments.filter(FEEDS[feed]).slice(0, 14)
+  const empty = { all: 'Quiet so far.', mail: 'No messages between agents yet.', bad: 'Nothing has gone wrong.' }[feed]
+  return list.map(m => `<li class="${m.tone}"><button data-pick="${escapeHtml(m.target ?? '')}"><span>${escapeHtml(m.text)}</span><time>${ago(m.t)}</time></button></li>`).join('') ||
+    `<li class="muted"><span>${empty}</span></li>`
+}
+
+// ---------------------------------------------------------------------------
+// The projects directory
+
+function agentRow(a, depth) {
+  const f = fill(a)
+  const state = agentState(a)
+  return `
+    <button class="agent-row ${state}" style="--depth:${depth}" data-pick="${escapeHtml(a.id)}" data-hover="${escapeHtml(a.id)}">
+      <i class="dot ${tintOf(a.type)}"></i>
+      <span class="aname">${escapeHtml(a.label)}${a.description && a.description !== a.label ? `<span class="muted"> · ${escapeHtml(a.description)}</span>` : ''}</span>
+      <span class="astate">${a.mailAt && Date.now() - a.mailAt < 8000 ? '<i class="env" title="Just got a message">✉</i>' : ''}${state === 'working' && a.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span>` : `<i class="sdot ${state}" title="${STATE_WORDS[state]}"></i>`}</span>
+    </button>`
+}
+
+const countAll = branch => branch.reduce((sum, b) => sum + 1 + countAll(b.children), 0)
+
+// A thread's live team, nested under its lead; finished ones fold away.
+function teamRows(n, depth = 1) {
+  let finished = 0
+  const rows = []
+  const walk = (branch, d) => {
+    for (const { node, children } of branch) {
+      if (agentState(node) === 'done') {
+        finished += 1 + countAll(children)
+        continue
+      }
+      rows.push(agentRow(node, d))
+      walk(children, d + 1)
+    }
+  }
+  walk(teamOf(n), depth)
+  if (finished) rows.push(`<p class="folded" style="--depth:${depth}">${plural(finished, 'agent')} finished</p>`)
+  return rows.join('')
+}
+
+function threadRow(n, running, selected) {
+  const live = isLive(n)
+  const state = threadState(n, running)
+  const f = fill(n)
+  const doing = !live ? `ended ${ago(n.endedAt ?? n.lastAt)}`
+    : state === 'working' ? (activity.get(n.id)?.actions[0]?.text ?? 'working')
+      : state === 'stuck' ? 'its last turn didn’t finish'
+        : n.answer?.text ? `said ${quote(n.answer.text)}` : 'ready for you'
+  return `
+    <div class="thread ${live ? '' : 'past'} ${selected === n.id ? 'on' : ''}">
+      <button class="entry" data-pick="${escapeHtml(n.id)}" data-hover="${escapeHtml(n.id)}">
+        <i class="dot ${sessionTint(n.session)}"></i>
+        <span class="ename">${escapeHtml(title(n))}${n.thread ? '<span class="badge" title="A claude.ai project’s coordinator handed this session its work">thread</span>' : ''}</span>
+        ${live ? pill(state) : n.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span>` : '<span></span>'}
+        <span class="estate">${live && n.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span> · ` : ''}${escapeHtml(doing)}</span>
+      </button>
+      ${live ? teamRows(n) : ''}
+    </div>`
+}
+
+function directory(running, selected) {
+  const projects = projectsList()
+  const live = projects.flatMap(p => p.live)
+  const working = live.filter(n => threadState(n, running) === 'working').length
+  return `
+    <h2 class="sideh">Projects <small>${live.length ? `${working} working · ${live.length - working} with you` : 'none live'}</small></h2>
+    ${projects.map(p => `
+      <section class="project">
+        <p class="room"><i class="room-${roomKey(p.name)}"></i>${escapeHtml(p.name)}<small>${p.live.length ? plural(p.live.length, 'thread') : 'earlier'}</small></p>
+        ${p.live.map(n => threadRow(n, running, selected)).join('')}
+        ${p.past.length ? `${p.live.length ? '<p class="earlier">Earlier</p>' : ''}${p.past.map(n => threadRow(n, running, selected)).join('')}` : ''}
+      </section>`).join('') || '<p class="muted">No sessions yet. Start Claude Code anywhere and it appears here.</p>'}`
+}
+
+// ---------------------------------------------------------------------------
+// The clipboard for one thread or agent
 
 function line(text, extra = '', cls = '') {
   return `<p class="line ${cls}">${text}${extra ? `<span class="muted">· ${extra}</span>` : ''}</p>`
@@ -124,14 +306,68 @@ function limits(n) {
   return n.rateLimits.map(r => line(`${escapeHtml(r.kind.replace('_', ' '))} limit`, `${Math.round(r.percentUsed)}% used`)).join('')
 }
 
-function sessionDetail(n) {
+function gauge(n, live, whose) {
+  if (!n.context?.tokens) return ''
   const f = fill(n)
+  return `
+    <div class="dgauge"><span class="big ${level(f)}">${pct(f)}</span><span>of ${whose} context window ${live ? 'is' : 'was'} in use${live && f >= WARN_AT ? '. It will compact soon.' : '.'}</span></div>
+    <span class="meter"><span class="${level(f)}" style="width:${(f * 100).toFixed(1)}%"></span></span>
+    <p class="dmeta">${k(n.context.tokens)} of ${k(n.context.window)} tokens${n.compactions?.length ? ` · compacted ${plural(n.compactions.length, 'time')}` : ''}</p>`
+}
+
+// Project › thread › agent › agent, each a way back up.
+function crumbs(n) {
+  const chain = lineage(n)
+  const parts = [`<button data-back>${escapeHtml(chain[0]?.projectName ?? 'Projects')}</button>`]
+  chain.slice(0, -1).forEach(x => parts.push(`<button data-pick="${escapeHtml(x.id)}">${escapeHtml(x.label)}</button>`))
+  return `<nav class="crumbs" aria-label="Where this is">${parts.join('<span aria-hidden="true">›</span>')}</nav>`
+}
+
+function messagesFor(n) {
+  const host = n.kind === 'session' ? n : nodes.get(sid(n.session))
+  const list = mailOf(host).filter(m => n.kind === 'session' || m.from === n.id || m.to === n.id).slice(0, 5)
+  if (!list.length) return ''
+  return `<h3>Messages</h3>${list.map(m => `
+    <p class="mail"><b>${escapeHtml(m.fromName ?? 'Someone')} → ${escapeHtml(m.toName ?? 'someone')}</b>${m.text ? `<span>${escapeHtml(m.text)}</span>` : ''}<time>${ago(m.t)}</time></p>`).join('')}`
+}
+
+// The Team tab: the lead, then everyone it spawned, nested.
+function teamTab(n, running) {
+  const host = n.kind === 'session' ? n : nodes.get(sid(n.session))
+  if (!host) return ''
+  if (!isLive(host)) {
+    const helpers = host.pastAgents ?? []
+    return `<h3>Who helped</h3>${helpers.map(a => line(`<i class="dot ${tintOf(a.type)}"></i>${escapeHtml(a.label ?? a.type)}`, escapeHtml(a.description ?? ''))).join('') || '<p class="muted">No subagents.</p>'}`
+  }
+  const rows = []
+  const walk = (branch, d) => branch.forEach(({ node, children }) => {
+    const state = agentState(node)
+    const kind = [node.teammate ? 'teammate' : node.fork ? 'fork' : node.background ? 'background' : '', node.type !== node.label ? node.type : ''].filter(Boolean).join(' · ')
+    rows.push(`
+      <button class="member ${node.id === n.id ? 'on' : ''}" style="--depth:${d}" data-pick="${escapeHtml(node.id)}" data-hover="${escapeHtml(node.id)}">
+        <i class="dot ${tintOf(node.type)}"></i>
+        <span class="mname">${escapeHtml(node.label)}${kind ? `<small>${escapeHtml(kind)}</small>` : ''}</span>
+        ${pill(state)}
+        <span class="mdesc">${escapeHtml(node.description ?? '')}${node.context?.tokens ? ` · ${pct(fill(node))} of its window` : ''}</span>
+      </button>`)
+    walk(children, d + 1)
+  })
+  walk(teamOf(host), 1)
+  return `
+    <button class="member lead ${host.id === n.id ? 'on' : ''}" style="--depth:0" data-pick="${escapeHtml(host.id)}">
+      <i class="dot ${sessionTint(host.session)}"></i>
+      <span class="mname">Lead<small>the main conversation</small></span>
+      ${pill(threadState(host, running))}
+      <span class="mdesc">${host.model ? escapeHtml(host.model) : ''}</span>
+    </button>
+    ${rows.join('') || '<p class="muted">No agents yet. When the lead hands work off, its agents appear here.</p>'}
+    ${messagesFor(n)}`
+}
+
+function sessionDetails(n) {
   const live = isLive(n)
   const act = activity.get(n.id)
   const files = act ? [...act.files].sort((a, b) => (b[1].edits * 3 + b[1].reads) - (a[1].edits * 3 + a[1].reads)).slice(0, 8) : []
-  const helpers = live ? liveHelpers(n) : (n.pastAgents ?? [])
-  const finished = live ? helpersOf(n).filter(a => a.status === 'done').sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0)) : []
-  const where = [n.projectName, n.gitBranch].filter(Boolean).join(' · ')
   const facts = [
     n.turns !== undefined && plural(n.turns, 'turn'),
     n.toolCalls !== undefined && plural(n.toolCalls, 'tool call'),
@@ -140,42 +376,38 @@ function sessionDetail(n) {
     n.model,
   ].filter(Boolean).join(' · ')
   return `
-    <button class="back" data-back>← All sessions</button>
-    <h2 class="dtitle"><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(title(n))}</h2>
-    <p class="dmeta">${escapeHtml(where)}${live ? '' : ` · ended ${ago(n.endedAt ?? n.lastAt)}`}</p>
-    <!--tabs-->
-    ${n.context?.tokens ? `
-      <div class="dgauge"><span class="big ${level(f)}">${pct(f)}</span><span>of its context window ${live ? 'is' : 'was'} in use${live && f >= WARN_AT ? '. It will compact soon.' : '.'}</span></div>
-      <span class="meter"><span class="${level(f)}" style="width:${(f * 100).toFixed(1)}%"></span></span>
-      <p class="dmeta">${k(n.context.tokens)} of ${k(n.context.window)} tokens${n.compactions?.length ? ` · compacted ${plural(n.compactions.length, 'time')}` : ''}</p>` : ''}
+    ${gauge(n, live, 'its')}
     ${facts ? `<p class="dmeta">${escapeHtml(facts)}</p>` : ''}
     ${live ? breakdown(n) + limits(n) : ''}
-    <h3>${live ? 'Helping now' : 'Who helped'}</h3>
-    ${live
-      ? helpers.map(a => helperLine(a, a.context?.tokens ? `${pct(fill(a))} of its own window` : escapeHtml(a.description ?? ''))).join('') || '<p class="muted">No subagents.</p>'
-      : helpers.map(a => line(`<i class="dot ${tintOf(a.type)}"></i>${escapeHtml(a.label ?? a.type)}`, escapeHtml(a.description ?? ''))).join('') || '<p class="muted">No subagents.</p>'}
-    ${finished.length ? `<h3>Finished</h3>${finished.map(a => helperLine(a, `${escapeHtml(a.description ?? '')}${a.description ? ' · ' : ''}${ago(a.endedAt)}`)).join('')}` : ''}
     ${files.length ? `<h3>Files it has worked on</h3>${files.map(fileLine).join('')}` : ''}
     ${act?.actions.length ? `<h3>Recently</h3>${act.actions.slice(0, 8).map(x => line(escapeHtml(x.text), ago(x.t), x.ok ? '' : 'bad')).join('')}` : ''}
     ${n.prompts?.length ? `<h3>What you asked</h3>${[...n.prompts].reverse().slice(0, 6).map(p => line(asked(p), ago(p.t))).join('')}` : ''}`
 }
 
-function agentDetail(n) {
-  const host = nodes.get(sid(n.session))
-  const f = fill(n)
+function agentDetails(n) {
+  const facts = [n.model, n.history ? plural(n.history, 'tool call') : '', n.cwd ? `in ${n.cwd}` : ''].filter(Boolean).join(' · ')
   return `
-    <button class="back" data-pick="${escapeHtml(host?.id ?? '')}">← ${escapeHtml(host?.label ?? 'Session')}</button>
-    <h2 class="dtitle"><i class="dot ${tintOf(n.type)}"></i>${escapeHtml(n.label)}</h2>
-    <p class="dmeta">${escapeHtml(n.description ?? n.type)}</p>
-    <!--tabs-->
-    ${n.context?.tokens ? `
-      <div class="dgauge"><span class="big ${level(f)}">${pct(f)}</span><span>of its own context window.</span></div>
-      <span class="meter"><span class="${level(f)}" style="width:${(f * 100).toFixed(1)}%"></span></span>` : ''}
-    <p class="dmeta">${escapeHtml([n.status === 'done' ? 'finished' : n.status === 'idle' ? 'waiting' : 'working', n.model, n.history ? plural(n.history, 'tool call') : '', n.teammate ? 'teammate' : n.background ? 'background' : ''].filter(Boolean).join(' · '))}</p>`
+    ${gauge(n, agentState(n) !== 'done', 'its own')}
+    ${facts ? `<p class="dmeta">${escapeHtml(facts)}</p>` : ''}
+    ${n.answer?.text ? `<h3>Last report</h3><p class="line">${escapeHtml(n.answer.text)}</p>` : ''}`
 }
 
+function head(n, running) {
+  const isAgent = n.kind === 'agent'
+  const state = isAgent ? agentState(n) : threadState(n, running)
+  const sub = isAgent
+    ? [n.description, n.teammateId ?? (n.teammate ? 'teammate' : ''), n.fork ? 'fork of its parent' : n.background ? 'in the background' : ''].filter(Boolean).join(' · ')
+    : [n.thread ? 'Thread of a claude.ai project' : '', n.gitBranch, isLive(n) ? '' : `ended ${ago(n.endedAt ?? n.lastAt)}`].filter(Boolean).join(' · ')
+  return `
+    ${crumbs(n)}
+    <h2 class="dtitle"><i class="dot ${isAgent ? tintOf(n.type) : sessionTint(n.session)}"></i>${escapeHtml(isAgent ? n.label : title(n))}</h2>
+    <p class="dmeta">${pill(state)} ${escapeHtml(sub)}</p>`
+}
+
+// ---------------------------------------------------------------------------
 // Patch the DOM in place rather than replacing it, so a card under your
 // pointer (or holding keyboard focus) survives the refresh and clicks land.
+
 function morph(from, to) {
   if (from.nodeType !== to.nodeType || from.nodeName !== to.nodeName) {
     from.replaceWith(to)
@@ -205,15 +437,26 @@ function patch(el, html) {
   morph(el, fresh)
 }
 
-// The clipboard's two tabs: the details, or the conversation (transcript.js).
-let tab = 'details'
+// The clipboard's tabs. The conversation comes first: talking to a thread
+// is what you open one for.
+const TABS = [['transcript', 'Conversation'], ['team', 'Team'], ['details', 'Details']]
+let tab = 'transcript'
 let lastArgs = null
 
-function withTabs(html, n) {
-  const [head, body] = html.split('<!--tabs-->')
-  const button = (name, label) => `<button type="button" role="tab" class="tab ${tab === name ? 'on' : ''}" aria-selected="${tab === name}" data-tab="${name}">${label}</button>`
-  const tabs = `<div class="tabs" role="tablist">${button('details', 'Details')}${button('transcript', 'Transcript')}</div>`
-  return head + tabs + (tab === 'details' ? body : `<div class="transcript" data-keep="${escapeHtml(n.id)}"></div>`)
+export function setTab(name) {
+  if (!TABS.some(([t]) => t === name)) return
+  tab = name
+  if (lastArgs) render(lastArgs)
+}
+
+function clipboard(n, running) {
+  const host = n.kind === 'session' ? n : nodes.get(sid(n.session))
+  const teamSize = host && isLive(host) ? countAll(teamOf(host)) : (host?.pastAgents?.length ?? 0)
+  const button = ([name, label], i) => `<button type="button" role="tab" class="tab ${tab === name ? 'on' : ''}" aria-selected="${tab === name}" data-tab="${name}" title="${label} (${i + 1})">${label}${name === 'team' && teamSize ? `<small>${teamSize}</small>` : ''}</button>`
+  const body = tab === 'transcript' ? `<div class="transcript" data-keep="${escapeHtml(n.id)}"></div>`
+    : tab === 'team' ? teamTab(n, running)
+      : n.kind === 'agent' ? agentDetails(n) : sessionDetails(n)
+  return `${head(n, running)}<div class="tabs" role="tablist">${TABS.map(button).join('')}</div>${body}`
 }
 
 // Re-render what changed. `selected` is a node id or null; `hover` shows
@@ -221,22 +464,35 @@ function withTabs(html, n) {
 export function render(args) {
   lastArgs = args
   const { running, selected, pick, hover } = args
-  patch($('#now'), summary(running).map(p => `<p>${p}</p>`).join(''))
-  patch($('#look'), needsALook())
-  patch($('#moments'), moments.slice(0, 12).map(m =>
-    `<li class="${m.tone}"><span>${escapeHtml(m.text)}</span><time>${ago(m.t)}</time></li>`).join('') || '<li class="muted"><span>Quiet so far.</span></li>')
+  patch($('#now'), `<p>${escapeHtml(headline(running))}</p>`)
+  renderInbox(running)
+  patch($('#full'), fullWindows())
+  for (const b of document.querySelectorAll('[data-feed]')) b.classList.toggle('on', b.dataset.feed === feed)
+  patch($('#moments'), activityList())
   const n = selected && nodes.get(selected)
   const detail = n && (n.kind === 'agent' || n.kind === 'session')
   $('#side').classList.toggle('clipboard', Boolean(detail))
   $('#side').classList.toggle('talking', Boolean(detail) && tab === 'transcript')
-  patch($('#side'), !detail ? directory(running, selected) : withTabs(n.kind === 'agent' ? agentDetail(n) : sessionDetail(n), n))
+  patch($('#side'), !detail ? directory(running, selected) : clipboard(n, running))
   if (detail && tab === 'transcript') transcript.attach($('#side .transcript'), n)
   else transcript.detach()
-  for (const b of document.querySelectorAll('[data-tab]')) b.onclick = () => { tab = b.dataset.tab; render(lastArgs) }
-  for (const b of document.querySelectorAll('[data-pick]')) b.onclick = () => pick(b.dataset.pick || null)
+  for (const b of document.querySelectorAll('[data-tab]')) b.onclick = () => setTab(b.dataset.tab)
+  for (const b of document.querySelectorAll('[data-feed]')) b.onclick = () => { feed = b.dataset.feed; render(lastArgs) }
+  for (const b of document.querySelectorAll('[data-pick]')) b.onclick = () => b.dataset.pick && pick(b.dataset.pick)
   for (const b of document.querySelectorAll('[data-back]')) b.onclick = () => pick(null)
   for (const b of document.querySelectorAll('[data-hover]')) {
     b.onpointerenter = () => hover(b.dataset.hover)
     b.onpointerleave = () => hover(null)
   }
+}
+
+// `r`: reply to what's open, or to the thread that has waited longest.
+export function focusReply() {
+  if (lastArgs?.selected) {
+    if (tab !== 'transcript') setTab('transcript')
+    return transcript.focusComposer()
+  }
+  const field = document.querySelector('#inbox .card:not(.gone) textarea')
+  field?.focus()
+  return Boolean(field)
 }

@@ -25,6 +25,8 @@ export const nodes = new Map()
 export let links = []
 export const stats = { calls: 0, errors: 0 }
 export const notices = [] // compactions and other moments, newest first
+export const mail = [] // messages between loops, newest first: { t, session, from, to, fromName, toName, via, text }
+const MAIL_KEEP = 60
 let dirty = true
 
 export const isDirty = () => dirty
@@ -64,6 +66,7 @@ export function reset() {
   links = links.filter(l => nodes.has(idOf(l.source)) && nodes.has(idOf(l.target)))
   Object.assign(stats, { calls: 0, errors: 0 })
   notices.length = 0
+  mail.length = 0
   dirty = true
 }
 
@@ -139,6 +142,11 @@ function notice(ev, text, level, target) {
 
 const k = n => `${Math.round(n / 1000)}k`
 
+// Messages that come from outside the session have no sender loop here.
+const OUTSIDE = { 'projects-relay': 'Project coordinator', peer: 'Another session', 'peer-send-message': 'Another session', channel: 'A channel', 'slack-ping': 'Slack', 'scheduled-trigger': 'A routine', bridge: 'You, remotely' }
+const isOutside = via => via in OUTSIDE
+const outsideName = via => OUTSIDE[via]
+
 const handlers = {
   'session.start'(ev) {
     const node = ensureSession(ev)
@@ -154,6 +162,11 @@ const handlers = {
   'turn.start'(ev) {
     const node = owner(ev)
     node.pulseAt = ev.t
+    if (node.kind === 'session') {
+      node.turnOpen = true
+      node.turnAt = ev.t
+      node.lastReason = undefined
+    }
     if (node.kind === 'session' && ev.text) {
       node.turns++
       // A background task reporting in isn't something you asked.
@@ -168,8 +181,35 @@ const handlers = {
     }
   },
   'turn.complete'(ev) {
+    // A reading for an agent no longer shown must not bring it back.
+    if (ev.agent && !nodes.has(aid(ev.session, ev.agent))) return
     const node = owner(ev)
     if (ev.context?.window) node.context = ev.context
+    if (ev.answer) node.answer = { t: ev.t, text: ev.answer }
+    if (node.kind === 'session') {
+      node.turnOpen = false
+      node.lastReason = ev.reason
+      node.answeredAt = ev.t
+    }
+  },
+  'session.thread'(ev) {
+    ensureSession(ev).thread = true
+  },
+  'agent.message'(ev) {
+    ensureSession(ev)
+    const toAgent = ev.to ?? [...nodes.values()].find(n => n.kind === 'agent' && n.session === ev.session && n.name && n.name === ev.toName)?.agent
+    const from = ev.from ? aid(ev.session, ev.from) : isOutside(ev.via) ? null : sid(ev.session)
+    const to = toAgent ? aid(ev.session, toAgent) : ev.toName ? null : sid(ev.session)
+    // Names as they were: a finished agent leaves the office, its mail stays.
+    const nameOf = id => (nodes.get(id)?.kind === 'session' ? 'Lead' : nodes.get(id)?.label)
+    mail.unshift({
+      t: ev.t, session: ev.session, via: ev.via, text: ev.text, from, to,
+      fromName: ev.fromName ?? (from ? nameOf(from) : outsideName(ev.via)),
+      toName: ev.toName ?? (to ? nameOf(to) : undefined),
+    })
+    if (mail.length > MAIL_KEEP) mail.pop()
+    const target = to && nodes.get(to)
+    if (target) target.mailAt = ev.t
   },
   'context.measure'(ev) {
     const node = ensureSession(ev)
@@ -209,8 +249,9 @@ const handlers = {
       addLink(parent, id, 'spawn')
     }
     Object.assign(node, {
-      label: ev.name || ev.type, type: ev.type, description: ev.description, model: ev.model,
-      background: ev.background, teammate: ev.teammate, parent, status: 'active', startedAt: ev.t,
+      label: ev.name || ev.type, name: ev.name, type: ev.type, description: ev.description, model: ev.model,
+      background: ev.background, teammate: ev.teammate, teammateId: ev.teammateId, fork: ev.fork, cwd: ev.cwd,
+      parent, status: 'active', startedAt: ev.t,
       announced: true,
     })
     nodes.get(parent).pulseAt = ev.t
@@ -219,15 +260,22 @@ const handlers = {
     const node = nodes.get(aid(ev.session, ev.agent))
     if (node) node.status = 'idle'
   },
+  'agent.waiting'(ev) {
+    const node = nodes.get(aid(ev.session, ev.agent))
+    if (node) node.status = 'waiting'
+  },
   'agent.end'(ev) {
     const node = nodes.get(aid(ev.session, ev.agent))
     if (!node) return
     node.status = 'done'
+    node.endStatus = ev.status
     node.endedAt = ev.t
     trimFinishedAgents()
   },
   'tool.start'(ev) {
     const own = owner(ev)
+    // A finished or waiting subagent at work again: it was resumed.
+    if (own.kind === 'agent' && own.status !== 'active') own.status = 'active'
     const id = tid(ev.session, ev.id)
     if (nodes.has(id)) return
     addNode({
@@ -354,3 +402,59 @@ export function warnings() {
     .filter(n => (n.kind === 'session' || n.kind === 'agent') && !n.past && n.status !== 'done' && fill(n) >= WARN_AT)
     .sort((a, b) => fill(b) - fill(a))
 }
+
+// ---------------------------------------------------------------------------
+// The shape Claude gives work: a project holds threads (sessions), a thread
+// has its lead (the main loop) and the agents it spawned, nested.
+
+export const BUSY_MS = 2500
+
+// Where a thread stands, in the words claude.ai's Overview uses:
+//   working   a turn is running or a tool just ran
+//   waiting   it answered and the next move is yours
+//   stuck     its last turn ended on an error, a refusal or an interrupt
+//   ended     the session is over (or is a past one)
+export function threadState(n, running = new Set()) {
+  if (n.past || n.status === 'done') return 'ended'
+  if (n.turnOpen || running.has(n.id) || Date.now() - (n.lastAt ?? 0) < BUSY_MS) return 'working'
+  if (n.lastReason && n.lastReason !== 'answer') return 'stuck'
+  return 'waiting'
+}
+
+// An agent: working, waiting (on its own background work), idle (a
+// teammate between turns), done or failed.
+export function agentState(n) {
+  if (n.status === 'done') return n.endStatus === 'failed' || n.endStatus === 'killed' ? 'failed' : 'done'
+  if (n.status === 'idle') return 'idle'
+  if (n.status === 'waiting') return 'waiting'
+  return 'working'
+}
+
+// A thread's agents as a tree under its lead: [{ node, children }].
+export function teamOf(sessionNode) {
+  const agents = [...nodes.values()].filter(n => n.kind === 'agent' && n.session === sessionNode.session)
+  const byParent = new Map()
+  for (const a of agents) {
+    const parent = a.parent ?? sessionNode.id
+    if (!byParent.has(parent)) byParent.set(parent, [])
+    byParent.get(parent).push(a)
+  }
+  const grow = id => (byParent.get(id) ?? [])
+    .sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0))
+    .map(node => ({ node, children: grow(node.id) }))
+  return grow(sessionNode.id)
+}
+
+// Who stands above a node: its thread, then each agent down to it.
+export function lineage(n) {
+  const chain = []
+  let at = n
+  while (at && at.kind === 'agent') {
+    chain.unshift(at)
+    at = nodes.get(at.parent ?? sid(at.session))
+  }
+  if (at) chain.unshift(at)
+  return chain
+}
+
+export const mailOf = sessionNode => mail.filter(m => m.session === sessionNode.session)

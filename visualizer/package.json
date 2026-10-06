@@ -1,7 +1,7 @@
 {
   "name": "agent-office-visualizer",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "description": "Source of the tabletop page the agent-office bridge serves.",
   "license": "MIT",
