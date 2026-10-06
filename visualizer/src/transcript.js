@@ -199,6 +199,40 @@ export function onEvent(ev) {
 
 const capitalize = s => s.charAt(0).toUpperCase() + s.slice(1)
 
+// A message sent from outside the transcript (the inbox's reply box): the
+// same route, without a transcript open. Resolves to { ok, status }.
+export async function sendTo(n, text) {
+  if (!n || !text.trim()) return { ok: false, status: 'Nothing to send' }
+  if (demo) {
+    const list = demoReplies.get(n.id) ?? []
+    list.push({ kind: 'chat', text: text.trim(), from: 'agent-office', t: Date.now() })
+    demoReplies.set(n.id, list)
+    return { ok: true, status: 'Queued as the next prompt' }
+  }
+  if (!token) return { ok: false, status: 'Messaging needs the office opened from its bridge (run /office)' }
+  try {
+    const res = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-agent-office-token': token },
+      body: JSON.stringify({ ...target(n), text: text.trim() }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(body.error ?? `the bridge answered ${res.status}`)
+    return { ok: true, status: 'Sent. It arrives as the next prompt' }
+  } catch (err) {
+    return { ok: false, status: `Not sent: ${err.message}` }
+  }
+}
+
+export const canMessage = () => demo || Boolean(token)
+
+// Put the cursor in the open transcript's message box, if there is one.
+export function focusComposer() {
+  const field = view?.root.querySelector('.tx-compose textarea')
+  field?.focus()
+  return Boolean(field)
+}
+
 // ---------------------------------------------------------------------------
 // Mounting into the clipboard
 

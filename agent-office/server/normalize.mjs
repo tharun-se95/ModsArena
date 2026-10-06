@@ -10,12 +10,19 @@
 //   session.start  { cwd?, model?, project? { id, name, remote } }
 //   session.end    { reason?, resumeId? }
 //   turn.start     { agent?, turnId?, text? }
-//   turn.complete  { agent?, turnId?, durationMs?, reason?, context? }
-//   agent.spawn    { agent, parent?, type, description?, model?, background? }
-//   agent.end      { agent }
+//   turn.complete  { agent?, turnId?, durationMs?, reason?, context?, answer? }
+//   agent.spawn    { agent, parent?, type, name?, description?, model?, background?,
+//                    teammate?, teammateId?, fork?, cwd? }
+//   agent.end      { agent, status? }             completed, failed or killed
 //   tool.start     { agent?, id, tool, summary? }
 //   tool.end       { agent?, id, tool, ok }
 //   agent.idle     { agent }                      a teammate waiting for mail
+//   agent.waiting  { agent }                      a subagent holding background work
+//   agent.message  { from?, to?, toName?, fromName?, via, text? }
+//                  one loop messaging another; no `from` or `to` is the main
+//                  loop; `via` says how (model, plugin, projects-relay, peer...)
+//   session.thread {}                             a claude.ai project's coordinator
+//                                                 handed this session work
 // Gauges (the bridge keeps only the newest per session and agent):
 //   context.measure   { context { tokens?, window, percent? }, costUsd?, rateLimits? }
 //   context.breakdown { window, used, categories [{ name, tokens, kind }] }
@@ -27,7 +34,8 @@
 
 const KINDS = new Set([
   'session.start', 'session.end', 'turn.start', 'turn.complete',
-  'agent.spawn', 'agent.end', 'agent.idle', 'tool.start', 'tool.end',
+  'agent.spawn', 'agent.end', 'agent.idle', 'agent.waiting', 'agent.message', 'session.thread',
+  'tool.start', 'tool.end',
   'context.measure', 'context.breakdown', 'context.compact', 'agent.context',
   'chat.sent', 'chat.delivered',
 ])

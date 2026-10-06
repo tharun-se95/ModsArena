@@ -102,26 +102,18 @@
   #now p { margin: 0 0 6px; font: 400 16.5px/1.42 var(--serif); text-wrap: pretty; }
   #now p + p { font-size: 13.5px; color: var(--muted); }
   ul { list-style: none; margin: 0; padding: 0; }
-  #look { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-  #look:empty { display: none; }
-  #look li { width: calc(50% - 4px); }
-  #look li:only-child { width: 100%; }
-  #look button, #look li > span { display: block; width: 100%; height: 100%; padding: 8px 9px 9px; font: 12px/1.35 var(--sans); color: #3b3226; background: #fbe7a1; box-shadow: 0 3px 6px rgba(60, 40, 10, 0.18); border-radius: 2px 2px 8px 2px; transform: rotate(-1.2deg); transition: transform 0.15s; }
-  #look li:nth-child(even) button { transform: rotate(1.4deg); }
-  #look button { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-  #look li.bad button { background: #f8cdd6; }
-  #look li.calm span { background: color-mix(in srgb, var(--leaf) 30%, #fffbe9); transform: rotate(-0.6deg); }
-  #look button:hover { transform: rotate(0) translateY(-2px); }
-  #look .dot { display: none; }
 
   .tape { position: relative; margin-top: auto; flex: 0 1 auto; min-height: 0; overflow-y: auto; padding: 12px 14px 10px; border-radius: 4px 4px 14px 14px; border-top: 2px dashed color-mix(in srgb, var(--muted) 45%, transparent); }
-  #moments li { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-top: 1px dashed var(--line); font-size: 12px; line-height: 1.38; }
+  #moments li { border-top: 1px dashed var(--line); font-size: 12px; line-height: 1.38; }
+  #moments li > button, #moments li > span { display: flex; justify-content: space-between; gap: 10px; width: 100%; padding: 5px 0; }
+  #moments li > button:hover span { color: var(--accent); }
   #moments li:first-child { border-top: 0; }
   #moments li:nth-child(n+5) { opacity: 0.75; }
   #moments li:nth-child(n+8) { opacity: 0.5; }
   #moments li time { color: var(--muted); font: 11px var(--mono); white-space: nowrap; }
   #moments li.bad span { color: var(--crit); }
   #moments li.note span { color: var(--accent); }
+  #moments li.mail span::before { content: "✉ "; color: var(--teal); }
 
   #side { top: 64px; right: 16px; width: 320px; max-height: calc(100% - 80px); overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 6px; }
   #side.clipboard { padding-top: 26px; border-top: 0; margin-top: 10px; }
@@ -256,9 +248,99 @@
   .tx-hint { grid-column: 1 / -1; margin: 0; font-size: 10.5px; color: var(--muted); }
   @media (prefers-reduced-motion: reduce) { .tx-dot.running { animation: none; } }
 
-  /* Dark mode: the sticky notes dim a little. */
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) #look button, :root:not([data-theme="light"]) #look li > span { filter: brightness(0.86); } }
-  :root[data-theme="dark"] #look button, :root[data-theme="dark"] #look li > span { filter: brightness(0.86); }
+
+
+  /* Waiting on you: a letter for each thread whose next move is yours,
+     longest waiting first, with what it last said and a reply line. */
+  .board > .eyebrow { display: flex; align-items: center; }
+  .count { margin-left: auto; display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: #fff; font: 600 10px var(--mono); letter-spacing: 0; }
+  .count:empty { display: none; }
+  #inbox { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+  .card { position: relative; background: var(--paper); border: 1px solid var(--line); border-radius: 4px 12px 12px 12px; box-shadow: 0 3px 10px rgba(60, 40, 10, 0.10); padding: 9px 10px 8px 12px; transition: opacity 0.3s, transform 0.2s; }
+  .card::before { content: ""; position: absolute; left: -1px; top: 10px; bottom: 10px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
+  .card.stuck::before { background: var(--crit); }
+  .card.gone { opacity: 0.55; }
+  .card.gone::before { background: var(--teal); }
+  .card:hover { transform: translateY(-1px); }
+  .card-head { display: flex; flex-direction: column; gap: 2px; width: 100%; }
+  .card-where { display: flex; align-items: center; font: 500 10.5px var(--mono); color: var(--muted); letter-spacing: 0.02em; min-width: 0; }
+  .card-where .dot { width: 7px; height: 7px; margin-right: 6px; }
+  .card-where time { margin-left: auto; padding-left: 8px; white-space: nowrap; }
+  .card-head b { font: 600 14px/1.3 var(--serif); text-wrap: pretty; }
+  .card-head:hover b { color: var(--accent); }
+  .card-said { font-size: 12px; line-height: 1.4; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+  .card-reply { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: end; margin-top: 7px; padding-top: 7px; border-top: 1px dashed var(--line); }
+  .card-reply textarea { font: 12.5px/1.4 var(--sans); color: var(--ink); background: transparent; border: 0; padding: 3px 0; resize: none; min-height: 22px; max-height: 90px; field-sizing: content; }
+  .card-reply textarea:focus { outline: none; }
+  .card-reply:focus-within { border-top-color: var(--accent); }
+  .card-reply button { width: 26px; height: 26px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 14%, var(--paper)); color: var(--accent); text-align: center; font: 600 13px var(--sans); }
+  .card-reply button:hover { background: var(--accent); color: #fff; }
+  .card-status { grid-column: 1 / -1; margin: 0; font-size: 10.5px; color: var(--teal); }
+  .card-status.bad { color: var(--crit); }
+  #inbox .calm { padding: 10px 12px; font-size: 12.5px; color: var(--muted); background: color-mix(in srgb, var(--leaf) 12%, var(--paper)); border-radius: 10px; }
+  #inbox-more button { margin-top: 8px; font-size: 12px; color: var(--accent); }
+  #inbox-more:empty, #full:empty { display: none; }
+  #full { margin-top: 10px; display: flex; flex-direction: column; gap: 2px; }
+  #full button { font-size: 12px; color: var(--muted); }
+  #full button:hover { color: var(--ink); }
+  #full .pct { margin-right: 4px; }
+
+  /* Activity: all, only messages between agents, or only problems. */
+  .tape-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .feeds { display: inline-flex; gap: 2px; }
+  .feeds button { font-size: 11px; color: var(--muted); padding: 1px 7px; border-radius: 999px; }
+  .feeds button:hover { color: var(--ink); }
+  .feeds button.on { background: color-mix(in srgb, var(--line) 70%, transparent); color: var(--ink); }
+
+  /* States, as claude.ai's Overview names them. */
+  .pill { display: inline-flex; align-items: center; gap: 5px; padding: 1px 7px; border-radius: 999px; font: 500 10.5px/1.6 var(--sans); white-space: nowrap; color: var(--muted); background: color-mix(in srgb, var(--line) 55%, transparent); }
+  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .pill.working { color: color-mix(in srgb, var(--teal) 80%, var(--ink)); background: color-mix(in srgb, var(--teal) 14%, transparent); }
+  .pill.working::before { animation: tx-pulse 1.4s ease-in-out infinite; }
+  .pill.waiting { color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, transparent); }
+  .pill.stuck, .pill.failed { color: var(--crit); background: color-mix(in srgb, var(--crit) 12%, transparent); }
+  .sdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--teal); }
+  .sdot.waiting { background: var(--mustard); } .sdot.idle { background: var(--muted); opacity: 0.6; } .sdot.failed { background: var(--crit); } .sdot.done { background: var(--line); }
+  .badge { margin-left: 6px; padding: 0 5px; border-radius: 4px; font: 500 9.5px/1.6 var(--mono); letter-spacing: 0.04em; text-transform: uppercase; color: var(--lilac); background: color-mix(in srgb, var(--lilac) 13%, transparent); vertical-align: 1px; }
+  .env { font-style: normal; color: var(--teal); margin-right: 4px; animation: tx-pulse 1s ease-in-out 3; }
+
+  /* The projects directory: each project's threads, each thread's live
+     team nested under it the way the lead spawned them. */
+  .project + .project { margin-top: 6px; }
+  .room small { margin-left: auto; font: 500 10px var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+  .earlier { margin: 6px 0 0 8px; font: 500 10px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  .thread { border-radius: 10px; }
+  .thread.on { background: color-mix(in srgb, var(--line) 40%, transparent); }
+  .thread .entry { width: 100%; }
+  .thread .estate .pct { font-size: 11px; }
+  .agent-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px; width: 100%; padding: 3px 8px 3px calc(8px + var(--depth) * 14px); border-radius: 8px; font-size: 12px; position: relative; }
+  .agent-row::before { content: ""; position: absolute; left: calc(var(--depth) * 14px - 2px); top: 0; height: 50%; width: 7px; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); border-bottom-left-radius: 4px; }
+  .agent-row:hover { background: color-mix(in srgb, var(--line) 55%, transparent); }
+  .agent-row .dot { width: 7px; height: 7px; margin: 0; }
+  .aname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .astate { display: inline-flex; align-items: center; }
+  .folded { margin: 0; padding: 2px 8px 4px calc(8px + var(--depth) * 14px + 13px); font-size: 11px; color: var(--muted); }
+
+  /* The clipboard: where you are, then the conversation, the team, the details. */
+  .crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+  .crumbs button { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+  .crumbs button:hover { color: var(--accent); }
+  .dmeta .pill { margin-right: 4px; }
+  .tab small { margin-left: 5px; font: 500 10px var(--mono); color: var(--muted); }
+  .member { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 2px 8px; width: 100%; padding: 6px 8px 6px calc(8px + var(--depth) * 16px); border-radius: 10px; position: relative; }
+  .member:not(.lead)::before { content: ""; position: absolute; left: calc(var(--depth) * 16px - 4px); top: 0; height: 18px; width: 8px; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); border-bottom-left-radius: 5px; }
+  .member:hover, .member.on { background: color-mix(in srgb, var(--line) 55%, transparent); }
+  .member .dot { margin: 0; }
+  .mname { font: 500 13px/1.3 var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mname small { margin-left: 6px; font: 400 11px var(--sans); color: var(--muted); }
+  .mdesc { grid-column: 2 / 4; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mdesc:empty { display: none; }
+  .mail { margin: 0; padding: 5px 0; border-top: 1px dashed var(--line); font-size: 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1px 8px; }
+  .mail b { font-weight: 500; }
+  .mail span { grid-column: 1; color: var(--muted); overflow-wrap: anywhere; }
+  .mail time { grid-row: 1; grid-column: 2; font: 10.5px var(--mono); color: var(--muted); }
+  kbd { font: 500 10.5px var(--mono); padding: 0 4px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; background: var(--paper); }
+  @media (prefers-reduced-motion: reduce) { .pill.working::before, .env { animation: none; } }
 
   /* Narrow screens: the notice card shrinks to a strip under the top bar,
      the tape goes away, and the directory becomes a sheet at the bottom. */
@@ -268,19 +350,19 @@
     .board::before { display: none; }
     #now p { font-size: 14.5px; }
     #now p + p, .tape { display: none; }
-    #look li { width: auto; flex: 1 1 140px; }
+    #inbox { max-height: 96px; overflow-y: auto; }
     #side { top: auto; bottom: 12px; left: 12px; right: 12px; width: auto; max-height: 36%; }
     .hint { display: none; }
     .word { font-size: 15px; }
     .controls .toggle span, .controls .sound span { display: none; }
   }
-  @media (prefers-reduced-motion: reduce) { .flag.zzz i { animation: none; } #look button { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .flag.zzz i { animation: none; } .card { transition: none; } }
 </style>
 </head>
 <body>
 <div class="app">
   <main class="stage-wrap">
-    <div id="stage" aria-label="Your sessions in an office: each project is a room, each session a colorful critter at its own desk, its subagents stand behind it, and small beads rise with each tool call"></div>
+    <div id="stage" aria-label="Your sessions in an office: each project is a room, each thread a colorful critter at its own desk, the agents it spawned stand behind it, and small beads rise with each tool call"></div>
 
     <header class="hud topbar">
       <span class="brand paper">
@@ -298,19 +380,24 @@
     </header>
 
     <div class="hud left">
-      <section class="board paper" aria-label="Right now">
-        <p class="eyebrow">Right now</p>
+      <section class="board paper" aria-label="Waiting on you">
+        <p class="eyebrow">Waiting on you <span id="inbox-count" class="count"></span></p>
         <div id="now"></div>
-        <ul id="look" aria-label="Needs a look"></ul>
+        <ul id="inbox" aria-label="Threads waiting on you"></ul>
+        <div id="inbox-more"></div>
+        <ul id="full" aria-label="Context windows nearly full"></ul>
       </section>
-      <section class="tape paper" aria-label="Moments">
-        <p class="eyebrow">Moments</p>
+      <section class="tape paper" aria-label="Activity">
+        <div class="tape-head">
+          <p class="eyebrow">Activity</p>
+          <span class="feeds" role="group" aria-label="Show"><button type="button" data-feed="all">All</button><button type="button" data-feed="mail">Messages</button><button type="button" data-feed="bad">Problems</button></span>
+        </div>
         <ul id="moments"></ul>
       </section>
     </div>
 
     <aside class="hud paper" id="side" aria-live="polite"></aside>
-    <span class="hint paper">Drag to move around &middot; scroll to zoom &middot; hover a critter to see what it&rsquo;s doing &middot; click a room&rsquo;s sign to zoom in</span>
+    <span class="hint paper"><kbd>j</kbd> <kbd>k</kbd> move between threads and agents &middot; <kbd>r</kbd> reply &middot; <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> tabs &middot; <kbd>Esc</kbd> back &middot; drag to look around</span>
   </main>
 </div>
 

@@ -6,6 +6,25 @@ git tag (`v0.2.1`) with a GitHub Release, and the same version is in
 and both `package.json` files. `claude plugin marketplace update modsarena`
 picks up a new one.
 
+## Unreleased
+
+- **The office follows how Claude organizes work.** Projects hold threads
+  (your sessions), each thread has its lead and the agents it spawned,
+  nested. The directory shows every thread's state (Working, Waiting on
+  you, Needs a look) and its live team as a tree.
+- **Waiting on you.** Threads whose next move is yours collect as letters
+  with what they last said, and you reply right there.
+- **A clipboard with a trail.** Project › thread › agent, each a way back
+  up, and three tabs: Conversation (now first), Team, Details.
+- **Messages between agents.** The lead to its agents, agents to each
+  other, and a claude.ai project's coordinator to a thread running on your
+  machine show in Activity (filter to Messages) and on the Team tab.
+- **Real agent status.** A subagent holding background work stays in the
+  office instead of being shown as finished, and one that stopped early
+  says so.
+- **Keys:** j/k walk threads and agents, 1-3 switch tabs, r replies, Esc
+  goes up a level.
+
 ## 0.3.1
 
 - **Agent Office has a logo.** A floor plan of the office, a room per

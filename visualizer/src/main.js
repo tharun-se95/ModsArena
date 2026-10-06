@@ -61,10 +61,33 @@ function measureInsets() {
 const panelWatch = new ResizeObserver(measureInsets)
 for (const el of document.querySelectorAll('.hud.left > *, #side, .topbar, #stage')) panelWatch.observe(el)
 
+// The keyboard: j/k (or the arrows) walk the directory, thread by thread
+// and agent by agent; 1-3 switch tabs; r replies; Esc goes up a level.
+const isTyping = el => el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' || el.isContentEditable)
 addEventListener('keydown', e => {
-  if (e.key !== 'Escape') return
-  pick(null)
-  table.focusOn(null)
+  if (e.metaKey || e.ctrlKey || e.altKey) return
+  if (isTyping(document.activeElement)) {
+    if (e.key === 'Escape') document.activeElement.blur()
+    return
+  }
+  if (e.key === 'Escape') {
+    const n = selected && model.nodes.get(selected)
+    const up = n?.kind === 'agent' ? model.lineage(n).at(-2) : null
+    pick(up?.id ?? null)
+    if (!up) table.focusOn(null)
+    return
+  }
+  const step = { j: 1, ArrowDown: 1, k: -1, ArrowUp: -1 }[e.key]
+  if (step) {
+    const list = panels.order()
+    if (!list.length) return
+    const at = list.indexOf(selected)
+    pick(list[at < 0 ? (step > 0 ? 0 : list.length - 1) : (at + step + list.length) % list.length])
+    e.preventDefault()
+    return
+  }
+  if (['1', '2', '3'].includes(e.key)) panels.setTab(['transcript', 'team', 'details'][Number(e.key) - 1])
+  else if (e.key === 'r' && panels.focusReply()) e.preventDefault()
 })
 
 // Sound: off until the page has been clicked or a key pressed (browsers

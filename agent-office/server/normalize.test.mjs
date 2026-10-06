@@ -37,3 +37,12 @@ test('context events pass through and gauges key per loop', () => {
   assert.equal(normalize({ kind: 'context.compact', session: 's', trigger: 'auto' }).length, 1)
   assert.equal(normalize({ hook_event_name: 'PreCompact', session_id: 's', trigger: 'manual' })[0].trigger, 'manual')
 })
+
+test('threads, messages and waiting subagents pass through', () => {
+  const out = normalize([
+    { kind: 'session.thread', session: 's' },
+    { kind: 'agent.message', session: 's', via: 'projects-relay', text: 'Look into it' },
+    { kind: 'agent.waiting', session: 's', agent: 'a' },
+  ], 1)
+  assert.deepEqual(out.map(ev => ev.kind), ['session.thread', 'agent.message', 'agent.waiting'])
+})
