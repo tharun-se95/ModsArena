@@ -7,17 +7,21 @@
 // session's mod delivers it. In the demo there's no bridge: the transcript
 // is drawn from the sample activity and messages get a sample reply.
 
-import { nodes, sid } from './model.js'
+import { nodes, sid, aid } from './model.js'
 import { activity, escapeHtml, ago } from './words.js'
 
 const POLL_MS = 1500
 const KEEP = 600
 const token = document.querySelector('meta[name="agent-office-token"]')?.content || ''
 let demo = false
+let demoSend = null
 
-// main.js says whether this page plays sample activity.
-export function setDemo(isDemo) {
+// main.js says whether this page plays sample activity, and (for the
+// scripted story) who takes a reply: demoSend(node, text) is true when the
+// story carries on from it.
+export function setDemo(isDemo, onSend = null) {
   demo = isDemo
+  demoSend = onSend
 }
 
 // What's open: one transcript at a time.
@@ -143,6 +147,28 @@ function demoEntries(n) {
 
 const demoReplies = new Map()
 
+// The demo has no transcript files: what each one answered, and the
+// messages it got from its team, are kept from the sample activity.
+function remember(ev) {
+  const add = (id, entry) => {
+    const list = demoReplies.get(id) ?? []
+    list.push(entry)
+    if (list.length > KEEP) list.shift()
+    demoReplies.set(id, list)
+  }
+  if (ev.kind === 'turn.complete' && ev.answer) add(ev.agent ? aid(ev.session, ev.agent) : sid(ev.session), { kind: 'say', text: ev.answer, t: ev.t })
+  if (ev.kind === 'agent.message' && ev.text) {
+    const to = ev.to ? aid(ev.session, ev.to) : ev.toName ? null : sid(ev.session)
+    const sender = ev.from ? nodes.get(aid(ev.session, ev.from))?.label : ev.via === 'model' ? 'Lead' : ev.fromName
+    // A prompt from the project's coordinator is the turn's own prompt.
+    if (to && ev.via !== 'projects-relay') add(to, { kind: 'chat', text: ev.text, from: sender ?? 'someone', t: ev.t })
+  }
+  if (view && demo && (ev.kind === 'turn.complete' || ev.kind === 'agent.message')) {
+    const n = nodes.get(view.id)
+    if (n) { view.entries = demoEntries(n); draw() }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Sending
 
@@ -160,8 +186,11 @@ async function send(text) {
     }, 500)
     setTimeout(() => {
       const list = demoReplies.get(id) ?? []
-      list.push({ kind: 'chat', text: pending.text, from: 'agent-office', t: Date.now() })
-      list.push({ kind: 'say', text: 'Got it. (This is the demo: nothing really runs, but in your own office the session reads this as its next prompt and answers here.)', t: Date.now() + 1 })
+      // The story takes it as the lead's next prompt; otherwise a sample reply.
+      if (!demoSend?.(n, pending.text)) {
+        list.push({ kind: 'chat', text: pending.text, from: 'agent-office', t: Date.now() })
+        list.push({ kind: 'say', text: 'Got it. (This is the demo: nothing really runs, but in your own office the session reads this as its next prompt and answers here.)', t: Date.now() + 1 })
+      }
       demoReplies.set(id, list)
       if (view?.id === id) {
         view.pending = view.pending.filter(p => p !== pending)
@@ -190,6 +219,7 @@ async function send(text) {
 
 // The bridge's chat events: how a message we sent is getting on.
 export function onEvent(ev) {
+  if (demo) remember(ev)
   if (!view || (ev.kind !== 'chat.delivered')) return
   const p = view.pending.find(x => x.id === ev.id)
   if (!p) return
@@ -205,9 +235,11 @@ const capitalize = s => s.charAt(0).toUpperCase() + s.slice(1)
 export async function sendTo(n, text) {
   if (!n || !text.trim()) return { ok: false, status: 'Nothing to send' }
   if (demo) {
-    const list = demoReplies.get(n.id) ?? []
-    list.push({ kind: 'chat', text: text.trim(), from: 'agent-office', t: Date.now() })
-    demoReplies.set(n.id, list)
+    if (!demoSend?.(n, text.trim())) {
+      const list = demoReplies.get(n.id) ?? []
+      list.push({ kind: 'chat', text: text.trim(), from: 'agent-office', t: Date.now() })
+      demoReplies.set(n.id, list)
+    }
     return { ok: true, status: 'Queued as the next prompt' }
   }
   if (!token) return { ok: false, status: 'Messaging needs the office opened from its bridge (run /office)' }
