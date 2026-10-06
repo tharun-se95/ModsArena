@@ -4,6 +4,7 @@
 // events into plain sentences.
 
 import { startDemo, demoHistory } from '../../agent-office/server/demo.mjs'
+import { startStory, storyHistory } from '../../agent-office/server/story.mjs'
 import * as model from './model.js'
 import * as words from './words.js'
 import * as table from './table.js'
@@ -14,7 +15,10 @@ import * as transcript from './transcript.js'
 const HISTORY_REFRESH_MS = 60000
 const PANEL_REFRESH_MS = 700
 const params = new URLSearchParams(location.search)
-const isDemo = Boolean(window.AGENT_OFFICE_DEMO) || params.get('demo') === '1'
+// ?demo=1 plays random sample activity; ?demo=story plays one scripted team
+// building a real system (so does a page built with AGENT_OFFICE_DEMO = 'story').
+const isStory = window.AGENT_OFFICE_DEMO === 'story' || params.get('demo') === 'story'
+const isDemo = isStory || Boolean(window.AGENT_OFFICE_DEMO) || params.get('demo') === '1'
 
 let showPast = true
 let history = []
@@ -142,7 +146,7 @@ function ingest(ev) {
 
 async function loadHistory() {
   try {
-    history = isDemo ? demoHistory() : (await (await fetch('/history')).json()).sessions ?? []
+    history = isStory ? storyHistory() : isDemo ? demoHistory() : (await (await fetch('/history')).json()).sessions ?? []
   } catch {
     history = []
   }
@@ -177,7 +181,9 @@ function connect() {
 // synthetic activity as `server.mjs --demo`.
 function playDemo() {
   setStatus('Sample activity', 'live')
-  startDemo(events => events.forEach(ingest))
+  if (!isStory) return startDemo(events => events.forEach(ingest))
+  const story = startStory(events => events.forEach(ingest))
+  transcript.setDemo(true, (n, text) => story.reply(n.session, text))
 }
 
 // A bridge started with --demo has sample sessions and no transcripts on

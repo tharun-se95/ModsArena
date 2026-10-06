@@ -3,14 +3,18 @@
 // plays sample activity, with no bridge behind it. GitHub Pages serves it
 // (.github/workflows/pages.yml).
 //
-//   node scripts/build-demo-site.mjs [out dir, default: site]
+//   node scripts/build-demo-site.mjs [out dir, default: site] [--story]
+//
+// --story plays the scripted team (story.mjs) instead of random activity.
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-const out = process.argv[2] ?? join(root, 'site')
+const args = process.argv.slice(2)
+const story = args.includes('--story')
+const out = args.find(a => !a.startsWith('--')) ?? join(root, 'site')
 const pub = join(root, 'agent-office', 'server', 'public')
 
 const html = readFileSync(join(pub, 'index.html'), 'utf8')
@@ -20,7 +24,7 @@ if (!html.includes(tag)) throw new Error(`index.html no longer loads ${tag}; upd
 
 // A function, not a string: in a replacement string `$$`, `$&` and `$'` are
 // patterns, and the bundle is full of `$`.
-const page = html.replace(tag, () => `<script>window.AGENT_OFFICE_DEMO = true</script>\n<script type="module">\n${app}\n</script>`)
+const page = html.replace(tag, () => `<script>window.AGENT_OFFICE_DEMO = ${story ? "'story'" : 'true'}</script>\n<script type="module">\n${app}\n</script>`)
 if (!page.includes(app)) throw new Error('the bundle did not land in the page verbatim')
 mkdirSync(out, { recursive: true })
 writeFileSync(join(out, 'index.html'), page)
