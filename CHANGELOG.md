@@ -6,6 +6,13 @@ git tag (`v0.2.1`) with a GitHub Release, and the same version is in
 and both `package.json` files. `claude plugin marketplace update modsarena`
 picks up a new one.
 
+## Unreleased
+
+- **An `office` skill.** `/office` only exists once the plugin's hooks run in
+  a session, so the Claude app's menu didn't list it. The `agent-office:office`
+  skill is always listed and starts the bridge and opens the office the same
+  way.
+
 ## 0.3.0
 
 - **Talk to your agents.** A critter's clipboard has a Transcript tab: its

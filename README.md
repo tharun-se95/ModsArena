@@ -22,6 +22,7 @@ You need Claude Code and [Node](https://nodejs.org) 18 or newer. In Claude Code:
 Then type **`/office`**. It starts the office's bridge if it isn't running and opens the office in your browser. Every Claude Code session on your machine, in any project, joins the same office. That's all.
 
 - `/office status` says whether the bridge is running, what it has seen, and what this session is doing.
+- `/office` appears once a session has started and the plugin's hooks are running. Where it isn't listed (before the first message in the desktop app, or anywhere the hooks don't run), the `agent-office:office` skill opens the office instead.
 - `claude plugin marketplace update modsarena` fetches new versions.
 - The status line shows `◉ office N agents · M tools` while work is in flight.
 

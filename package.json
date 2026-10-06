@@ -10,7 +10,8 @@
     "agent-office/server",
     "agent-office/fallback",
     "agent-office/.claude-plugin",
-    "agent-office/hooks"
+    "agent-office/hooks",
+    "agent-office/skills"
   ],
   "engines": {
     "node": ">=18"
