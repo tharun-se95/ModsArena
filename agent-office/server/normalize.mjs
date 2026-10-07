@@ -38,6 +38,7 @@ const KINDS = new Set([
   'tool.start', 'tool.end',
   'context.measure', 'context.breakdown', 'context.compact', 'agent.context',
   'chat.sent', 'chat.delivered',
+  'todo.update', 'ask.open', 'ask.close', 'asset.add',
 ])
 
 export const GAUGES = new Set(['context.measure', 'context.breakdown', 'agent.context'])

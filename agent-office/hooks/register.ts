@@ -221,6 +221,112 @@ async function status($: EngineInterface) {
   return lines.join('\n')
 }
 
+// ---------------------------------------------------------------------------
+// What the work asks and makes: the checklist (TodoWrite, or the Task tools'
+// list), questions Claude Code holds a turn for (AskUserQuestion, a plan to
+// approve), and outputs (pictures, files, artifacts, pull requests).
+
+type Todo = { text: string; status: string; active?: string }
+const tasks = new Map<string, Map<string, Todo>>() // loop ('' for main) -> task id -> task
+const PICTURE = /\.(png|jpe?g|gif|webp|svg)$/i
+const FILE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
+const PR_URL = /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/
+
+const str = (v: unknown) => (typeof v === 'string' ? v : undefined)
+const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path
+
+// Additions and deletions from a file tool's patch.
+export function diffStats(result: Record<string, unknown> | undefined) {
+  const git = result?.gitDiff as { additions?: number; deletions?: number } | undefined
+  if (git?.additions !== undefined) return { additions: git.additions, deletions: git.deletions ?? 0 }
+  const hunks = result?.structuredPatch as { lines?: string[] }[] | undefined
+  if (!Array.isArray(hunks)) return undefined
+  let additions = 0
+  let deletions = 0
+  for (const h of hunks) for (const l of h.lines ?? []) {
+    if (l.startsWith('+')) additions++
+    else if (l.startsWith('-')) deletions++
+  }
+  return { additions, deletions }
+}
+
+// What a question was answered with, as one line.
+export function answerOf(result: Record<string, unknown> | undefined) {
+  const answers = result?.answers
+  if (!answers || typeof answers !== 'object') return undefined
+  return clip(Object.values(answers as Record<string, unknown>).map(a => (Array.isArray(a) ? a.join(', ') : String(a))).join(' · '), 120)
+}
+
+// Before the tool runs: a checklist written, a question or plan put to you.
+export function beforeTool(e: Record<string, unknown>): ClusterEvent[] {
+  const agent = str(e.agentId)
+  const id = str(e.tool_use_id) ?? `${e.tool}-${Date.now()}`
+  if (e.tool === 'TodoWrite' && Array.isArray(e.todos)) {
+    const items = (e.todos as { content?: string; status?: string; activeForm?: string }[])
+      .map(t => ({ text: clip(t.content, 120) ?? '', status: t.status ?? 'pending', active: clip(t.activeForm, 120) }))
+    return [{ kind: 'todo.update', agent, items }]
+  }
+  if (e.tool === 'AskUserQuestion' && Array.isArray(e.questions)) {
+    const questions = (e.questions as Record<string, unknown>[]).map(q => ({
+      header: clip(str(q.header), 24), question: clip(str(q.question), 300), multiSelect: q.multiSelect === true,
+      options: (Array.isArray(q.options) ? q.options as Record<string, unknown>[] : []).map(o => ({ label: clip(str(o.label), 60), description: clip(str(o.description), 160) })),
+    }))
+    return [{ kind: 'ask.open', agent, id, type: 'question', questions }]
+  }
+  if (e.tool === 'ExitPlanMode') return [{ kind: 'ask.open', agent, id, type: 'plan', plan: str(e.plan)?.slice(0, 4000) }]
+  return []
+}
+
+// After it ran: the question answered, the list's new state, what was made.
+export function afterTool(e: Record<string, unknown>, ran: { result?: unknown; text?: string; deny?: string; isError?: boolean } | undefined): ClusterEvent[] {
+  const agent = str(e.agentId)
+  const id = str(e.tool_use_id) ?? `${e.tool}-${Date.now()}`
+  const ok = ran !== undefined && ran.deny === undefined && ran.isError !== true
+  const result = (ran?.result && typeof ran.result === 'object' ? ran.result : undefined) as Record<string, unknown> | undefined
+  const out: ClusterEvent[] = []
+  if (e.tool === 'AskUserQuestion') out.push({ kind: 'ask.close', agent, id, answer: ok ? answerOf(result) : 'Not answered' })
+  if (e.tool === 'ExitPlanMode') {
+    out.push({ kind: 'ask.close', agent, id, answer: ok ? 'Approved' : 'Kept planning' })
+    const plan = str(result?.plan) ?? str(e.plan)
+    if (ok && plan) out.push({ kind: 'asset.add', agent, id: `plan-${id}`, type: 'plan', title: clip(plan.replace(/^#+\s*/gm, '').split('\n').find(l => l.trim()), 80) ?? 'Plan', text: plan.slice(0, 4000) })
+  }
+  if (!ok) return out
+  // The Task tools keep a list per loop; the office gets it whole.
+  if (e.tool === 'TaskCreate' || e.tool === 'TaskUpdate') {
+    const loop = agent ?? ''
+    if (!tasks.has(loop)) tasks.set(loop, new Map())
+    const list = tasks.get(loop)!
+    if (e.tool === 'TaskCreate') {
+      const task = result?.task as { id?: string } | undefined
+      if (task?.id) list.set(task.id, { text: clip(str(e.subject), 120) ?? '', status: 'pending', active: clip(str(e.activeForm), 120) })
+    } else {
+      const taskId = str(e.taskId) ?? ''
+      const had = list.get(taskId)
+      if (e.status === 'deleted') list.delete(taskId)
+      else if (had || e.subject) list.set(taskId, { ...(had ?? { text: '', status: 'pending' }), ...(str(e.subject) && { text: clip(str(e.subject), 120)! }), ...(str(e.status) && { status: str(e.status)! }) })
+    }
+    out.push({ kind: 'todo.update', agent, items: [...list.values()] })
+  }
+  const path = str(e.file_path) ?? str(e.notebook_path)
+  if (FILE_TOOLS.has(String(e.tool)) && path) {
+    out.push(PICTURE.test(path)
+      ? { kind: 'asset.add', agent, id: `img-${path}`, type: 'image', title: fileName(path), path }
+      : { kind: 'asset.add', agent, id: `file-${path}`, type: 'file', title: fileName(path), path, meta: diffStats(result) })
+  }
+  if (e.tool === 'Read' && path && result?.type === 'image') out.push({ kind: 'asset.add', agent, id: `img-${path}`, type: 'image', title: fileName(path), path })
+  if (e.tool === 'SendUserFile' && Array.isArray(result?.attachments)) {
+    for (const a of result!.attachments as { path?: string; isImage?: boolean }[]) {
+      if (a.path) out.push({ kind: 'asset.add', agent, id: `${a.isImage ? 'img' : 'file'}-${a.path}`, type: a.isImage ? 'image' : 'file', title: str(e.caption) ?? fileName(a.path), path: a.path })
+    }
+  }
+  if (e.tool === 'Artifact' && str(result?.url)) out.push({ kind: 'asset.add', agent, id: `artifact-${result!.url}`, type: 'artifact', title: str(result?.title) ?? str(e.title) ?? 'Artifact', url: result!.url })
+  if (/create_pull_request$/.test(String(e.tool))) {
+    const url = PR_URL.exec(ran?.text ?? '')?.[0]
+    if (url) out.push({ kind: 'asset.add', agent, id: `pr-${url}`, type: 'pr', title: clip(str(e.title), 120) ?? url, url, meta: { state: e.draft ? 'draft' : 'open' } })
+  }
+  return out
+}
+
 const ENDED = new Set(['completed', 'failed', 'killed'])
 
 // Where a subagent stands after a run: finished (and how), or still holding
@@ -503,17 +609,21 @@ export const register: Register = (on, options) => {
     if (SPAWN_TOOLS.has(String(e.tool))) return next(e)
 
     const base = { agent: e.agentId, id: e.tool_use_id, tool: e.tool }
-    emit({ kind: 'tool.start', ...base, summary: summarize(e as unknown as Record<string, unknown>) })
+    const fields = e as unknown as Record<string, unknown>
+    emit({ kind: 'tool.start', ...base, summary: summarize(fields) })
+    for (const ev of beforeTool(fields)) emit(ev)
     link.activeTools++
     showStatus($)
     let ok = false
+    let ran: Awaited<ReturnType<typeof next>> | undefined
     try {
-      const ran = await next(e)
+      ran = await next(e)
       ok = ran.deny === undefined && ran.isError !== true
       return ran
     } finally {
       link.activeTools--
       emit({ kind: 'tool.end', ...base, ok })
+      for (const ev of afterTool(fields, ran as Parameters<typeof afterTool>[1])) emit(ev)
       showStatus($)
     }
   })

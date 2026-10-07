@@ -26,6 +26,12 @@ const ANSWERS = [
   'The chart tokens are migrated. Two charts still hard-code colors; fix those too?',
   'Review done: one race in session.ts and two nits. I left them as comments.',
 ]
+// What you ask a thread next, once its first job is done.
+const FOLLOWUPS = {
+  'Now add tests for it': ['Find the untested paths', 'Write the tests', 'Run the suite'],
+  'Open a PR with that': ['Write the PR description', 'Push the branch', 'Open the PR'],
+  'Screenshot it in dark mode too': ['Switch to dark mode', 'Screenshot every chart', 'Compare with light'],
+}
 const NUDGES = ['Also check the error path', 'Keep it to the auth module', 'Skip the snapshots', 'Note anything flaky']
 const AGENTS = [
   ['Explore', 'Map the auth module'], ['Plan', 'Design token rotation'],
@@ -37,6 +43,72 @@ const FIXED = [
   ['Custom agents', 1200], ['Memory files', 2600], ['Skills', 1900],
 ]
 
+// What each prompt's checklist looks like (TodoWrite in Claude Code).
+const PLANS = {
+  'Harden the session handling': ['Map how sessions are issued', 'Compare tokens with timingSafeEqual', 'Rotate the token on login', 'Add regression tests', 'Run the suite'],
+  'Add retries to the webhook worker': ['Find where deliveries fail', 'Wrap sends in a retry helper', 'Back off between tries', 'Test the retry path'],
+  'Why is the build flaky?': ['Reproduce the failure', 'Bisect the cache keys', 'Fix the stale key', 'Rerun CI three times'],
+  'Write tests for the refund flow': ['List the refund cases', 'Write full-refund tests', 'Write partial-refund tests', 'Run the suite'],
+  'Migrate charts to the new tokens': ['Inventory hard-coded colors', 'Swap to the new tokens', 'Screenshot every chart', 'Check dark mode'],
+  'Review the open PR': ['Read the diff', 'Run it locally', 'Write up findings'],
+}
+// AskUserQuestion, as Claude Code's dialog draws it.
+const QUESTIONS = [
+  { header: 'Backoff', question: 'Should retries also back off on 429s?', multiSelect: false, options: [
+    { label: 'Exponential', description: 'Waits 1s, 2s, 4s… up to 30s. Recommended.' },
+    { label: 'Fixed delay', description: 'Simpler: 5s between tries.' },
+    { label: 'Only 5xx', description: 'Leave 429s alone.' }] },
+  { header: 'Chart style', question: 'Which look should the revenue chart take?', multiSelect: false, options: [
+    { label: 'Bars', description: 'Monthly bars, easy to compare.', preview: 'bars' },
+    { label: 'Area', description: 'A smooth trend line, filled.', preview: 'area' },
+    { label: 'Both', description: 'Bars with the trend over them.', preview: 'combo' }] },
+  { header: 'Scope', question: 'Open a PR now, or keep going on partial refunds first?', multiSelect: false, options: [
+    { label: 'Open the PR', description: 'Ship what passes; partial refunds next.' },
+    { label: 'Keep going', description: 'One PR with everything.' }] },
+]
+const PERMISSIONS = [['Bash', 'npm publish --dry-run'], ['Bash', 'git push origin fix/stale-cache'], ['mcp__github__create_pull_request', 'acme/payments-api']]
+const PLAN_TEXT = `# Rotate session tokens\n\n1. Issue a fresh token on every login and privilege change\n2. Keep the old one valid for 30s so in-flight requests finish\n3. Compare tokens with timingSafeEqual\n4. Add tests for reuse and expiry\n\nTouches src/auth/session.ts and src/auth/login.ts.`
+const FILES = ['src/auth/session.ts', 'src/webhooks/worker.ts', 'src/refunds/refund.test.ts', 'src/charts/tokens.ts', 'ci/cache.yml', 'docs/ARCHITECTURE.md']
+const SHOTS = [
+  ['dashboard', 'Dashboard with the new tokens'], ['chart', 'Revenue chart, dark mode'],
+  ['diagram', 'How a session token flows'], ['tests', 'Test run: 42 passed'],
+]
+const DELIVERABLES = [
+  ['pr', 'Retry webhook sends with backoff', 'https://github.com/acme/payments-api/pull/'],
+  ['artifact', 'Flaky build: what broke and why', 'https://claude.ai/artifact/demo-'],
+  ['pr', 'Fix the stale CI cache key', 'https://github.com/acme/web-dashboard/pull/'],
+  ['artifact', 'Refund flow test report', 'https://claude.ai/artifact/demo-'],
+]
+
+// A small picture for the demo's images: an SVG drawn from a few shapes.
+export function demoShot(kind, hue = 18) {
+  const c = `hsl(${hue} 62% 58%)`
+  const bars = Array.from({ length: 7 }, (_, i) => {
+    const h = 30 + ((i * 37 + hue) % 70)
+    return `<rect x="${30 + i * 36}" y="${150 - h}" width="22" height="${h}" rx="3" fill="${i === 5 ? c : '#cfc6b8'}"/>`
+  }).join('')
+  const body = {
+    dashboard: `<rect width="320" height="200" fill="#f6f2ea"/><rect width="320" height="22" fill="#2b2a2e"/><circle cx="12" cy="11" r="4" fill="#e66"/><circle cx="24" cy="11" r="4" fill="#eb4"/><circle cx="36" cy="11" r="4" fill="#5b5"/><rect x="12" y="34" width="90" height="154" rx="6" fill="#fff"/><rect x="22" y="46" width="60" height="7" rx="3" fill="${c}"/><rect x="22" y="62" width="50" height="6" rx="3" fill="#ddd"/><rect x="22" y="76" width="66" height="6" rx="3" fill="#ddd"/><rect x="112" y="34" width="196" height="70" rx="6" fill="#fff"/><path d="M122 92 L160 70 L196 80 L232 52 L270 62 L298 44" stroke="${c}" stroke-width="4" fill="none"/><rect x="112" y="114" width="94" height="74" rx="6" fill="#fff"/><rect x="214" y="114" width="94" height="74" rx="6" fill="${c}" opacity=".85"/><text x="226" y="160" font-family="sans-serif" font-size="22" font-weight="700" fill="#fff">$48k</text>`,
+    chart: `<rect width="320" height="200" fill="#1f2433"/><text x="20" y="28" font-family="sans-serif" font-size="13" fill="#e8e2d6">Revenue by month</text>${bars.replaceAll('#cfc6b8', '#3c4560')}<path d="M40 120 L76 104 L112 110 L148 80 L184 86 L220 52 L256 64" stroke="#f2c14e" stroke-width="3" fill="none"/>`,
+    diagram: `<rect width="320" height="200" fill="#fbf8f2"/><g font-family="sans-serif" font-size="11" fill="#2b2a2e"><rect x="16" y="78" width="74" height="40" rx="8" fill="#fff" stroke="${c}" stroke-width="2"/><text x="32" y="102">Login</text><rect x="124" y="30" width="74" height="40" rx="8" fill="#fff" stroke="#2b2a2e"/><text x="138" y="54">Issue</text><rect x="124" y="126" width="74" height="40" rx="8" fill="#fff" stroke="#2b2a2e"/><text x="134" y="150">Rotate</text><rect x="232" y="78" width="74" height="40" rx="8" fill="${c}"/><text x="246" y="102" fill="#fff">Verify</text></g><path d="M90 92 L124 54 M90 104 L124 140 M198 50 L232 90 M198 146 L232 106" stroke="#8a8378" stroke-width="2"/>`,
+    tests: `<rect width="320" height="200" fill="#16181d"/><g font-family="monospace" font-size="11">${Array.from({ length: 9 }, (_, i) => `<text x="16" y="${30 + i * 17}" fill="${i === 8 ? '#a7e3a1' : '#9aa3b5'}">${i === 8 ? '✓ 42 passed, 0 failed (3.1s)' : `✓ refund ${['full', 'partial', 'twice', 'expired', 'currency', 'zero', 'webhook', 'audit'][i]} case`}</text>`).join('')}</g>`,
+    bars: `<rect width="320" height="200" fill="#fbf8f2"/>${bars}`,
+    area: `<rect width="320" height="200" fill="#fbf8f2"/><path d="M30 150 L30 110 L80 96 L130 104 L180 70 L230 78 L290 46 L290 150 Z" fill="${c}" opacity=".35"/><path d="M30 110 L80 96 L130 104 L180 70 L230 78 L290 46" stroke="${c}" stroke-width="4" fill="none"/>`,
+    combo: `<rect width="320" height="200" fill="#fbf8f2"/>${bars}<path d="M41 120 L77 104 L113 110 L149 80 L185 86 L221 52 L257 64" stroke="#2b2a2e" stroke-width="3" fill="none"/>`,
+  }[kind]
+  return `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200" width="320" height="200">${body}</svg>`)}`
+}
+
+// The demo's open questions, answered from the office's buttons.
+const waiting = new Map() // `${session}|${id}` -> resolve(answer)
+export function answerDemo(session, id, answer) {
+  const resolve = waiting.get(`${session}|${id}`)
+  if (!resolve) return false
+  waiting.delete(`${session}|${id}`)
+  resolve(answer)
+  return true
+}
+
 const pick = list => list[Math.floor(Math.random() * list.length)]
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const rand = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo))
@@ -44,9 +116,10 @@ const rand = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo))
 export function startDemo(publish) {
   let seq = 0
 
-  function runSession(session, project, pace, asThread = false) {
+  function runSession(session, project, pace, asThread = false, first = pick(PROMPTS)) {
     const emit = ev => publish([{ t: Date.now(), session, ...ev }])
     let messages = rand(8000, 40000)
+    let turns = 0
     let cost = 0
 
     const fixedTokens = FIXED.reduce((n, [, t]) => n + t, 0)
@@ -107,26 +180,78 @@ export function startDemo(publish) {
       emit({ kind: 'agent.end', agent, status: 'completed' })
     }
 
+    // Claude Code holding the turn for you, until you answer (from the
+    // office, in the demo) or the demo answers itself.
+    async function ask(fields, auto) {
+      const id = `demo-ask-${++seq}`
+      emit({ kind: 'ask.open', id, ...fields })
+      const answer = await new Promise(resolve => {
+        waiting.set(`${session}|${id}`, resolve)
+        setTimeout(() => answerDemo(session, id, auto), rand(10000, 20000) * pace)
+      })
+      emit({ kind: 'ask.close', id, answer })
+      return answer
+    }
+
+    function checklist(items, done, active) {
+      emit({
+        kind: 'todo.update',
+        items: items.map((text, i) => ({ text, status: i < done ? 'completed' : i === done && active ? 'in_progress' : 'pending' })),
+      })
+    }
+
     async function loop() {
       emit({ kind: 'session.start', cwd: project.id, model: 'claude-sonnet-5-5', project })
       measure()
       breakdown()
       for (;;) {
         const turnId = `demo-turn-${++seq}`
-        const text = pick(PROMPTS)
+        const text = turns++ === 0 ? first : pick(Object.keys(FOLLOWUPS))
         if (asThread) {
           emit({ kind: 'session.thread' })
           emit({ kind: 'agent.message', via: 'projects-relay', text })
         }
         emit({ kind: 'turn.start', turnId, text })
+        const items = PLANS[text] ?? FOLLOWUPS[text] ?? ['Look around', 'Make the change', 'Test it']
+        checklist(items, 0, true)
         const work = []
         for (let i = 0; i < rand(0, 3); i++) work.push(runAgent(undefined, 0))
-        for (let i = 0; i < rand(1, 4); i++) {
+        const hue = rand(0, 360)
+        for (let step = 0; step < items.length; step++) {
+          checklist(items, step, true)
           await runTool(undefined)
           messages += rand(3000, 12000)
           measure()
+          if (Math.random() < 0.45) {
+            const path = pick(FILES)
+            emit({ kind: 'asset.add', id: `file-${path}`, type: 'file', title: path.split('/').pop(), path, meta: { additions: rand(4, 120), deletions: rand(0, 40) } })
+          }
+          if (Math.random() < 0.3) {
+            const [shot, title] = pick(SHOTS)
+            emit({ kind: 'asset.add', id: `img-${++seq}`, type: 'image', title, path: `screenshots/${shot}.png`, src: demoShot(shot, hue) })
+          }
+          // Now and then it stops to ask you something.
+          if (step === 1 && Math.random() < 0.4) {
+            const roll = Math.random()
+            if (roll < 0.6) {
+              const q = pick(QUESTIONS)
+              const questions = [{ ...q, options: q.options.map(o => ({ ...o, ...(o.preview && { preview: demoShot(o.preview, hue) }) })) }]
+              await ask({ type: 'question', questions }, q.options[0].label)
+            } else if (roll < 0.85) {
+              const [tool, summary] = pick(PERMISSIONS)
+              await ask({ type: 'permission', tool, summary }, 'Allowed')
+            } else {
+              await ask({ type: 'plan', plan: PLAN_TEXT }, 'Approved')
+            }
+          }
         }
+        checklist(items, items.length, false)
         await Promise.all(work)
+        if (Math.random() < 0.6) {
+          const [type, title, url] = pick(DELIVERABLES)
+          const n = rand(12, 240)
+          emit({ kind: 'asset.add', id: `${type}-${n}`, type, title, url: `${url}${n}`, ...(type === 'pr' && { meta: { state: 'open', additions: rand(20, 300), deletions: rand(2, 80) } }) })
+        }
         messages += rand(4000, 14000)
         if (used() > WINDOW - 33000) {
           const before = used()
@@ -145,9 +270,9 @@ export function startDemo(publish) {
     void loop()
   }
 
-  runSession('demo-payments-1', PROJECTS[0], 1)
-  setTimeout(() => runSession('demo-payments-2', PROJECTS[0], 1.6), 2500)
-  setTimeout(() => runSession('demo-dashboard-1', PROJECTS[1], 1.3, true), 5000)
+  runSession('demo-payments-1', PROJECTS[0], 1, false, 'Harden the session handling')
+  setTimeout(() => runSession('demo-payments-2', PROJECTS[0], 1.6, false, 'Why is the build flaky?'), 2500)
+  setTimeout(() => runSession('demo-dashboard-1', PROJECTS[1], 1.3, true, 'Migrate charts to the new tokens'), 5000)
 }
 
 // Past sessions in the shape GET /history answers.

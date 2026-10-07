@@ -1,5 +1,5 @@
 import { test, expect, mock } from 'claude-code/testing'
-import { summarize, contextTokens, projectOf, nodeProblem, isNewer, isStale } from './register'
+import { summarize, contextTokens, projectOf, nodeProblem, isNewer, isStale, beforeTool, afterTool, diffStats } from './register'
 
 test('summarize picks the most telling field and trims it', async () => {
   expect(summarize({ command: 'npm   test\n --watch' })).toBe('npm test --watch')
@@ -271,4 +271,36 @@ test('threads, messages and a subagent’s real status reach the bridge', async 
   expect(posted.find(ev => ev.kind === 'agent.waiting')?.agent).toBe('agent-1')
   expect(posted.find(ev => ev.kind === 'agent.end')?.status).toBe('completed')
   expect(posted.filter(ev => ev.kind === 'turn.complete').map(ev => ev.answer)).toContain('Found it: the cache key.')
+})
+
+test('checklists, questions and plans reach the office before the tool runs', async () => {
+  const [todo] = beforeTool({ tool: 'TodoWrite', todos: [{ content: 'Write tests', status: 'in_progress', activeForm: 'Writing tests' }] })
+  expect(todo).toEqual({ kind: 'todo.update', agent: undefined, items: [{ text: 'Write tests', status: 'in_progress', active: 'Writing tests' }] })
+  const [ask] = beforeTool({ tool: 'AskUserQuestion', tool_use_id: 'q1', questions: [{ header: 'Lib', question: 'Which one?', multiSelect: false, options: [{ label: 'A', description: 'first' }, { label: 'B', description: 'second' }] }] })
+  expect(ask.kind).toBe('ask.open')
+  expect(ask.id).toBe('q1')
+  expect((ask.questions as { options: unknown[] }[])[0].options.length).toBe(2)
+  expect(beforeTool({ tool: 'ExitPlanMode', tool_use_id: 'p1' })[0].type).toBe('plan')
+  expect(beforeTool({ tool: 'Read', file_path: '/a' })).toEqual([])
+})
+
+test('answers, files, pictures and pull requests reach the office after it runs', async () => {
+  const [closed] = afterTool({ tool: 'AskUserQuestion', tool_use_id: 'q1' }, { result: { answers: { 'Which one?': 'A' } } })
+  expect(closed).toEqual({ kind: 'ask.close', agent: undefined, id: 'q1', answer: 'A' })
+  const [file] = afterTool({ tool: 'Edit', file_path: '/w/src/a.ts' }, { result: { structuredPatch: [{ lines: ['+x', '+y', '-z', ' k'] }] } })
+  expect(file).toEqual({ kind: 'asset.add', agent: undefined, id: 'file-/w/src/a.ts', type: 'file', title: 'a.ts', path: '/w/src/a.ts', meta: { additions: 2, deletions: 1 } })
+  const [pic] = afterTool({ tool: 'Read', file_path: '/w/shot.png' }, { result: { type: 'image', file: {} } })
+  expect(pic.type).toBe('image')
+  const [pr] = afterTool({ tool: 'mcp__github__create_pull_request', title: 'Fix it' }, { result: {}, text: '{"html_url":"https://github.com/o/r/pull/7"}' })
+  expect(pr.url).toBe('https://github.com/o/r/pull/7')
+  // A refused edit made nothing.
+  expect(afterTool({ tool: 'Edit', file_path: '/w/a.ts' }, { deny: 'no' })).toEqual([])
+  expect(diffStats({ gitDiff: { additions: 3, deletions: 4 } })).toEqual({ additions: 3, deletions: 4 })
+})
+
+test('the Task tools build one checklist per loop', async () => {
+  afterTool({ tool: 'TaskCreate', subject: 'Map it' }, { result: { task: { id: '1', subject: 'Map it' } } })
+  afterTool({ tool: 'TaskCreate', subject: 'Fix it' }, { result: { task: { id: '2', subject: 'Fix it' } } })
+  const [list] = afterTool({ tool: 'TaskUpdate', taskId: '1', status: 'completed' }, { result: { success: true } })
+  expect(list.items).toEqual([{ text: 'Map it', status: 'completed', active: undefined }, { text: 'Fix it', status: 'pending', active: undefined }])
 })

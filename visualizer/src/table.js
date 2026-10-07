@@ -14,10 +14,11 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
 import { makeCharacter, pose } from './character.js'
 import {
-  buildRoom, rug, desk, coffeeCorner, officeShell, glassMat, lampMat,
+  buildRoom, rug, desk, easel, coffeeCorner, officeShell, glassMat, lampMat,
   FLOOR_TOP, WALL_H, COFFEE_W, COFFEE_D,
 } from './office.js'
-import { nodes, fill, sid, aid, WARN_AT } from './model.js'
+import { nodes, fill, sid, aid, WARN_AT, outputs, openAsks } from './model.js'
+import { srcOf, toolName } from './assets.js'
 import { beadColor, escapeHtml, activity, ago } from './words.js'
 import { sound } from './sound.js'
 
@@ -398,9 +399,23 @@ function ensureSession(n) {
   s.zzz.obj.position.set(10, FLOOR_TOP + SS * s.char.height + 4, 0)
   s.oops = flag('oops', '!')
   s.oops.obj.position.set(0, FLOOR_TOP + SS * s.char.height + 10, 0)
-  s.body.add(s.zzz.obj, s.oops.obj)
-  s.group.add(s.rug, s.track, s.body, s.label.obj)
+  // The sign it holds up while Claude Code waits on your answer.
+  s.ask = flag('raise', '<span class="sign">?</span><span class="what"></span>')
+  s.ask.obj.position.set(0, FLOOR_TOP + SS * s.char.height + 14, 0)
+  s.ask.el.addEventListener('click', () => onPick(n.id))
+  // A note that pops up over the desk when it makes something.
+  s.made = flag('made', '')
+  s.made.obj.position.set(0, FLOOR_TOP + 50, DESK_Z)
+  s.body.add(s.zzz.obj, s.oops.obj, s.ask.obj)
+  s.group.add(s.rug, s.track, s.body, s.label.obj, s.made.obj)
   placeDesk(s)
+  s.easel = easel(roomColors(s.room))
+  s.easel.group.position.set(-50, FLOOR_TOP, DESK_Z + 4)
+  s.easel.group.rotation.y = 0.35
+  s.easel.group.visible = false
+  s.easel.group.traverse(o => { if (o.isMesh) o.userData.pick = { kind: 'session', id: n.id } })
+  s.group.add(s.easel.group)
+  s.seen = outputs.filter(o => o.session === n.session).length
   // A session that starts while you watch walks in through the office.
   s.walkIn = !resting(n) && clock() - mountedAt > 3
   scene.add(s.group)
@@ -412,7 +427,7 @@ function dropSession(id) {
   const s = sessionViews.get(id)
   if (!s) return
   scene.remove(s.group)
-  for (const el of [s.label.el, s.zzz.el, s.oops.el]) el.remove()
+  for (const el of [s.label.el, s.zzz.el, s.oops.el, s.ask.el, s.made.el]) el.remove()
   sessionViews.delete(id)
   for (const [key, a] of agentViews) if (a.session === id) dropAgent(key)
 }
@@ -964,6 +979,7 @@ export function animate() {
     s.zzz.el.classList.toggle('on', dozing && !walking)
     s.desk.draw(now, asleep ? 'off' : busy > 0.5 && !walking ? 'busy' : 'idle', `#${palette[s.tint].getHexString()}`)
     s.desk.steam(now, !asleep && working)
+    showWork(s, n, now, asleep)
     updateGauge(s, f)
     const warn = !asleep && f >= WARN_AT
     if (warn && !s.alarm) { s.alarm = flatRing(26.5, 27.5, palette.crit); s.group.add(s.alarm) }
@@ -1077,6 +1093,74 @@ export function animate() {
   labels.render(scene, camera)
   placeBubble(tick % 10 === 1)
   if ((tick++ % 6) === 0) declutter()
+}
+
+// ---------------------------------------------------------------------------
+// What the work asks and makes, in the office: a sign held up while Claude
+// Code waits on your answer (and the monitor shows it too), the checklist
+// on an easel by the desk, the latest picture in a frame on the desk (and
+// on the monitor a moment when it lands), and an outbox tray stacking what
+// it delivered.
+
+const pictures = new Map() // src -> Image, loaded once
+function picture(src, then) {
+  let img = pictures.get(src)
+  if (!img) {
+    img = new Image()
+    img.decoding = 'async'
+    img.src = src
+    pictures.set(src, img)
+  }
+  if (img.complete && img.naturalWidth) then(img)
+  else img.addEventListener('load', () => then(img), { once: true })
+}
+const SHEET = { pr: 'leaf', artifact: 'lilac', plan: 'sky', link: 'teal' }
+const ICON = { pr: '⇡', artifact: '◈', plan: '✎', link: '↗', file: '▤' }
+const MADE_S = 4.5
+
+function showWork(s, n, now, asleep) {
+  // The sign.
+  const asks = asleep ? [] : openAsks(n)
+  const ask = asks[0]
+  s.ask.el.classList.toggle('on', Boolean(ask))
+  s.ask.el.classList.toggle('permission', ask?.type === 'permission')
+  s.ask.el.classList.toggle('plan', ask?.type === 'plan')
+  const what = !ask ? '' : ask.type === 'question' ? `${ask.questions?.[0]?.header ?? 'Question'}?` : ask.type === 'permission' ? `Allow ${toolName(ask.tool)}?` : 'Approve the plan?'
+  if (s.askWhat !== what) {
+    s.askWhat = what
+    s.ask.el.querySelector('.sign').textContent = ask?.type === 'permission' ? '>_' : ask?.type === 'plan' ? '✎' : '?'
+    s.ask.el.querySelector('.what').textContent = what
+  }
+  s.desk.showAsk(ask?.type, ask?.type === 'permission' ? `#${palette.mustard.getHexString()}` : ask?.type === 'plan' ? `#${palette.sky.getHexString()}` : `#${palette.clay.getHexString()}`)
+
+  // The easel.
+  const todos = n.todos
+  s.easel.group.visible = Boolean(todos?.length) && !asleep
+  if (s.easel.group.visible) s.easel.draw(todos, `#${palette[s.tint].getHexString()}`, now)
+
+  // New outputs since last frame.
+  const mine = outputs.filter(o => o.session === n.session)
+  if (mine.length !== s.seen) {
+    const fresh = mine.slice(0, Math.max(0, mine.length - (s.seen ?? 0)))
+    s.seen = mine.length
+    const pic = fresh.find(o => o.type === 'image')
+    if (pic) {
+      picture(srcOf(pic), img => {
+        s.desk.showImage(img, clock() + 6)
+        s.desk.setPhoto(img)
+      })
+    }
+    const note = pic ?? fresh.find(o => o.type !== 'file')
+    if (note) {
+      s.made.el.innerHTML = note.type === 'image'
+        ? `<img alt="" src="${escapeHtml(srcOf(note))}"><span>${escapeHtml(note.title)}</span>`
+        : `<i class="out-icon" style="background:var(--${SHEET[note.type] ?? 'muted'})">${ICON[note.type] ?? '•'}</i><span>${escapeHtml(note.title)}</span>`
+      s.madeAt = now
+      s.hopAt = now
+    }
+    s.desk.setTray(mine.filter(o => SHEET[o.type]).reverse().map(o => palette[SHEET[o.type]]))
+  }
+  s.made.el.classList.toggle('on', s.madeAt !== undefined && now - s.madeAt < MADE_S && !asleep)
 }
 
 // The wheel (or a trackpad pinch) sets where to zoom to, by as much as the

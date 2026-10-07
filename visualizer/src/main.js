@@ -3,7 +3,7 @@
 // the bridge's Server-Sent Events and /history; words.js turns the same
 // events into plain sentences.
 
-import { startDemo, demoHistory } from '../../agent-office/server/demo.mjs'
+import { startDemo, demoHistory, answerDemo } from '../../agent-office/server/demo.mjs'
 import * as model from './model.js'
 import * as words from './words.js'
 import * as table from './table.js'
@@ -86,7 +86,7 @@ addEventListener('keydown', e => {
     e.preventDefault()
     return
   }
-  if (['1', '2', '3'].includes(e.key)) panels.setTab(['transcript', 'team', 'details'][Number(e.key) - 1])
+  if (['1', '2', '3', '4'].includes(e.key)) panels.setTab(['transcript', 'outputs', 'team', 'details'][Number(e.key) - 1])
   else if (e.key === 'r' && panels.focusReply()) e.preventDefault()
 })
 
@@ -116,9 +116,20 @@ function running() {
   return owners
 }
 
+// Answering a question from the office. The demo's sample sessions take
+// the answer; a real session is answered in Claude Code for now, so the
+// office only shows what it's waiting on.
+const answer = {
+  can: () => isDemo,
+  send: (session, id, label) => {
+    answerDemo(session, id, label)
+    setTimeout(refreshPanels, 50)
+  },
+}
+
 function refreshPanels() {
   if (selected && !model.nodes.has(selected)) selected = null
-  panels.render({ running: running(), selected, pick, hover: table.setHover })
+  panels.render({ running: running(), selected, pick, hover: table.setHover, answer })
 }
 
 function frame() {

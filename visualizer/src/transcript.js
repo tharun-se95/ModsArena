@@ -7,8 +7,9 @@
 // session's mod delivers it. In the demo there's no bridge: the transcript
 // is drawn from the sample activity and messages get a sample reply.
 
-import { nodes, sid } from './model.js'
+import { nodes, sid, outputs } from './model.js'
 import { activity, escapeHtml, ago } from './words.js'
+import { outputCard } from './assets.js'
 
 const POLL_MS = 1500
 const KEEP = 600
@@ -19,6 +20,7 @@ let demo = false
 export function setDemo(isDemo) {
   demo = isDemo
 }
+export const isDemo = () => demo
 
 // What's open: one transcript at a time.
 let view = null
@@ -40,6 +42,18 @@ function bubble(entry, results) {
       return `<div class="tx say"><p>${escapeHtml(entry.text)}</p>${time}</div>`
     case 'note':
       return `<div class="tx note">${escapeHtml(entry.text)}</div>`
+    // What the work made, as the card the Outputs tab shows.
+    case 'output':
+      return `<div class="tx made ${entry.output.type}">${outputCard(entry.output)}</div>`
+    // A checklist update (TodoWrite): where it stands, folded.
+    case 'todo': {
+      const done = entry.items.filter(i => i.status === 'completed').length
+      const now = entry.items.find(i => i.status === 'in_progress')
+      return `<details class="tx todo-snap"><summary><span class="todo-ring" style="--f:${(done / entry.items.length).toFixed(3)}"></span>${done === entry.items.length ? 'Checked off the last item' : `Checklist ${done}/${entry.items.length}${now ? `: ${escapeHtml(now.text)}` : ''}`}</summary><ol>${entry.items.map(i => `<li class="${i.status}"><i>${{ completed: '✓', in_progress: '✱' }[i.status] ?? '○'}</i>${escapeHtml(i.text)}</li>`).join('')}</ol></details>`
+    }
+    // A question it asked you (AskUserQuestion), and what you picked.
+    case 'ask':
+      return `<div class="tx asked"><p class="ask-eyebrow"><i class="ask-icon">${entry.type === 'permission' ? '>_' : entry.type === 'plan' ? '✎' : '?'}</i>${entry.type === 'permission' ? 'Asked to run' : entry.type === 'plan' ? 'Asked you to approve a plan' : 'Asked you'}</p><p>${escapeHtml(entry.text)}</p>${entry.answer ? `<span class="tx-answer">${escapeHtml(entry.answer)}</span>` : ''}${time}</div>`
     case 'tool': {
       const result = results.get(entry.id)
       const state = !result ? 'running' : result.ok ? 'ok' : 'bad'
@@ -137,6 +151,13 @@ function demoEntries(n) {
     entries.push({ kind: 'tool', id, name: who, summary: what, t: a.t })
     entries.push({ kind: 'result', id, ok: a.ok, text: a.ok ? '' : 'Something went wrong (sample activity).' })
   })
+  // What it made, and what it asked you, where they happened.
+  for (const o of outputs) {
+    if (o.session !== n.session || (n.kind === 'agent' ? o.agent !== n.agent : o.agent) || o.type === 'plan') continue
+    entries.push({ kind: 'output', output: o, t: o.t })
+  }
+  for (const a of n.answered ?? []) entries.push(a)
+  if (n.todosLog) entries.push(...n.todosLog)
   entries.push(...(demoReplies.get(n.id) ?? []))
   return entries.sort((a, b) => (a.t ?? 0) - (b.t ?? 0))
 }
@@ -265,6 +286,13 @@ export function attach(root, n) {
           <p class="tx-hint">${escapeHtml(box.hint)} Enter sends, Shift+Enter starts a new line.</p>
         </form>`}`
   view = { id: n.id, root, target: target(n), entries: [], pending: [], next: undefined, empty: 'Reading the transcript…', firstDraw: true }
+  // A picture in the conversation opens in the lightbox (panels.js).
+  root.querySelector('.tx-log').addEventListener('click', e => {
+    const zoom = e.target.closest('[data-zoom]')
+    if (!zoom) return
+    e.preventDefault()
+    document.dispatchEvent(new CustomEvent('office:zoom', { detail: zoom.dataset.zoom }))
+  })
   const form = root.querySelector('form')
   const field = form?.querySelector('textarea')
   form?.addEventListener('submit', e => {
