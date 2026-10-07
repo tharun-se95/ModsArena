@@ -151,6 +151,8 @@ function ingest(ev) {
   transcript.onEvent(ev)
 }
 
+document.addEventListener('office:event', e => ingest(e.detail))
+
 async function loadHistory() {
   try {
     history = isDemo ? demoHistory() : (await (await fetch('/history')).json()).sessions ?? []

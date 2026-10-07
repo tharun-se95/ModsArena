@@ -476,20 +476,64 @@
   .lb-plan h3 { font: 600 18px var(--serif); margin: 4px 0 8px; }
   .lb-plan p { margin: 0 0 6px; }
 
-  /* Over a critter in the office: the sign it holds up while it waits on
-     your answer, and the chip naming what it's asking. */
-  .flag.raise { display: flex; flex-direction: column; align-items: center; pointer-events: auto; cursor: pointer; transform: translateY(6px) scale(0.7); transition: opacity 0.25s, transform 0.25s; }
-  .flag.raise.on { transform: translateY(0) scale(1); }
-  .flag.raise .sign { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: var(--accent); color: #fff; font: 700 16px var(--serif); box-shadow: 0 4px 10px rgba(80, 30, 10, 0.25); animation: ask-bob 1.6s ease-in-out infinite; }
-  .flag.raise.permission .sign { background: var(--mustard); font-size: 14px; }
-  .flag.raise.plan .sign { background: var(--sky); font-size: 14px; }
-  .flag.raise .what { margin-top: 3px; padding: 1px 7px; border-radius: 999px; background: var(--paper); color: var(--ink); font: 500 10px var(--sans); white-space: nowrap; max-width: 140px; overflow: hidden; text-overflow: ellipsis; box-shadow: 0 1px 4px rgba(40, 30, 20, 0.15); }
-  @keyframes ask-bob { 50% { transform: translateY(-3px) rotate(-4deg); } }
-  .flag.made { display: flex; align-items: center; gap: 5px; padding: 3px 7px 3px 3px; border-radius: 9px; background: var(--paper); box-shadow: 0 3px 10px rgba(40, 30, 20, 0.2); font: 500 10px var(--sans); white-space: nowrap; transform: translateY(8px); transition: opacity 0.4s, transform 0.4s; }
-  .flag.made.on { transform: translateY(0); }
-  .flag.made img { width: 34px; height: 22px; object-fit: cover; border-radius: 4px; }
-  .flag.made .out-icon { width: 20px; height: 20px; font-size: 11px; border-radius: 5px; }
-  @media (prefers-reduced-motion: reduce) { .flag.raise .sign, .todo li.in_progress i, .todo-bar i.in_progress { animation: none; } }
+  /* Bubbles over the critters (bubbles.js): 💬 speech when one says
+     something to someone, 💭 thought for what it's on. Each kind has its
+     own voice: a question rings in the accent and bobs, a message between
+     agents is teal, work from outside is lilac, your own words are ink. */
+  .bubbles { position: absolute; inset: 0; pointer-events: none; z-index: 2; overflow: hidden; }
+  .bub { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 6px; max-width: 210px; padding: 5px 10px; border-radius: 14px; background: var(--paper); color: var(--ink); font: 500 11.5px/1.3 var(--sans); white-space: nowrap; box-shadow: 0 4px 14px rgba(40, 30, 20, 0.18), 0 0 0 1px color-mix(in srgb, var(--line) 80%, transparent); pointer-events: auto; cursor: pointer; transform: translate(-50%, calc(-100% - 12px)) scale(0.5); transform-origin: 50% calc(100% + 12px); opacity: 0; transition: opacity 0.22s, transform 0.28s cubic-bezier(.3, 1.5, .5, 1), max-width 0.2s; }
+  .bub.on { opacity: 1; transform: translate(-50%, calc(-100% - 12px)) scale(1); }
+  .bub.gone { opacity: 0; transform: translate(-50%, calc(-100% - 18px)) scale(0.85); transition-duration: 0.25s; }
+  .bub span { overflow: hidden; text-overflow: ellipsis; }
+  .bub b { font: 600 9.5px var(--mono); letter-spacing: 0.04em; text-transform: uppercase; flex: none; }
+  .bub.mine { max-width: 260px; white-space: normal; font-size: 12px; }
+  .bub.mine span { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+  .bub.far { opacity: 0; pointer-events: none; }
+  /* The speech tail. */
+  .bub.speech::after { content: ""; position: absolute; left: calc(50% + var(--tx, 0px)); bottom: -5px; width: 10px; height: 10px; margin-left: -5px; background: inherit; transform: rotate(45deg); border-radius: 0 0 3px 0; box-shadow: 1px 1px 0 color-mix(in srgb, var(--line) 80%, transparent); }
+  /* The thought: a soft cloud with two puffs trailing down to the head. */
+  .bub.thought { border-radius: 999px; padding: 4px 11px; font: italic 400 11px/1.3 var(--serif); color: var(--muted); background: color-mix(in srgb, var(--paper) 88%, transparent); box-shadow: 0 2px 8px rgba(40, 30, 20, 0.12), 0 0 0 1px color-mix(in srgb, var(--line) 70%, transparent); }
+  .bub.thought.on { opacity: 0.92; }
+  .bub.thought::before, .bub.thought::after { content: ""; position: absolute; border-radius: 50%; background: inherit; box-shadow: 0 0 0 1px color-mix(in srgb, var(--line) 70%, transparent); }
+  .bub.thought::before { width: 8px; height: 8px; left: calc(50% + var(--tx, 0px) - 10px); bottom: -9px; }
+  .bub.thought::after { width: 4px; height: 4px; left: calc(50% + var(--tx, 0px) - 4px); bottom: -15px; }
+  .bub .badge { display: inline-grid; place-items: center; flex: none; min-width: 18px; height: 18px; padding: 0 4px; margin: -1px 0 -1px -4px; border-radius: 999px; background: var(--accent); color: #fff; font: 700 11px var(--sans); font-style: normal; letter-spacing: 0; text-transform: none; vertical-align: 0; }
+  /* 💬 a question: it rings and bobs until you answer. */
+  .bub.ask { box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 35%, transparent), 0 0 0 2px var(--accent); animation: bub-bob 1.8s ease-in-out infinite; font-weight: 600; }
+  .bub.ask::after { box-shadow: 2px 2px 0 var(--accent); }
+  .bub.ask .badge.permission { background: var(--mustard); font: 700 9.5px var(--mono); }
+  .bub.ask .badge.plan { background: var(--sky); }
+  .bub.ask:has(.permission) { box-shadow: 0 6px 18px color-mix(in srgb, var(--mustard) 35%, transparent), 0 0 0 2px var(--mustard); }
+  .bub.ask:has(.permission)::after { box-shadow: 2px 2px 0 var(--mustard); }
+  .bub.ask:has(.plan) { box-shadow: 0 6px 18px color-mix(in srgb, var(--sky) 35%, transparent), 0 0 0 2px var(--sky); }
+  .bub.ask:has(.plan)::after { box-shadow: 2px 2px 0 var(--sky); }
+  .bub.ask::before { content: ""; position: absolute; inset: -2px; border-radius: inherit; box-shadow: 0 0 0 2px var(--accent); opacity: 0; animation: bub-ring 1.8s ease-out infinite; pointer-events: none; }
+  @keyframes bub-bob { 50% { margin-top: -3px; } }
+  @keyframes bub-ring { 0% { opacity: 0.6; transform: scale(1); } 100% { opacity: 0; transform: scale(1.25); } }
+  /* 💬 a message between agents, and the envelope that carries it. */
+  .bub.mail { background: color-mix(in srgb, var(--teal) 12%, var(--paper)); }
+  .bub.mail b { color: color-mix(in srgb, var(--teal) 75%, var(--ink)); }
+  .bub-fly { position: absolute; left: 0; top: 0; width: 14px; height: 10px; margin: -5px 0 0 -7px; border-radius: 2px; background: var(--tint); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2); pointer-events: none; }
+  .bub-fly i { position: absolute; inset: 0; border-radius: 2px; background: linear-gradient(to bottom right, transparent 47%, rgba(255, 255, 255, 0.7) 50%, transparent 53%), linear-gradient(to bottom left, transparent 47%, rgba(255, 255, 255, 0.7) 50%, transparent 53%); background-size: 100% 70%; background-repeat: no-repeat; }
+  /* 💬 work arriving from outside: a project's coordinator, another session. */
+  .bub.relay { background: color-mix(in srgb, var(--lilac) 16%, var(--paper)); }
+  .bub.relay b { color: color-mix(in srgb, var(--lilac) 80%, var(--ink)); }
+  /* 💬 your own words, in ink. */
+  .bub.you { background: var(--ink); color: var(--paper); }
+  .bub.you b { color: color-mix(in srgb, var(--paper) 70%, transparent); }
+  .bub.you.speech::after { box-shadow: none; }
+  /* 💬 look what I made. */
+  .bub.made { padding: 4px 10px 4px 4px; }
+  .bub.made img { width: 46px; height: 30px; object-fit: cover; border-radius: 8px; flex: none; }
+  .bub.made .badge { margin-left: 0; }
+  .bub.made .badge.pr { background: var(--leaf); } .bub.made .badge.artifact { background: var(--lilac); } .bub.made .badge.plan { background: var(--sky); }
+  .bub.answer span::before { content: "“"; } .bub.answer span::after { content: "”"; }
+  .bub.answer.mine span::before, .bub.answer.mine span::after { content: ""; }
+  /* Crowded: a lower-ranked bubble shrinks to a dot of its kind. */
+  .bub.dot { padding: 0; width: 18px; height: 14px; border-radius: 8px; }
+  .bub.dot > * { display: none; }
+  .bub.dot.thought { opacity: 0; pointer-events: none; }
+  @media (prefers-reduced-motion: reduce) { .bub.ask, .bub.ask::before, .todo li.in_progress i, .todo-bar i.in_progress { animation: none; } }
   @media (max-width: 900px) { #library { left: 12px; right: 12px; width: auto; top: 64px; bottom: 12px; } .libbtn span:not(.count) { display: none; } }
 
   /* Narrow screens: the notice card shrinks to a strip under the top bar,

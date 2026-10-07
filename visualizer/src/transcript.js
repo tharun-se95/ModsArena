@@ -174,6 +174,8 @@ async function send(text) {
   view.pending.push(pending)
   draw()
   if (demo) {
+    // The demo has no bridge to announce it: tell the page ourselves.
+    document.dispatchEvent(new CustomEvent('office:event', { detail: { kind: 'chat.sent', t: Date.now(), ...view.target, text: pending.text } }))
     const id = view.id
     setTimeout(() => {
       pending.status = 'Queued as the next prompt'
@@ -226,6 +228,7 @@ const capitalize = s => s.charAt(0).toUpperCase() + s.slice(1)
 export async function sendTo(n, text) {
   if (!n || !text.trim()) return { ok: false, status: 'Nothing to send' }
   if (demo) {
+    document.dispatchEvent(new CustomEvent('office:event', { detail: { kind: 'chat.sent', t: Date.now(), ...target(n), text: text.trim() } }))
     const list = demoReplies.get(n.id) ?? []
     list.push({ kind: 'chat', text: text.trim(), from: 'agent-office', t: Date.now() })
     demoReplies.set(n.id, list)

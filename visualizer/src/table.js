@@ -17,8 +17,9 @@ import {
   buildRoom, rug, desk, easel, coffeeCorner, officeShell, glassMat, lampMat,
   FLOOR_TOP, WALL_H, COFFEE_W, COFFEE_D,
 } from './office.js'
-import { nodes, fill, sid, aid, WARN_AT, outputs, openAsks } from './model.js'
+import { nodes, fill, sid, aid, WARN_AT, outputs, openAsks, mail } from './model.js'
 import { srcOf, toolName } from './assets.js'
+import { createBubbles } from './bubbles.js'
 import { beadColor, escapeHtml, activity, ago } from './words.js'
 import { sound } from './sound.js'
 
@@ -91,7 +92,7 @@ export const roomKey = roomOf
 // ---------------------------------------------------------------------------
 // Scene
 
-let stage, renderer, labels, scene, camera, controls, sun, sky, floor, bubble
+let stage, renderer, labels, scene, camera, controls, sun, sky, floor, bubble, talk
 const palette = {}
 const rooms = new Map() // project node id -> room view
 const sessionViews = new Map() // session node id -> view
@@ -137,6 +138,7 @@ export function mount(el, { pick }) {
   bubble.className = 'bubble'
   bubble.hidden = true
   stage.append(bubble)
+  talk = createBubbles({ stage, headAt, onPick: id => onPick(id) })
 
   scene = new THREE.Scene()
   // A soft studio environment for every surface to reflect: glazes, metal
@@ -399,15 +401,8 @@ function ensureSession(n) {
   s.zzz.obj.position.set(10, FLOOR_TOP + SS * s.char.height + 4, 0)
   s.oops = flag('oops', '!')
   s.oops.obj.position.set(0, FLOOR_TOP + SS * s.char.height + 10, 0)
-  // The sign it holds up while Claude Code waits on your answer.
-  s.ask = flag('raise', '<span class="sign">?</span><span class="what"></span>')
-  s.ask.obj.position.set(0, FLOOR_TOP + SS * s.char.height + 14, 0)
-  s.ask.el.addEventListener('click', () => onPick(n.id))
-  // A note that pops up over the desk when it makes something.
-  s.made = flag('made', '')
-  s.made.obj.position.set(0, FLOOR_TOP + 50, DESK_Z)
-  s.body.add(s.zzz.obj, s.oops.obj, s.ask.obj)
-  s.group.add(s.rug, s.track, s.body, s.label.obj, s.made.obj)
+  s.body.add(s.zzz.obj, s.oops.obj)
+  s.group.add(s.rug, s.track, s.body, s.label.obj)
   placeDesk(s)
   s.easel = easel(roomColors(s.room))
   s.easel.group.position.set(-50, FLOOR_TOP, DESK_Z + 4)
@@ -427,7 +422,7 @@ function dropSession(id) {
   const s = sessionViews.get(id)
   if (!s) return
   scene.remove(s.group)
-  for (const el of [s.label.el, s.zzz.el, s.oops.el, s.ask.el, s.made.el]) el.remove()
+  for (const el of [s.label.el, s.zzz.el, s.oops.el]) el.remove()
   sessionViews.delete(id)
   for (const [key, a] of agentViews) if (a.session === id) dropAgent(key)
 }
@@ -751,6 +746,21 @@ function headOf(id) {
   return null
 }
 
+// Where a critter's bubble hangs, in stage pixels, or null when it's out
+// of sight.
+function headAt(id) {
+  const head = headOf(id)
+  if (!head) return null
+  const isAgent = agentViews.has(id)
+  head.y += isAgent ? 5 : 9
+  const p = head.project(camera)
+  if (p.z > 1) return null
+  const x = ((p.x + 1) / 2) * stage.clientWidth
+  const y = ((1 - p.y) / 2) * stage.clientHeight
+  if (x < -40 || y < -40 || x > stage.clientWidth + 40 || y > stage.clientHeight + 40) return null
+  return { x, y }
+}
+
 function addBead(from, color) {
   const m = new THREE.Mesh(new THREE.SphereGeometry(1.7, 16, 16), new THREE.MeshStandardMaterial({ color, roughness: 0.5, transparent: true }))
   m.castShadow = true
@@ -770,6 +780,10 @@ function addConfetti(from) {
     const sp = 14 + Math.random() * 18
     confetti.push({ m, born: clock(), vel: new THREE.Vector3(Math.cos(a) * sp, 34 + Math.random() * 22, Math.sin(a) * sp), spin: new THREE.Vector3(Math.random() * 9, Math.random() * 9, Math.random() * 9) })
   }
+}
+
+function fly(from, to, tint, t) {
+  talk.fly(from, to, tint, t)
 }
 
 export function pulse(ev) {
@@ -803,7 +817,26 @@ export function pulse(ev) {
     const from = headOf(session.id)
     if (from) addConfetti(from)
     sound.chime()
+    // 💬 the first words of its answer.
+    if (ev.answer) talk.say(session.id, 'answer', { text: ev.answer, thread: session.id }, t)
   }
+  if (ev.kind === 'turn.complete' && ev.agent && ev.answer && agentViews.has(owner)) {
+    talk.say(owner, 'answer', { text: ev.answer, thread: session?.id }, t)
+  }
+  // 💬 one loop messaging another, with an envelope flying across; work
+  // arriving from outside drops in over the thread.
+  if (ev.kind === 'agent.message' && session) {
+    const m = mail[0]
+    if (!m || m.t !== ev.t) return
+    if (!m.from) {
+      talk.say(m.to ?? session.id, 'relay', { who: m.fromName ?? 'From outside', text: m.text ?? '', thread: session.id }, t)
+    } else {
+      talk.say(m.from, 'mail', { who: `To ${m.toName ?? 'someone'}`, text: m.text ?? '', thread: session.id }, t)
+      if (m.to) fly(m.from, m.to, 'teal', t)
+    }
+  }
+  // 💬 a message you sent from the office, landing on whoever it's for.
+  if (ev.kind === 'chat.sent' && session) talk.say(owner, 'you', { who: 'You', text: ev.text ?? '', thread: session.id }, t)
 }
 
 // ---------------------------------------------------------------------------
@@ -997,6 +1030,7 @@ export function animate() {
     if (!n || !s) continue
     if (n.status === 'done' && !a.endedAt) {
       a.endedAt = now
+      talk.hold(a.id, 'think', null, now)
       // A wave goodbye (and one back from the session), then off to coffee.
       if (!a.gone) { a.waveAt = now; s.waveAt = now + 0.2; a.departAt = now + 0.9 }
     }
@@ -1031,6 +1065,9 @@ export function animate() {
       continue
     }
 
+    // 💭 what a helper is on, for the thread you're looking at.
+    const shown = selected && (selected === s.id || nodes.get(selected)?.session === nodes.get(s.id)?.session)
+    talk.hold(a.id, 'think', shown && n.status === 'active' && n.description ? { key: n.description, text: n.description, thread: s.id } : null, now)
     const [sx, sz] = slotAt(a.slot)
     const target = new THREE.Vector3(s.group.position.x + sx, FLOOR_TOP, s.group.position.z + sz)
     const grow = Math.min(1, (now - a.born) / 0.6)
@@ -1091,6 +1128,7 @@ export function animate() {
   sharpness(now, dt)
   renderer.render(scene, camera)
   labels.render(scene, camera)
+  talk.tick(now, { selected: selected && (nodes.get(selected)?.kind === 'agent' ? sid(nodes.get(selected).session) : selected) })
   placeBubble(tick % 10 === 1)
   if ((tick++ % 6) === 0) declutter()
 }
@@ -1116,29 +1154,34 @@ function picture(src, then) {
 }
 const SHEET = { pr: 'leaf', artifact: 'lilac', plan: 'sky', link: 'teal' }
 const ICON = { pr: '⇡', artifact: '◈', plan: '✎', link: '↗', file: '▤' }
-const MADE_S = 4.5
+
+// What a waiting question says over the critter: its header for the room,
+// the question itself for the thread you've selected.
+function askWords(ask) {
+  if (ask.type === 'question') {
+    const q = ask.questions?.[0]
+    return { text: `${q?.header ?? 'Question'}?`, long: q?.question }
+  }
+  if (ask.type === 'permission') return { text: `May I run ${toolName(ask.tool)}?`, long: `May I run ${toolName(ask.tool)} ${ask.summary ?? ''}?` }
+  return { text: 'Plan ready. Approve?', long: `Plan ready: ${(ask.plan ?? '').replace(/^#+\s*/, '').split('\n')[0]}. Approve?` }
+}
 
 function showWork(s, n, now, asleep) {
-  // The sign.
-  const asks = asleep ? [] : openAsks(n)
-  const ask = asks[0]
-  s.ask.el.classList.toggle('on', Boolean(ask))
-  s.ask.el.classList.toggle('permission', ask?.type === 'permission')
-  s.ask.el.classList.toggle('plan', ask?.type === 'plan')
-  const what = !ask ? '' : ask.type === 'question' ? `${ask.questions?.[0]?.header ?? 'Question'}?` : ask.type === 'permission' ? `Allow ${toolName(ask.tool)}?` : 'Approve the plan?'
-  if (s.askWhat !== what) {
-    s.askWhat = what
-    s.ask.el.querySelector('.sign').textContent = ask?.type === 'permission' ? '>_' : ask?.type === 'plan' ? '✎' : '?'
-    s.ask.el.querySelector('.what').textContent = what
-  }
+  // 💬 a question it's holding the turn for, and the monitor turns into it.
+  const ask = asleep ? null : openAsks(n)[0]
+  talk.hold(s.id, 'ask', ask && { key: ask.id, type: ask.type, ...askWords(ask), thread: s.id }, now)
   s.desk.showAsk(ask?.type, ask?.type === 'permission' ? `#${palette.mustard.getHexString()}` : ask?.type === 'plan' ? `#${palette.sky.getHexString()}` : `#${palette.clay.getHexString()}`)
+
+  // 💭 the item in hand, while it works.
+  const doing = !asleep && n.turnOpen && n.todos?.find(i => i.status === 'in_progress')
+  talk.hold(s.id, 'think', doing && { key: doing.text, text: doing.active ?? doing.text }, now)
 
   // The easel.
   const todos = n.todos
   s.easel.group.visible = Boolean(todos?.length) && !asleep
   if (s.easel.group.visible) s.easel.draw(todos, `#${palette[s.tint].getHexString()}`, now)
 
-  // New outputs since last frame.
+  // 💬 "look": something new it made.
   const mine = outputs.filter(o => o.session === n.session)
   if (mine.length !== s.seen) {
     const fresh = mine.slice(0, Math.max(0, mine.length - (s.seen ?? 0)))
@@ -1152,15 +1195,16 @@ function showWork(s, n, now, asleep) {
     }
     const note = pic ?? fresh.find(o => o.type !== 'file')
     if (note) {
-      s.made.el.innerHTML = note.type === 'image'
-        ? `<img alt="" src="${escapeHtml(srcOf(note))}"><span>${escapeHtml(note.title)}</span>`
-        : `<i class="out-icon" style="background:var(--${SHEET[note.type] ?? 'muted'})">${ICON[note.type] ?? '•'}</i><span>${escapeHtml(note.title)}</span>`
-      s.madeAt = now
+      const who = note.agent ? aid(n.session, note.agent) : s.id
+      const lead = { image: 'Look: ', pr: 'Opened a PR: ', artifact: 'Published ', plan: 'Wrote a plan: ', link: '' }[note.type] ?? ''
+      talk.say(agentViews.get(who) && !agentViews.get(who).gone ? who : s.id, 'made', {
+        type: note.type, text: `${lead}${note.title}`, src: note.type === 'image' ? srcOf(note) : undefined,
+        icon: ICON[note.type], thread: s.id,
+      }, now)
       s.hopAt = now
     }
     s.desk.setTray(mine.filter(o => SHEET[o.type]).reverse().map(o => palette[SHEET[o.type]]))
   }
-  s.made.el.classList.toggle('on', s.madeAt !== undefined && now - s.madeAt < MADE_S && !asleep)
 }
 
 // The wheel (or a trackpad pinch) sets where to zoom to, by as much as the
