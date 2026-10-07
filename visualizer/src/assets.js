@@ -9,7 +9,9 @@
 // project's decision card; a checklist of ✓ ✱ ○ rows, like a project
 // thread's status; outputs as cards, like a project's Library.
 
-import { nodes, sid, outputs, openAsks } from './model.js'
+import { nodes, sid, outputs, openAsks, toolName } from './model.js'
+
+export { toolName }
 import { escapeHtml, ago } from './words.js'
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
@@ -21,14 +23,6 @@ export const srcOf = o => o.src ?? (o.path ? `/asset?${new URLSearchParams({ ses
 // ---------------------------------------------------------------------------
 // Questions
 
-// A tool as people say it: mcp__github__create_pull_request is "GitHub:
-// create pull request".
-export function toolName(tool) {
-  const mcp = /^mcp__(.+?)__(.+)$/.exec(tool ?? '')
-  if (!mcp) return tool ?? 'a tool'
-  const server = mcp[1].replace(/^plugin_\w+_/, '').replace(/[-_]/g, ' ')
-  return `${server.charAt(0).toUpperCase()}${server.slice(1)}: ${mcp[2].replace(/_/g, ' ')}`
-}
 
 const ASK_EYEBROW = { question: 'Asks you', permission: 'Wants to run', plan: 'Plan to approve' }
 

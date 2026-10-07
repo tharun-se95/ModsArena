@@ -306,7 +306,7 @@ const handlers = {
     const ask = node.asks?.find(a => a.id === ev.id)
     node.asks = (node.asks ?? []).filter(a => a.id !== ev.id)
     if (!ask) return
-    const text = ask.type === 'question' ? ask.questions?.map(q => q.question).join(' ') : ask.type === 'plan' ? firstLine(ask.plan ?? '') : `${ask.tool ?? ''} ${ask.summary ?? ''}`.trim()
+    const text = ask.type === 'question' ? ask.questions?.map(q => q.question).join(' ') : ask.type === 'plan' ? firstLine(ask.plan ?? '') : `${toolName(ask.tool)} ${ask.summary ?? ''}`.trim()
     node.answered = [...(node.answered ?? []).slice(-12), { kind: 'ask', type: ask.type, text, answer: ev.answer, t: ask.t }]
   },
   'asset.add'(ev) {
@@ -344,6 +344,15 @@ const handlers = {
       if (own.kind === 'agent') own.lastAt = ev.t
     }
   },
+}
+
+// A tool as people say it: mcp__github__create_pull_request is "GitHub:
+// create pull request".
+export function toolName(tool) {
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(tool ?? '')
+  if (!mcp) return tool ?? 'a tool'
+  const server = mcp[1].replace(/^plugin_\w+_/, '').replace(/[-_]/g, ' ')
+  return `${server.charAt(0).toUpperCase()}${server.slice(1)}: ${mcp[2].replace(/_/g, ' ')}`
 }
 
 const firstLine = text => text.replace(/^#+\s*/gm, '').split('\n').find(l => l.trim())?.trim().slice(0, 80) ?? 'Plan'
