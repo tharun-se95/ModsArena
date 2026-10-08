@@ -13,6 +13,7 @@ import { nodes, sid, outputs, openAsks, toolName } from './model.js'
 
 export { toolName }
 import { escapeHtml, ago } from './words.js'
+import * as answer from './answer.js'
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 
@@ -27,38 +28,65 @@ export const srcOf = o => o.src ?? (o.path ? `/asset?${new URLSearchParams({ ses
 const ASK_EYEBROW = { question: 'Asks you', permission: 'Wants to run', plan: 'Plan to approve' }
 
 // One open ask as a card. `answerable` says whether its buttons answer it
-// from here; when they can't, they say where to answer.
+// from here (answer.js does the answering); when they can't, they say
+// where to answer.
 export function askCard(ask, { answerable, compact = false } = {}) {
   const who = ask.who?.kind === 'agent' ? `<span class="ask-who">${escapeHtml(ask.who.label)}</span>` : ''
-  const key = `${ask.who?.session ?? ''}|${ask.id}`
-  const button = (label, sub = '', cls = '') => answerable
-    ? `<button type="button" class="ask-opt ${cls}" data-answer="${escapeHtml(key)}" data-label="${escapeHtml(label)}"><b>${escapeHtml(label)}</b>${sub ? `<span>${escapeHtml(sub)}</span>` : ''}</button>`
-    : `<span class="ask-opt ${cls}"><b>${escapeHtml(label)}</b>${sub ? `<span>${escapeHtml(sub)}</span>` : ''}</span>`
+  const key = answer.keyOf(ask)
+  if (answerable) answer.remember(ask)
+  const sent = answerable ? answer.statusOf(key) : undefined
+  const isBusy = sent?.status === 'Sending…' || sent?.ok === true
+  const attrs = (act, label, qi = 0) => `data-ans="${act}" data-key="${escapeHtml(key)}" data-q="${qi}" data-label="${escapeHtml(label)}"${isBusy ? ' disabled' : ''}`
+  const option = (label, sub, cls, qi) => {
+    if (!answerable) return `<span class="ask-opt ${cls}"><b>${escapeHtml(label)}</b>${sub ? `<span>${escapeHtml(sub)}</span>` : ''}</span>`
+    const on = answer.isPicked(key, qi, label)
+    return `<button type="button" class="ask-opt ${cls} ${on ? 'picked' : ''}" aria-pressed="${on}" ${attrs('pick', label, qi)}><b>${escapeHtml(label)}</b>${sub ? `<span>${escapeHtml(sub)}</span>` : ''}</button>`
+  }
+  // Demo-only: the sample sessions' permission asks and plan approvals.
+  const say = (label, cls = '') => answerable
+    ? `<button type="button" class="ask-opt ${cls}" ${attrs('say', label)}><b>${escapeHtml(label)}</b></button>`
+    : `<span class="ask-opt ${cls}"><b>${escapeHtml(label)}</b></span>`
+  const note = placeholder => `<input class="ask-note" type="text" data-ans-note="${escapeHtml(key)}" placeholder="${escapeHtml(placeholder)}" aria-label="${escapeHtml(placeholder)}" maxlength="2000"${isBusy ? ' disabled' : ''}>`
   let body = ''
+  let foot = ''
   if (ask.type === 'question') {
-    body = (ask.questions ?? []).map(q => {
+    const qs = ask.questions ?? []
+    body = qs.map((q, qi) => {
       const previews = q.options.some(o => o.preview)
       return `
       <div class="ask-q">
-        <p class="ask-text"><span class="chip">${escapeHtml(q.header)}</span>${escapeHtml(q.question)}</p>
+        <p class="ask-text"><span class="chip">${escapeHtml(q.header)}</span>${escapeHtml(q.question)}${q.multiSelect ? '<small class="ask-multi">pick any</small>' : ''}</p>
         <div class="ask-opts ${previews && !compact ? 'previews' : ''}">${q.options.map((o, i) => previews && !compact
-          ? `<${answerable ? 'button type="button"' : 'span'} class="ask-opt pic ${i === 0 ? 'rec' : ''}" ${answerable ? `data-answer="${escapeHtml(key)}" data-label="${escapeHtml(o.label)}"` : ''}><img alt="" src="${escapeHtml(o.preview ?? '')}"><b>${escapeHtml(o.label)}</b></${answerable ? 'button' : 'span'}>`
-          : button(o.label, compact ? '' : o.description, i === 0 ? 'rec' : '')).join('')}</div>
+          ? (answerable
+            ? `<button type="button" class="ask-opt pic ${i === 0 ? 'rec' : ''} ${answer.isPicked(key, qi, o.label) ? 'picked' : ''}" aria-pressed="${answer.isPicked(key, qi, o.label)}" ${attrs('pick', o.label, qi)}><img alt="" src="${escapeHtml(o.preview ?? '')}"><b>${escapeHtml(o.label)}</b></button>`
+            : `<span class="ask-opt pic ${i === 0 ? 'rec' : ''}"><img alt="" src="${escapeHtml(o.preview ?? '')}"><b>${escapeHtml(o.label)}</b></span>`)
+          : option(o.label, compact ? '' : o.description, i === 0 ? 'rec' : '', qi)).join('')}</div>
       </div>`
     }).join('')
+    // Several questions, or several picks: say when you're done.
+    const needsSend = qs.length > 1 || qs.some(q => q.multiSelect)
+    if (answerable) foot = `<div class="ask-own">${note(qs.length > 1 ? 'Or say it in your own words…' : 'Or type your own answer…')}${needsSend ? `<button type="button" class="ask-send" ${attrs('send', '')}>Send</button>` : ''}</div>`
   } else if (ask.type === 'permission') {
     body = `<p class="ask-text"><code>${escapeHtml(toolName(ask.tool))}</code> ${escapeHtml(ask.summary ?? '')}</p>
-      <div class="ask-opts row">${button('Allow', '', 'rec')}${button('Deny', '', 'no')}</div>`
+      <div class="ask-opts row">${say('Allow', 'rec')}${say('Deny', 'no')}</div>`
   } else if (ask.type === 'plan') {
     const lines = (ask.plan ?? '').split('\n').filter(l => l.trim()).slice(0, compact ? 3 : 8)
-    body = `<div class="ask-plan">${lines.map(l => /^#/.test(l) ? `<b>${escapeHtml(l.replace(/^#+\s*/, ''))}</b>` : `<span>${escapeHtml(l)}</span>`).join('')}</div>
-      <div class="ask-opts row">${button('Approve', '', 'rec')}${button('Keep planning', '', 'no')}</div>`
+    body = `<div class="ask-plan">${lines.map(l => /^#/.test(l) ? `<b>${escapeHtml(l.replace(/^#+\s*/, ''))}</b>` : `<span>${escapeHtml(l)}</span>`).join('')}</div>`
+    if (!answerable) body += `<div class="ask-opts row">${say('Approve', 'rec')}${say('Keep planning', 'no')}</div>`
+    else if (answer.canApprove(ask)) body += `<div class="ask-opts row">${say('Approve', 'rec')}<button type="button" class="ask-opt no" ${attrs('keep', '')}><b>Keep planning</b></button></div>${note('What should change? (optional)')}`
+    else {
+      body += `<div class="ask-own">${note('What should change? (optional)')}<button type="button" class="ask-send" ${attrs('keep', '')}>Keep planning</button></div>`
+      foot = '<p class="ask-where">To approve, use Claude Code: approving lets Claude start changing things, and only Claude Code can switch that on.</p>'
+    }
   }
+  const status = sent?.status ? `<p class="ask-status ${sent.ok === false ? 'bad' : ''}" role="status">${escapeHtml(sent.status)}</p>` : ''
   return `
-    <div class="ask ${ask.type}">
+    <div class="ask ${ask.type} ${answerable ? 'live' : ''}">
       <p class="ask-eyebrow"><i class="ask-icon">${ask.type === 'permission' ? '>_' : ask.type === 'plan' ? '✎' : '?'}</i>${ASK_EYEBROW[ask.type] ?? 'Asks you'}${who}<time>${ago(ask.t)}</time></p>
       ${body}
-      ${answerable ? '' : '<p class="ask-where">Answer it in Claude Code; the office shows it so you know it’s waiting.</p>'}
+      ${foot}
+      ${status}
+      ${answerable ? (ask.type === 'question' && !sent ? '<p class="ask-where">Answer here or in Claude Code, whichever is handier.</p>' : '') : '<p class="ask-where">Answer it in Claude Code; the office shows it so you know it’s waiting.</p>'}
     </div>`
 }
 

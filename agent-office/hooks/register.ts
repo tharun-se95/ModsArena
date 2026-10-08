@@ -327,6 +327,67 @@ export function afterTool(e: Record<string, unknown>, ran: { result?: unknown; t
   return out
 }
 
+// ---------------------------------------------------------------------------
+// Answering from the office. Claude Code's own dialog stays up the whole
+// time; meanwhile the hook asks the bridge, a long poll at a time, whether
+// you answered on the office page. Whichever answer comes first is the
+// tool's: an office answer returned while the dialog is pending makes the
+// engine take the dialog down. Approving a plan also switches Claude Code
+// out of plan mode, which a plugin can't do, so the office can only send a
+// plan back ("keep planning"); approving stays in the terminal.
+
+const ANSWERABLE = new Set(['AskUserQuestion', 'ExitPlanMode'])
+// How long the office keeps offering to answer one ask; after that only the
+// terminal can, as before.
+const OFFICE_ANSWER_MS = 30 * 60 * 1000
+const WAIT_FAILURES = 3
+
+type OfficeAnswer = { answers?: Record<string, string>; note?: string; choice?: string }
+
+// The tool's result for an answer given in the office: a question's
+// answers, keyed by question as Claude Code's dialog keys them; a plan sent
+// back as a refusal that says why. A note fills any question left open, or
+// reaches the model after the result.
+export function officeResult(e: Record<string, unknown>, answer: OfficeAnswer) {
+  const note = clip(answer.note, 2000)
+  if (e.tool === 'ExitPlanMode') {
+    return { deny: `The user read your plan in Agent Office and wants you to keep planning before you start.${note ? ` Their note: ${note}` : ''}` }
+  }
+  const questions = (Array.isArray(e.questions) ? e.questions : []) as { question: string }[]
+  const answers: Record<string, string> = {}
+  for (const q of questions) {
+    const given = answer.answers?.[q.question] ?? note
+    if (given) answers[q.question] = given
+  }
+  const isNoteUsed = note !== undefined && questions.some(q => answer.answers?.[q.question] === undefined)
+  return {
+    result: { questions, answers },
+    ...(note && !isNoteUsed && { context: [`The user also wrote, answering from Agent Office: ${note}`] }),
+  }
+}
+
+// Wait for the office's answer: undefined when the terminal answered first
+// (`settled`), the ask closed, the bridge stopped answering or time ran out.
+async function officeAnswer($: EngineInterface, id: string, settled: { isDone: boolean }) {
+  const until = Date.now() + OFFICE_ANSWER_MS
+  let failures = 0
+  while (!settled.isDone && Date.now() < until) {
+    try {
+      const res = await $.http.fetch(`${bridgeUrl()}/answer/wait?${new URLSearchParams({ session: link.session, id })}`, {
+        headers: { 'x-agent-office-inbox': '1' },
+      })
+      if (!res.ok) return undefined // a bridge from before answers existed
+      const got = JSON.parse(res.text) as { answer?: OfficeAnswer; closed?: boolean }
+      if (got.closed) return undefined
+      if (got.answer) return got.answer
+      failures = 0
+    } catch {
+      if (++failures >= WAIT_FAILURES) return undefined
+    }
+  }
+  return undefined
+}
+
 const ENDED = new Set(['completed', 'failed', 'killed'])
 
 // Where a subagent stands after a run: finished (and how), or still holding
@@ -611,15 +672,29 @@ export const register: Register = (on, options) => {
     const base = { agent: e.agentId, id: e.tool_use_id, tool: e.tool }
     const fields = e as unknown as Record<string, unknown>
     emit({ kind: 'tool.start', ...base, summary: summarize(fields) })
-    for (const ev of beforeTool(fields)) emit(ev)
+    // A question or plan the office may answer, while the bridge is there to carry it.
+    const isAnswerable = ANSWERABLE.has(String(e.tool)) && link.isBridgeUp && link.session !== 'unknown' && typeof e.tool_use_id === 'string'
+    for (const ev of beforeTool(fields)) emit(ev.kind === 'ask.open' && isAnswerable ? { ...ev, answerable: true } : ev)
     link.activeTools++
     showStatus($)
     let ok = false
     let ran: Awaited<ReturnType<typeof next>> | undefined
     try {
-      ran = await next(e)
-      ok = ran.deny === undefined && ran.isError !== true
-      return ran
+      let answer: NonNullable<typeof ran>
+      if (isAnswerable) {
+        // The terminal's dialog and the office, side by side.
+        const settled = { isDone: false }
+        const core = next(e)
+        core.then(() => { settled.isDone = true }, () => { settled.isDone = true })
+        const office = officeAnswer($, e.tool_use_id, settled).then(a => (a ? officeResult(fields, a) as typeof answer : core))
+        answer = await Promise.race([core, office])
+        settled.isDone = true
+      } else {
+        answer = await next(e)
+      }
+      ran = answer
+      ok = answer.deny === undefined && answer.isError !== true
+      return answer
     } finally {
       link.activeTools--
       emit({ kind: 'tool.end', ...base, ok })

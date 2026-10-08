@@ -388,6 +388,24 @@
   .ask-plan b { font: 600 13px var(--serif); }
   .ask-where { margin: 6px 0 0; font-size: 10.5px; color: var(--muted); }
   .ask-more { margin: 5px 0 0; font-size: 11px; color: var(--muted); }
+  /* Answering from the office (answer.js) */
+  .ask-multi { margin-left: 6px; font: 500 10px var(--mono); color: var(--muted); }
+  button.ask-opt { text-align: left; cursor: pointer; color: inherit; font: inherit; }
+  button.ask-opt.picked span { color: color-mix(in srgb, #fff 80%, transparent); }
+  button.ask-opt.picked.rec b::after { color: #fff; }
+  button.ask-opt:disabled, .ask-send:disabled, .ask-note:disabled { opacity: 0.55; cursor: default; }
+  .ask-own { display: flex; gap: 6px; margin-top: 7px; }
+  .ask-note { flex: 1; min-width: 0; padding: 5px 9px; border-radius: 8px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); font: 12px var(--sans); }
+  .ask-note:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .ask > .ask-note { width: 100%; margin-top: 6px; }
+  .ask-send { flex: none; padding: 5px 12px; border-radius: 8px; border: 0; background: var(--accent); color: #fff; font: 600 12px var(--sans); cursor: pointer; }
+  .ask.plan .ask-send { background: var(--sky); }
+  .ask-status { margin: 6px 0 0; font-size: 11.5px; color: var(--ok); }
+  .ask-status.bad { color: var(--crit); }
+  .bub.ask:has(.bub-opts) { flex-wrap: wrap; animation: none; }
+  .bub-opts { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 1px; }
+  .bub-opts button { padding: 3px 9px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--line)); background: var(--paper); color: var(--ink); font: 600 11px var(--sans); cursor: pointer; }
+  .bub-opts button:hover, .bub-opts button:focus-visible { background: var(--accent); color: #fff; }
 
   /* A thread's checklist: a ring that fills, the item in hand, then the
      list, ✓ done, ✱ in progress, ○ not started. */

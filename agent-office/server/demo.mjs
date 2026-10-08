@@ -65,6 +65,10 @@ const QUESTIONS = [
   { header: 'Scope', question: 'Open a PR now, or keep going on partial refunds first?', multiSelect: false, options: [
     { label: 'Open the PR', description: 'Ship what passes; partial refunds next.' },
     { label: 'Keep going', description: 'One PR with everything.' }] },
+  { header: 'Checks', question: 'Which checks should run before the PR?', multiSelect: true, options: [
+    { label: 'Unit tests', description: 'The fast suite, about a minute.' },
+    { label: 'Lint', description: 'Style and obvious mistakes.' },
+    { label: 'End-to-end', description: 'Slow, but catches the most.' }] },
 ]
 const PERMISSIONS = [['Bash', 'npm publish --dry-run'], ['Bash', 'git push origin fix/stale-cache'], ['mcp__github__create_pull_request', 'acme/payments-api']]
 const PLAN_TEXT = `# Rotate session tokens\n\n1. Issue a fresh token on every login and privilege change\n2. Keep the old one valid for 30s so in-flight requests finish\n3. Compare tokens with timingSafeEqual\n4. Add tests for reuse and expiry\n\nTouches src/auth/session.ts and src/auth/login.ts.`
@@ -116,7 +120,7 @@ const rand = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo))
 export function startDemo(publish) {
   let seq = 0
 
-  function runSession(session, project, pace, asThread = false, first = pick(PROMPTS)) {
+  function runSession(session, project, pace, asThread = false, first = pick(PROMPTS), firstAsk = undefined) {
     const emit = ev => publish([{ t: Date.now(), session, ...ev }])
     let messages = rand(8000, 40000)
     let turns = 0
@@ -184,10 +188,12 @@ export function startDemo(publish) {
     // office, in the demo) or the demo answers itself.
     async function ask(fields, auto) {
       const id = `demo-ask-${++seq}`
-      emit({ kind: 'ask.open', id, ...fields })
+      // Answerable from the office: through the bridge's /answer like a real
+      // session's (server.mjs hands it back here), or in the page itself.
+      emit({ kind: 'ask.open', id, answerable: true, ...fields })
       const answer = await new Promise(resolve => {
         waiting.set(`${session}|${id}`, resolve)
-        setTimeout(() => answerDemo(session, id, auto), rand(10000, 20000) * pace)
+        setTimeout(() => answerDemo(session, id, auto), rand(45000, 75000) * pace)
       })
       emit({ kind: 'ask.close', id, answer })
       return answer
@@ -231,10 +237,13 @@ export function startDemo(publish) {
             emit({ kind: 'asset.add', id: `img-${++seq}`, type: 'image', title, path: `screenshots/${shot}.png`, src: demoShot(shot, hue) })
           }
           // Now and then it stops to ask you something.
-          if (step === 1 && Math.random() < 0.4) {
-            const roll = Math.random()
+          // `firstAsk` makes its first turn ask straight away (0 a question,
+          // 0.9 a plan), so the office has something to answer early on.
+          const early = turns === 1 && firstAsk !== undefined
+          if (step === (early ? 0 : 1) && (early || Math.random() < 0.4)) {
+            const roll = early ? firstAsk : Math.random()
             if (roll < 0.6) {
-              const q = pick(QUESTIONS)
+              const q = early ? QUESTIONS[0] : pick(QUESTIONS)
               const questions = [{ ...q, options: q.options.map(o => ({ ...o, ...(o.preview && { preview: demoShot(o.preview, hue) }) })) }]
               await ask({ type: 'question', questions }, q.options[0].label)
             } else if (roll < 0.85) {
@@ -270,9 +279,9 @@ export function startDemo(publish) {
     void loop()
   }
 
-  runSession('demo-payments-1', PROJECTS[0], 1, false, 'Harden the session handling')
+  runSession('demo-payments-1', PROJECTS[0], 1, false, 'Harden the session handling', 0)
   setTimeout(() => runSession('demo-payments-2', PROJECTS[0], 1.6, false, 'Why is the build flaky?'), 2500)
-  setTimeout(() => runSession('demo-dashboard-1', PROJECTS[1], 1.3, true, 'Migrate charts to the new tokens'), 5000)
+  setTimeout(() => runSession('demo-dashboard-1', PROJECTS[1], 1.3, true, 'Migrate charts to the new tokens', 0.9), 5000)
 }
 
 // Past sessions in the shape GET /history answers.

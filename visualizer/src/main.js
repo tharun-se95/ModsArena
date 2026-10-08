@@ -10,6 +10,7 @@ import * as table from './table.js'
 import * as panels from './panels.js'
 import { unlock, isMuted, setMuted } from './sound.js'
 import * as transcript from './transcript.js'
+import * as answering from './answer.js'
 
 const HISTORY_REFRESH_MS = 60000
 const PANEL_REFRESH_MS = 700
@@ -116,16 +117,33 @@ function running() {
   return owners
 }
 
-// Answering a question from the office. The demo's sample sessions take
-// the answer; a real session is answered in Claude Code for now, so the
-// office only shows what it's waiting on.
-const answer = {
-  can: () => isDemo,
-  send: (session, id, label) => {
-    answerDemo(session, id, label)
-    setTimeout(refreshPanels, 50)
+// Answering a question from the office (answer.js). The demo's sample
+// sessions take any answer; a real session's question goes through the
+// bridge when its mod is waiting for one, and Claude Code's own dialog
+// stays up meanwhile.
+const officeToken = document.querySelector('meta[name="agent-office-token"]')?.content || ''
+answering.setRoute({
+  can: ask => isDemo || transcript.isDemo() || (Boolean(officeToken) && ask.answerable === true && ['question', 'plan'].includes(ask.type)),
+  canApprove: () => isDemo || transcript.isDemo(),
+  send: async (ask, body) => {
+    const session = ask.who?.session
+    if (isDemo) {
+      // Demo-only, with no bridge: the sample session takes the answer as one line.
+      const ok = answerDemo(session, ask.id, body.say ?? answering.summary(ask, body))
+      setTimeout(refreshPanels, 50)
+      return ok ? { ok } : { ok, status: 'that question has moved on' }
+    }
+    const res = await fetch('/answer', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-agent-office-token': officeToken },
+      body: JSON.stringify({ session, id: ask.id, ...body }),
+    })
+    const got = await res.json().catch(() => ({}))
+    return res.ok ? { ok: true } : { ok: false, status: got.error ?? `the bridge answered ${res.status}` }
   },
-}
+})
+answering.listen()
+const answer = { can: answering.canAnswer }
 
 function refreshPanels() {
   if (selected && !model.nodes.has(selected)) selected = null

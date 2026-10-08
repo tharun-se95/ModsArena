@@ -76,3 +76,15 @@ test('a transcript is served from the session file', async () => {
   assert.equal((await call('GET', '/transcript?session=unknown')).status, 404)
   assert.equal((await call('GET', '/transcript?session=..%2F..%2Fx')).status, 404)
 })
+
+test('answering a question from the office is guarded like chat, and reaches the waiting mod', async () => {
+  const token = /name="agent-office-token" content="([0-9a-f]{48})"/.exec((await call('GET', '/')).text)?.[1]
+  await call('POST', '/event', { body: [{ kind: 'ask.open', session: 'sess-a', id: 'toolu_9', type: 'question', answerable: true, questions: [{ question: 'Which one?', options: [{ label: 'A' }, { label: 'B' }] }] }] })
+  const body = { session: 'sess-a', id: 'toolu_9', answers: { 'Which one?': 'B' } }
+  assert.equal((await call('POST', '/answer', { body })).status, 403, 'no token')
+  assert.equal((await call('POST', '/answer', { body, headers: { 'x-agent-office-token': token, origin: 'https://evil.example' } })).status, 403, 'foreign origin')
+  assert.equal((await call('GET', '/answer/wait?session=sess-a&id=toolu_9')).status, 403, 'no inbox header')
+  const waiting = call('GET', '/answer/wait?session=sess-a&id=toolu_9', { headers: { 'x-agent-office-inbox': '1' } })
+  assert.equal((await call('POST', '/answer', { body, headers: { 'x-agent-office-token': token, origin: base } })).status, 200)
+  assert.deepEqual((await waiting).json(), { answer: { answers: { 'Which one?': 'B' } } })
+})

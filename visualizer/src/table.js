@@ -20,6 +20,7 @@ import {
 import { nodes, fill, sid, aid, WARN_AT, outputs, openAsks, mail } from './model.js'
 import { srcOf, toolName } from './assets.js'
 import { createBubbles } from './bubbles.js'
+import * as answering from './answer.js'
 import { beadColor, escapeHtml, activity, ago } from './words.js'
 import { sound } from './sound.js'
 
@@ -1169,7 +1170,10 @@ function askWords(ask) {
 function showWork(s, n, now, asleep) {
   // 💬 a question it's holding the turn for, and the monitor turns into it.
   const ask = asleep ? null : openAsks(n)[0]
-  talk.hold(s.id, 'ask', ask && { key: ask.id, type: ask.type, ...askWords(ask), thread: s.id }, now)
+  // Its choices too, when the office can answer it: tap one on the bubble.
+  const choices = ask && answering.canAnswer(ask) ? answering.bubbleOptions(ask) : undefined
+  if (choices) answering.remember(ask)
+  talk.hold(s.id, 'ask', ask && { key: ask.id, type: ask.type, ...askWords(ask), thread: s.id, ...(choices && { options: choices, answerKey: answering.keyOf(ask) }) }, now)
   s.desk.showAsk(ask?.type, ask?.type === 'permission' ? `#${palette.mustard.getHexString()}` : ask?.type === 'plan' ? `#${palette.sky.getHexString()}` : `#${palette.clay.getHexString()}`)
 
   // 💭 the item in hand, while it works.

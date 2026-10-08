@@ -88,7 +88,7 @@ function headline(running) {
   return `${yours} waiting on you, ${working} working${helping}.`
 }
 
-let answerable = () => false
+let answerable = () => false // (ask) -> can the office answer it
 
 function cardInfo(n, running) {
   const state = threadState(n, running)
@@ -99,7 +99,7 @@ function cardInfo(n, running) {
       <span class="card-where"><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(n.projectName ?? 'Elsewhere')}${n.thread ? '<span class="badge">thread</span>' : ''}<time>${ago(first.t)}</time></span>
       <b>${escapeHtml(title(n))}</b>
     </button>
-    ${assets.askCard(first, { answerable: answerable(), compact: true })}
+    ${assets.askCard(first, { answerable: answerable(first), compact: true })}
     ${more.length ? `<p class="ask-more">${plural(more.length, 'more question')} after this one</p>` : ''}`
   }
   const said = n.answer?.text
@@ -478,7 +478,7 @@ function clipboard(n, running) {
   // Above the conversation: what it's holding for you, then where it is in
   // its checklist.
   const asks = assets.asksFor(host ?? n).filter(a => n.kind === 'session' || a.who?.id === n.id)
-  const pinned = asks.map(a => assets.askCard(a, { answerable: answerable() })).join('') + assets.checklist(n, { open: !asks.length })
+  const pinned = asks.map(a => assets.askCard(a, { answerable: answerable(a) })).join('') + assets.checklist(n, { open: !asks.length })
   const body = tab === 'transcript' ? `${pinned ? `<div class="pinned">${pinned}</div>` : ''}<div class="transcript" data-keep="${escapeHtml(n.id)}"></div>`
     : tab === 'outputs' ? assets.outputsTab(n)
       : tab === 'team' ? teamTab(n, running)
@@ -490,13 +490,14 @@ function clipboard(n, running) {
 // a critter's bubble while its directory entry is under the pointer.
 let libraryOpen = false
 let zoomed = null
+document.addEventListener('office:answered', () => { if (lastArgs) render(lastArgs) })
 document.addEventListener('office:zoom', e => { zoomed = e.detail; if (lastArgs) render(lastArgs) })
 addEventListener('keydown', e => { if (e.key === 'Escape' && (zoomed || libraryOpen)) { if (zoomed) zoomed = null; else libraryOpen = false; if (lastArgs) render(lastArgs) } })
 
 export function render(args) {
   lastArgs = args
   const { running, selected, pick, hover, answer } = args
-  answerable = () => Boolean(answer?.can())
+  answerable = ask => Boolean(answer?.can(ask))
   patch($('#now'), `<p>${escapeHtml(headline(running))}</p>`)
   renderInbox(running)
   patch($('#full'), fullWindows())
@@ -525,14 +526,6 @@ export function render(args) {
   for (const b of document.querySelectorAll('[data-library]')) b.onclick = () => { libraryOpen = false; render(lastArgs) }
   for (const b of document.querySelectorAll('[data-shelf]')) b.onclick = () => { assets.setShelf(b.dataset.shelf); render(lastArgs) }
   for (const b of document.querySelectorAll('[data-zoom]')) b.onclick = e => { e.preventDefault(); zoomed = b.dataset.zoom; render(lastArgs) }
-  for (const b of document.querySelectorAll('[data-answer]')) {
-    b.onclick = e => {
-      e.stopPropagation()
-      const [session, id] = b.dataset.answer.split('|')
-      answer?.send(session, id, b.dataset.label)
-      b.classList.add('picked')
-    }
-  }
   for (const b of document.querySelectorAll('[data-hover]')) {
     b.onpointerenter = () => hover(b.dataset.hover)
     b.onpointerleave = () => hover(null)
