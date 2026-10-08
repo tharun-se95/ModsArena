@@ -763,20 +763,24 @@ export function easel(colors) {
     ctx.fillStyle = '#fdfcf8'
     ctx.fillRect(0, 0, 192, 224)
     const done = items.filter(i => i.status === 'completed').length
-    ctx.fillStyle = '#2b2a2e'
-    ctx.font = '600 19px Georgia, serif'
+    // "3 of 7 done" across the top, big enough to read from across the
+    // room, the way the directory says it.
+    ctx.fillStyle = done === items.length ? '#5f8a68' : '#2b2a2e'
+    ctx.font = '600 23px Georgia, serif'
     ctx.textBaseline = 'alphabetic'
-    ctx.fillText('To do', 12, 28)
-    ctx.font = '500 15px ui-monospace, Menlo, monospace'
-    ctx.fillStyle = '#8a8378'
-    ctx.textAlign = 'right'
-    ctx.fillText(`${done}/${items.length}`, 180, 28)
     ctx.textAlign = 'left'
-    ctx.fillStyle = '#e6dfd3'
-    ctx.fillRect(12, 38, 168, 6)
-    ctx.fillStyle = '#5f8a68'
-    ctx.fillRect(12, 38, 168 * (items.length ? done / items.length : 0), 6)
-    items.slice(0, 6).forEach((item, i) => {
+    ctx.fillText(done === items.length ? 'All done ✓' : `${done} of ${items.length} done`, 12, 28)
+    const bar = (w, color) => {
+      ctx.fillStyle = color
+      ctx.beginPath()
+      ctx.roundRect(12, 37, Math.max(w, 9), 9, 4.5)
+      ctx.fill()
+    }
+    bar(168, '#e6dfd3')
+    if (done) bar(168 * (done / items.length), '#5f8a68')
+    // Six rows fit: a long list shows the ones around the item in hand.
+    const from = Math.max(0, Math.min(now - 1, items.length - 6))
+    items.slice(from, from + 6).forEach((item, i) => {
       const y = 70 + i * 26
       const isDone = item.status === 'completed'
       const isNow = item.status === 'in_progress'

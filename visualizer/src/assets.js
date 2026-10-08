@@ -13,6 +13,7 @@ import { nodes, sid, outputs, openAsks, toolName } from './model.js'
 
 export { toolName }
 import { escapeHtml, ago } from './words.js'
+import { progressHtml } from './progress.js'
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 
@@ -75,25 +76,18 @@ export function checklist(n, { open = true } = {}) {
   const items = n.todos
   if (!items?.length) return ''
   const done = items.filter(i => i.status === 'completed').length
-  const now = items.find(i => i.status === 'in_progress')
   return `
     <details class="todo" ${open ? 'open' : ''} data-todo="${escapeHtml(n.id)}">
       <summary>
         <span class="todo-ring" style="--f:${(done / items.length).toFixed(3)}"></span>
-        <b>${done === items.length ? 'All done' : escapeHtml(now?.active ?? now?.text ?? 'Up next')}</b>
-        <span class="todo-count">${done}/${items.length}</span>
+        <b>Checklist</b><span class="todo-count">${items.length} steps</span>
       </summary>
       <ol>${items.map(i => `<li class="${i.status}"><i>${MARK[i.status] ?? '○'}</i>${escapeHtml(i.text)}</li>`).join('')}</ol>
     </details>`
 }
 
-// A one-line progress strip for cards and the directory.
-export function progress(n) {
-  const items = n.todos
-  if (!items?.length) return ''
-  const done = items.filter(i => i.status === 'completed').length
-  return `<span class="todo-bar" title="${done} of ${items.length} done">${items.map(i => `<i class="${i.status}"></i>`).join('')}</span>`
-}
+// "3 of 7 done" and its bar, for cards and the directory.
+export const progress = n => progressHtml(n.todos)
 
 // ---------------------------------------------------------------------------
 // Outputs
