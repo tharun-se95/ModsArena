@@ -5,8 +5,11 @@
 
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
+import { envelope } from './moods.js'
 
 const cache = new Map()
+const DOT_GEO = new THREE.SphereGeometry(1, 12, 10)
+const DOT_MAT = new THREE.MeshStandardMaterial({ color: '#fbf6ec', roughness: 0.5 })
 function box(w, h, d, r = 0.08) {
   const key = `${w}|${h}|${d}|${r}`
   if (!cache.has(key)) cache.set(key, new RoundedBoxGeometry(w, h, d, 4, Math.min(r, w / 2, h / 2, d / 2)))
@@ -116,10 +119,24 @@ export function makeCharacter({ build = 'general-purpose', bodyColor, inkColor, 
     height += 0.45
   }
 
+  // Thought dots, rising beside its head while it thinks. Every critter
+  // shares the one geometry and material.
+  const dots = new THREE.Group()
+  dots.position.set(b.w * 0.42, b.h + 0.25, 0)
+  dots.visible = false
+  ;[0.13, 0.18, 0.24].forEach((r, i) => {
+    const dot = new THREE.Mesh(DOT_GEO, DOT_MAT)
+    dot.scale.setScalar(r)
+    dot.position.set(i * 0.22, i * 0.3, 0)
+    dot.userData.r = r
+    dots.add(dot)
+  })
+  top.add(dots)
+
   rig.add(top, ...legs)
   root.traverse(o => {
     if (o.isMesh) {
-      o.castShadow = true
+      o.castShadow = o.parent !== dots
       if (pick) o.userData.pick = pick
     }
   })
@@ -127,7 +144,7 @@ export function makeCharacter({ build = 'general-purpose', bodyColor, inkColor, 
   for (const e of eyes) e.castShadow = false
 
   return {
-    root, rig, top, eyes, arms, legs, bulb, bodyMat, inkMat, accentMat, height,
+    root, rig, top, eyes, arms, legs, bulb, bodyMat, inkMat, accentMat, height, dots,
     seed: Math.random() * 10,
     blinkAt: 1 + Math.random() * 3,
   }
@@ -171,5 +188,46 @@ export function pose(c, t, { busy = 0, look = 0, hop = 0, alarm = false, asleep 
     c.bulb.position.y = c.bulb.userData.y ??= c.bulb.position.y
     c.bulb.position.y += Math.sin(t * 2 + c.seed) * 0.06
     c.bulb.material.emissiveIntensity = 0.15 + busy * (0.55 + 0.35 * Math.sin(t * 8))
+  }
+}
+
+// A mood on top of the pose (moods.js says which): call it right after
+// pose(). `still` (prefers-reduced-motion) keeps the shapes and drops the
+// bouncing.
+export function emote(c, t, mood, still = false) {
+  const kind = mood?.kind
+  c.dots.visible = kind === 'think'
+  c.top.rotation.x = 0
+  for (const e of c.eyes) e.scale.x = 1
+  if (!kind) return
+  const k = mood.k
+  if (kind === 'think') {
+    // One dot after another swells, like an ellipsis typing itself.
+    c.dots.children.forEach((d, i) => d.scale.setScalar(d.userData.r * (still ? 1 : 1 + 0.35 * Math.max(0, Math.sin((k - i / 3) * Math.PI * 2)))))
+    return
+  }
+  const e = envelope(k)
+  if (kind === 'cheer') {
+    // Both arms up, eyes squeezed happy, and a bounce or two.
+    for (const p of c.arms) p.rotation.z = p.userData.side * (1.25 + (still ? 0 : Math.sin(t * 18) * 0.2)) * e
+    for (const eye of c.eyes) eye.scale.y = 1 - 0.55 * e
+    if (!still) c.rig.position.y += Math.abs(Math.sin(k * Math.PI * 3)) * 0.35 * e
+  } else if (kind === 'sulk') {
+    // A slump: leaning forward, arms hanging, eyes low.
+    c.top.rotation.x = 0.28 * e
+    c.top.position.y -= 0.08 * e
+    for (const p of c.arms) p.rotation.z = p.userData.side * -0.15 * e
+    for (const eye of c.eyes) eye.scale.y = Math.min(eye.scale.y, 1 - 0.55 * e)
+  } else if (kind === 'perk') {
+    // Looks up at you, eyes wide, with a little hop.
+    c.top.rotation.x = -0.22 * e
+    for (const eye of c.eyes) { eye.scale.y = 1 + 0.3 * e; eye.scale.x = 1 + 0.15 * e }
+    if (!still) c.rig.position.y += Math.sin(Math.min(1, k * 2.5) * Math.PI) * 0.25
+  } else if (kind === 'yawn') {
+    // A slow stretch, arms up and eyes shut.
+    c.top.rotation.x = -0.18 * e
+    c.top.scale.y *= 1 + 0.06 * e
+    for (const p of c.arms) p.rotation.z = p.userData.side * 1.05 * e
+    for (const eye of c.eyes) eye.scale.y = 1 - 0.85 * e
   }
 }

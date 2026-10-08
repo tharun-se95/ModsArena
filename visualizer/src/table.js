@@ -12,7 +12,8 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
-import { makeCharacter, pose } from './character.js'
+import { makeCharacter, pose, emote } from './character.js'
+import { moodOf } from './moods.js'
 import {
   buildRoom, rug, desk, easel, coffeeCorner, officeShell, glassMat, lampMat,
   FLOOR_TOP, WALL_H, COFFEE_W, COFFEE_D,
@@ -119,6 +120,21 @@ let tick = 0
 const v = new THREE.Vector3()
 
 const clock = () => performance.now() / 1000
+// Moods keep their shapes but drop the bouncing for people who ask for less
+// motion.
+const lessMotion = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : { matches: false }
+// What moodOf() is asked, filled in place for each critter in turn.
+const feeling = {}
+function feel(view, asleep, thinking, idleFor) {
+  feeling.asleep = asleep
+  feeling.perkAt = view.perkAt
+  feeling.sulkAt = view.sulkAt
+  feeling.cheerAt = view.cheerAt
+  feeling.thinking = thinking
+  feeling.idleFor = idleFor
+  feeling.seed = view.char.seed
+  return moodOf(clock(), feeling, view.mood ??= { kind: null, k: 0 })
+}
 
 export function mount(el, { pick }) {
   stage = el
@@ -819,7 +835,12 @@ export function pulse(ev) {
     sound.hush()
   } else if (ev.kind === 'turn.start' && session && !ev.agent) {
     session.hopAt = t
+    // Your next prompt: it looks up at you.
+    if (ev.text) session.perkAt = t
   } else if (ev.kind === 'turn.complete' && session && !ev.agent) {
+    // A good finish gets a cheer; an error or a refusal, a short sulk.
+    if (ev.reason === 'answer' || !ev.reason) session.cheerAt = t
+    else if (ev.reason !== 'aborted') session.sulkAt = t
     const from = headOf(session.id)
     if (from) addConfetti(from)
     sound.chime()
@@ -843,6 +864,11 @@ export function pulse(ev) {
   }
   // 💬 a message you sent from the office, landing on whoever it's for.
   if (ev.kind === 'chat.sent' && session) talk.say(owner, 'you', { who: 'You', text: ev.text ?? '', thread: session.id }, t)
+  // You wrote to it, or answered what it asked: it perks up.
+  if ((ev.kind === 'chat.sent' || ev.kind === 'ask.close') && session) {
+    const view = agentViews.get(owner) ?? session
+    view.perkAt = t
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1010,6 +1036,10 @@ export function animate() {
       alarm: !asleep && !walking && f >= WARN_AT,
       asleep: dozing,
     })
+    // Thinking between tools mid-turn; yawning once it has waited on you a while.
+    const thinking = !walking && n.turnOpen && !running.has(s.id) && !n.asks?.length && now - (s.lastAt ?? -9) > 1.2
+    const idleFor = !walking && !working && !n.turnOpen ? (wall - (n.lastAt ?? wall)) / 1000 : 0
+    emote(s.char, now, feel(s, dozing || walking, thinking, idleFor), lessMotion.matches)
     oops(s, s.char, s.oops.el, now)
     waving(s, s.char, now)
     // A resting critter fades toward the floor's color.
@@ -1036,6 +1066,8 @@ export function animate() {
     if (!n || !s) continue
     if (n.status === 'done' && !a.endedAt) {
       a.endedAt = now
+      // Stopped short: a moment's sulk before it heads off.
+      if (!a.gone && (n.endStatus === 'failed' || n.endStatus === 'killed')) a.sulkAt = now
       talk.hold(a.id, 'think', null, now)
       // A wave goodbye (and one back from the session), then off to coffee.
       if (!a.gone) { a.waveAt = now; s.waveAt = now + 0.2; a.departAt = now + 0.9 }
@@ -1049,6 +1081,7 @@ export function animate() {
       // On the way to coffee, on a break, then off home.
       if (!walking && a.onBreak && !a.leaving && now - a.onBreak > BREAK_S) a.leaving = now
       pose(a.char, now + a.slot, { busy: walking ? 1 : 0, hop: 1 })
+      emote(a.char, now, feel(a, false, false, 0), lessMotion.matches)
       waving(a, a.char, now)
       if (a.onBreak && !a.leaving) {
         const table = coffee.target.clone().add(coffee.tableAt)
@@ -1083,6 +1116,10 @@ export function animate() {
       hop: a.hopAt ? (now - a.hopAt) / 0.3 : 1,
       alarm: n.status === 'active' && fill(n) >= WARN_AT,
     })
+    // A teammate between turns waits, and yawns; an active one between
+    // tools thinks.
+    const agentThinks = n.status === 'active' && !running.has(a.id) && now - (a.lastAt ?? a.born) > 1.5 && !n.asks?.length
+    emote(a.char, now, feel(a, false, agentThinks, n.status === 'idle' ? (now - (a.lastAt ?? a.born)) : 0), lessMotion.matches)
     waving(a, a.char, now)
     // Name tags show for the room you're in, or the thread you're on.
     const host = nodes.get(s.id)
