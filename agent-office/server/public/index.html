@@ -283,6 +283,38 @@
   @media (prefers-reduced-motion: reduce) { .switch input, .switch input::after, .tx.steps > summary::after { transition: none; } }
   @media (max-width: 900px) { .gear span { display: none; } .settings-pop { right: -40px; } }
 
+  /* Friendly names: a project's icon (click it to rename the project or
+     pick another), and context as energy, draining as the window fills. */
+  .picon { display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; border-radius: 6px; font-size: 12.5px; line-height: 1; border: 1px solid color-mix(in srgb, var(--ink) 12%, transparent); cursor: pointer; flex: none; }
+  .picon:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
+  .tag.project .picon { width: 18px; height: 18px; margin: 0 6px 0 -4px; font-size: 11.5px; border: 0; background: transparent; vertical-align: -3px; }
+  .tag.project .picon:hover { background: color-mix(in srgb, var(--line) 70%, transparent); box-shadow: none; }
+  .energy { display: inline-flex; align-items: center; gap: 5px; font: 500 11px var(--sans); white-space: nowrap; vertical-align: -1px; }
+  .energy i { position: relative; display: inline-block; width: 16px; height: 8px; border-radius: 2.5px; border: 1.2px solid currentColor; opacity: .9; }
+  .energy i::after { content: ""; position: absolute; right: -3.5px; top: 1.5px; width: 2px; height: 3px; border-radius: 0 1px 1px 0; background: currentColor; }
+  .energy b { position: absolute; left: 1px; top: 1px; bottom: 1px; max-width: calc(100% - 2px); border-radius: 1px; background: currentColor; }
+  .energy.fresh { color: var(--ok); } .energy.busy { color: var(--teal); } .energy.full { color: var(--warn); } .energy.tired { color: var(--crit); }
+  .tag .energy { margin-left: 5px; vertical-align: 0; }
+  .tag .energy i { width: 12px; height: 7px; }
+  .energy-word.fresh { color: var(--ok); } .energy-word.busy { color: var(--teal); } .energy-word.full { color: var(--warn); } .energy-word.tired { color: var(--crit); }
+  .dgauge .energy-word { font-size: 22px; white-space: nowrap; }
+  .energy-bar .fresh { background: var(--ok); } .energy-bar .busy { background: var(--teal); } .energy-bar .full { background: var(--warn); } .energy-bar .tired { background: var(--crit); }
+  .proj-edit { position: fixed; z-index: 40; width: 264px; padding: 12px 14px; background: var(--paper); }
+  .proj-edit[hidden] { display: none; }
+  .pe-name { display: grid; gap: 3px; font-size: 11.5px; color: var(--muted); }
+  .pe-name input { font: 14px var(--sans); color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  .pe-name input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); border-color: var(--accent); }
+  .pe-icons { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; margin: 10px 0 6px; }
+  .pe-icons button { font-size: 16px; line-height: 1; padding: 4px 0; border-radius: 7px; }
+  .pe-icons button:hover { background: color-mix(in srgb, var(--line) 60%, transparent); }
+  .pe-icons button[aria-pressed="true"] { background: color-mix(in srgb, var(--accent) 18%, transparent); box-shadow: inset 0 0 0 1.5px var(--accent); }
+  .pe-from { margin: 2px 0 8px; font-size: 11px; color: var(--muted); }
+  .pe-from code { font: 10.5px var(--mono); }
+  .pe-actions { display: flex; justify-content: space-between; }
+  .pe-actions button { font-size: 12.5px; padding: 5px 12px; border-radius: 8px; color: var(--muted); }
+  .pe-actions button:disabled { opacity: .4; cursor: default; }
+  .pe-actions .primary { background: var(--accent); color: #fff; font-weight: 500; }
+
 
 
   /* Waiting on you: a letter for each thread whose next move is yours,

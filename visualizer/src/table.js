@@ -21,6 +21,8 @@ import { nodes, fill, sid, aid, WARN_AT, outputs, openAsks, mail } from './model
 import { srcOf, toolName } from './assets.js'
 import { createBubbles } from './bubbles.js'
 import { beadColor, escapeHtml, activity, ago, say, doingNow } from './words.js'
+import { goalTitle, projectName, projectIcon, energy, energyMeter } from './names.js'
+import { devView } from './prefs.js'
 import { sound } from './sound.js'
 
 const ROW_DEPTH = 160 // one row: helpers, desk, the session, its label
@@ -352,7 +354,12 @@ function ensureRoom(p) {
   let t = rooms.get(p.id)
   if (!t) {
     t = { id: p.id, label: label('', 'project'), center: new THREE.Vector3(), target: new THREE.Vector3() }
-    t.label.el.addEventListener('click', () => focusProject(focusedProject === p.id ? null : p.id))
+    t.label.el.addEventListener('click', e => {
+      // The icon on the sign renames the project or changes its icon.
+      const icon = e.target.closest('[data-edit-project]')
+      if (icon) document.dispatchEvent(new CustomEvent('office:project-edit', { detail: { id: icon.dataset.editProject, raw: icon.dataset.raw, anchor: icon } }))
+      else focusProject(focusedProject === p.id ? null : p.id)
+    })
     rooms.set(p.id, t)
   }
   const cols = gridCols(p.sessions.length)
@@ -373,7 +380,9 @@ function ensureRoom(p) {
   // The room's name hangs as a sign over its back wall.
   t.label.obj.position.set(0, WALL_H + 8, -d / 2)
   const more = p.hidden > 0 ? `<span class="pmore">+${p.hidden}</span>` : ''
-  const html = `<span class="pname">${escapeHtml(p.name)}</span>${more}`
+  const id = p.id.slice(2)
+  const shown = projectName(id, p.name)
+  const html = `<button type="button" class="picon" data-edit-project="${escapeHtml(id)}" data-raw="${escapeHtml(p.name)}" title="Rename or change the icon" aria-label="Rename ${escapeHtml(shown)} or change its icon">${projectIcon(id, p.name)}</button><span class="pname">${escapeHtml(shown)}</span>${more}`
   if (t.html !== html) t.label.el.innerHTML = t.html = html
   t.label.el.classList.toggle('focused', focusedProject === p.id)
   return t
@@ -1018,7 +1027,7 @@ export function animate() {
     if (warn && !s.alarm) { s.alarm = flatRing(26.5, 27.5, palette.crit); s.group.add(s.alarm) }
     if (!warn && s.alarm) { s.group.remove(s.alarm); s.alarm = null }
     if (s.alarm) s.alarm.material.opacity = 0.35 + 0.45 * (Math.sin(now * 3) + 1) / 2
-    const html = `<span class="sname">${escapeHtml(n.label)}</span>${n.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span>` : ''}`
+    const html = `<span class="sname">${escapeHtml(n.label)}</span>${n.context?.tokens ? (devView() ? `<span class="pct ${level(f)}">${pct(f)}</span>` : energyMeter(f, { bare: true })) : ''}`
     if (s.html !== html) s.label.el.innerHTML = s.html = html
     s.label.el.classList.toggle('selected', selected === s.id)
     s.label.el.classList.toggle('past', asleep)
@@ -1315,7 +1324,8 @@ function bubbleFor(pick) {
   const tool = runningTool(n.id)
   // Plain words, or the raw call in Developer view.
   const doing = doingNow(n.id) ?? ''
-  const ctx = n.context?.tokens ? `${pct(fill(n))} · ${k(n.context.tokens)} of ${k(n.context.window)}` : ''
+  // Energy in plain words; the numbers in Developer view.
+  const ctx = !n.context?.tokens ? '' : devView() ? `${pct(fill(n))} · ${k(n.context.tokens)} of ${k(n.context.window)}` : energy(fill(n)).word
   if (n.kind === 'agent') {
     const host = nodes.get(sid(n.session))
     const view = agentViews.get(n.id)
@@ -1323,15 +1333,15 @@ function bubbleFor(pick) {
       : view?.walk ? 'finished, heading for coffee' : view?.onBreak && !view.leaving ? 'finished, on a coffee break' : 'finished'
     return `<b><i class="dot ${tintOf(n.type)}"></i>${escapeHtml(n.label)}</b>
       ${n.description ? `<p>${escapeHtml(n.description)}</p>` : ''}
-      <dl>${row('status', status)}${row('doing', doing, 'words')}${row('context', ctx)}${row('model', n.model)}${row('tool calls', n.history ? String(n.history) : '')}${row('for', host?.label)}</dl>`
+      <dl>${row('status', status)}${row('doing', doing, 'words')}${row(devView() ? 'context' : 'energy', ctx)}${row('model', n.model)}${row('tool calls', n.history ? String(n.history) : '')}${row('for', host?.label)}</dl>`
   }
   const live = !resting(n)
   const helpers = [...nodes.values()].filter(x => x.kind === 'agent' && x.session === n.session && x.status !== 'done').length
   const lastDone = activity.get(n.id)?.actions[0]
   const status = !live ? `ended ${ago(n.endedAt ?? n.lastAt)}` : tool || Date.now() - (n.lastAt ?? 0) < BUSY_MS ? 'working' : `waiting · last active ${ago(n.lastAt)}`
-  return `<b><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(n.prompts?.[0]?.text ?? n.label)}</b>
-    <p>${escapeHtml([n.projectName, n.gitBranch].filter(Boolean).join(' · '))}</p>
-    <dl>${row('status', status)}${row('doing', doing || (lastDone ? say(lastDone) : ''), 'words')}${row('context', ctx)}${row('helpers', helpers ? String(helpers) : '')}${row('model', n.model)}${row('cost', n.costUsd !== undefined ? `$${n.costUsd.toFixed(2)}` : '')}</dl>`
+  return `<b><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(goalTitle(n.prompts?.[0]?.text) || n.label)}</b>
+    <p>${escapeHtml([n.project ? projectName(n.project, n.projectName) : n.projectName, n.gitBranch].filter(Boolean).join(' · '))}</p>
+    <dl>${row('status', status)}${row('doing', doing || (lastDone ? say(lastDone) : ''), 'words')}${row(devView() ? 'context' : 'energy', ctx)}${row('helpers', helpers ? String(helpers) : '')}${row('model', n.model)}${row('cost', n.costUsd !== undefined ? `$${n.costUsd.toFixed(2)}` : '')}</dl>`
 }
 
 function placeBubble(refresh) {

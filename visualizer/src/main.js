@@ -104,6 +104,8 @@ for (const type of ['pointerdown', 'keydown']) addEventListener(type, unlock, { 
 
 // Developer view: plain words everywhere, or the raw tool lines.
 mountSettings(() => { transcript.redraw(); refreshPanels() })
+// A project renamed or given a new icon.
+document.addEventListener('office:names', () => refreshPanels())
 
 const pastToggle = document.getElementById('show-past')
 pastToggle.addEventListener('change', () => {

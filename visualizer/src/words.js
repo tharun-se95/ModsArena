@@ -5,6 +5,7 @@
 import { nodes, sid, aid, mail } from './model.js'
 import { describe } from './plain.js'
 import { devView } from './prefs.js'
+import { projectName } from './names.js'
 
 const ACTION_KEEP = 30
 const MOMENT_KEEP = 40
@@ -159,7 +160,7 @@ export function ingest(ev) {
       moment(ev, `${ev.agent ? who(ev) : quote(sessionName(ev.session))} compacted its context and has room again.`, 'note')
       break
     case 'session.start':
-      moment(ev, `A session started in ${ev.project?.name ?? 'a new folder'}.`)
+      moment(ev, `A session started in ${ev.project ? projectName(ev.project.id, ev.project.name) : 'a new folder'}.`)
       break
     case 'session.end':
       moment(ev, `${quote(sessionName(ev.session))} ended.`)

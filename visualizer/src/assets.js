@@ -13,6 +13,7 @@ import { nodes, sid, outputs, openAsks, toolName } from './model.js'
 
 export { toolName }
 import { escapeHtml, ago } from './words.js'
+import { projectName } from './names.js'
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 
@@ -165,7 +166,7 @@ export function library() {
     const pics = items.filter(o => o.type === 'image')
     const rest = items.filter(o => o.type !== 'image')
     return `<section class="lib-group">
-      <p class="lib-thread"><span>${escapeHtml(n?.projectName ?? '')}</span><button type="button" data-pick="${escapeHtml(sid(session))}">${escapeHtml(n?.label ?? session)}</button></p>
+      <p class="lib-thread"><span>${escapeHtml(n?.project ? projectName(n.project, n.projectName) : n?.projectName ?? '')}</span><button type="button" data-pick="${escapeHtml(sid(session))}">${escapeHtml(n?.label ?? session)}</button></p>
       ${pics.length ? `<div class="gallery">${pics.slice(0, 6).map(o => outputCard(o)).join('')}</div>` : ''}
       ${rest.length ? `<div class="outs">${rest.slice(0, 8).map(o => outputCard(o)).join('')}</div>` : ''}
     </section>`
