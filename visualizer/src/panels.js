@@ -9,10 +9,11 @@
 //                          which turns into a clipboard for the thread or
 //                          agent you pick: Conversation, Team, Details
 
-import { nodes, fill, warnings, sid, WARN_AT, threadState, agentState, teamOf, lineage, mailOf } from './model.js'
+import { nodes, outputs, fill, warnings, sid, WARN_AT, threadState, agentState, teamOf, lineage, mailOf } from './model.js'
 import { moments, activity, escapeHtml, quote, ago } from './words.js'
 import { pct, level, tintOf, sessionTint, roomKey } from './table.js'
 import * as transcript from './transcript.js'
+import * as assets from './assets.js'
 
 const $ = sel => document.querySelector(sel)
 const k = n => (n === undefined ? '—' : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : `${Math.round(n / 1000)}k`)
@@ -26,7 +27,7 @@ const title = n => n.prompts?.[0]?.text ?? n.label
 const isLive = n => n.kind === 'session' && !n.past && n.status !== 'done'
 
 const STATE_WORDS = {
-  working: 'Working', waiting: 'Waiting on you', stuck: 'Needs a look', ended: 'Ended',
+  working: 'Working', waiting: 'Waiting on you', asking: 'Needs your answer', stuck: 'Needs a look', ended: 'Ended',
   idle: 'Idle', done: 'Done', failed: 'Stopped',
 }
 const pill = state => `<span class="pill ${state}">${STATE_WORDS[state]}</span>`
@@ -69,8 +70,10 @@ export function order() {
 
 function inboxThreads(running) {
   return [...nodes.values()]
-    .filter(n => isLive(n) && ['waiting', 'stuck'].includes(threadState(n, running)))
-    .sort((a, b) => (a.answeredAt ?? a.startedAt ?? 0) - (b.answeredAt ?? b.startedAt ?? 0))
+    .filter(n => isLive(n) && ['asking', 'waiting', 'stuck'].includes(threadState(n, running)))
+    // A turn held on a question comes first: nothing moves until you answer.
+    .sort((a, b) => (threadState(b, running) === 'asking') - (threadState(a, running) === 'asking') ||
+      (a.answeredAt ?? a.startedAt ?? 0) - (b.answeredAt ?? b.startedAt ?? 0))
 }
 
 function headline(running) {
@@ -85,8 +88,20 @@ function headline(running) {
   return `${yours} waiting on you, ${working} working${helping}.`
 }
 
+let answerable = () => false
+
 function cardInfo(n, running) {
   const state = threadState(n, running)
+  if (state === 'asking') {
+    const [first, ...more] = assets.asksFor(n)
+    return `
+    <button class="card-head" data-pick="${escapeHtml(n.id)}" data-hover="${escapeHtml(n.id)}" title="Open the conversation">
+      <span class="card-where"><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(n.projectName ?? 'Elsewhere')}${n.thread ? '<span class="badge">thread</span>' : ''}<time>${ago(first.t)}</time></span>
+      <b>${escapeHtml(title(n))}</b>
+    </button>
+    ${assets.askCard(first, { answerable: answerable(), compact: true })}
+    ${more.length ? `<p class="ask-more">${plural(more.length, 'more question')} after this one</p>` : ''}`
+  }
   const said = n.answer?.text
   const blurb = state === 'stuck'
     ? (n.lastReason === 'aborted' ? 'You stopped its last turn.' : n.lastReason === 'refusal' ? 'Its last turn ended on a refusal.' : 'Its last turn ended on an error.')
@@ -96,6 +111,7 @@ function cardInfo(n, running) {
     <button class="card-head" data-pick="${escapeHtml(n.id)}" data-hover="${escapeHtml(n.id)}" title="Open the conversation">
       <span class="card-where"><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(n.projectName ?? 'Elsewhere')}${n.thread ? '<span class="badge">thread</span>' : ''}<time>${ago(n.answeredAt ?? n.startedAt)}</time></span>
       <b>${escapeHtml(title(n))}</b>
+      ${assets.progress(n)}
       <span class="card-said">${escapeHtml(blurb)}</span>
     </button>`
 }
@@ -174,8 +190,10 @@ function renderInbox(running) {
     if (list.children[i] !== li && !li.contains(document.activeElement)) list.insertBefore(li, list.children[i] ?? null)
     li.classList.remove('gone')
     li.classList.toggle('stuck', threadState(n, running) === 'stuck')
+    li.classList.toggle('asking', threadState(n, running) === 'asking')
     patch(li.querySelector('.card-info'), cardInfo(n, running))
-    li.querySelector('form').hidden = !transcript.canMessage()
+    // A question is answered with its options, not a reply.
+    li.querySelector('form').hidden = !transcript.canMessage() || threadState(n, running) === 'asking'
   })
   // A thread you're still replying to that went back to work keeps its
   // card, dimmed, until you're done with it.
@@ -252,7 +270,8 @@ function threadRow(n, running, selected) {
   const state = threadState(n, running)
   const f = fill(n)
   const doing = !live ? `ended ${ago(n.endedAt ?? n.lastAt)}`
-    : state === 'working' ? (activity.get(n.id)?.actions[0]?.text ?? 'working')
+    : state === 'asking' ? `asks: ${assets.asksFor(n)[0]?.questions?.[0]?.question ?? assets.asksFor(n)[0]?.summary ?? 'a plan to approve'}`
+    : state === 'working' ? (n.todos?.find(i => i.status === 'in_progress')?.text ?? activity.get(n.id)?.actions[0]?.text ?? 'working')
       : state === 'stuck' ? 'its last turn didn’t finish'
         : n.answer?.text ? `said ${quote(n.answer.text)}` : 'ready for you'
   return `
@@ -261,6 +280,7 @@ function threadRow(n, running, selected) {
         <i class="dot ${sessionTint(n.session)}"></i>
         <span class="ename">${escapeHtml(title(n))}${n.thread ? '<span class="badge" title="A claude.ai project’s coordinator handed this session its work">thread</span>' : ''}</span>
         ${live ? pill(state) : n.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span>` : '<span></span>'}
+        ${live ? assets.progress(n) : ''}
         <span class="estate">${live && n.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span> · ` : ''}${escapeHtml(doing)}</span>
       </button>
       ${live ? teamRows(n) : ''}
@@ -439,7 +459,7 @@ function patch(el, html) {
 
 // The clipboard's tabs. The conversation comes first: talking to a thread
 // is what you open one for.
-const TABS = [['transcript', 'Conversation'], ['team', 'Team'], ['details', 'Details']]
+const TABS = [['transcript', 'Conversation'], ['outputs', 'Outputs'], ['team', 'Team'], ['details', 'Details']]
 let tab = 'transcript'
 let lastArgs = null
 
@@ -452,18 +472,31 @@ export function setTab(name) {
 function clipboard(n, running) {
   const host = n.kind === 'session' ? n : nodes.get(sid(n.session))
   const teamSize = host && isLive(host) ? countAll(teamOf(host)) : (host?.pastAgents?.length ?? 0)
-  const button = ([name, label], i) => `<button type="button" role="tab" class="tab ${tab === name ? 'on' : ''}" aria-selected="${tab === name}" data-tab="${name}" title="${label} (${i + 1})">${label}${name === 'team' && teamSize ? `<small>${teamSize}</small>` : ''}</button>`
-  const body = tab === 'transcript' ? `<div class="transcript" data-keep="${escapeHtml(n.id)}"></div>`
-    : tab === 'team' ? teamTab(n, running)
+  const made = assets.outputCount(n)
+  const count = name => (name === 'team' && teamSize ? `<small>${teamSize}</small>` : name === 'outputs' && made ? `<small>${made}</small>` : '')
+  const button = ([name, label], i) => `<button type="button" role="tab" class="tab ${tab === name ? 'on' : ''}" aria-selected="${tab === name}" data-tab="${name}" title="${label} (${i + 1})">${label}${count(name)}</button>`
+  // Above the conversation: what it's holding for you, then where it is in
+  // its checklist.
+  const asks = assets.asksFor(host ?? n).filter(a => n.kind === 'session' || a.who?.id === n.id)
+  const pinned = asks.map(a => assets.askCard(a, { answerable: answerable() })).join('') + assets.checklist(n, { open: !asks.length })
+  const body = tab === 'transcript' ? `${pinned ? `<div class="pinned">${pinned}</div>` : ''}<div class="transcript" data-keep="${escapeHtml(n.id)}"></div>`
+    : tab === 'outputs' ? assets.outputsTab(n)
+      : tab === 'team' ? teamTab(n, running)
       : n.kind === 'agent' ? agentDetails(n) : sessionDetails(n)
   return `${head(n, running)}<div class="tabs" role="tablist">${TABS.map(button).join('')}</div>${body}`
 }
 
 // Re-render what changed. `selected` is a node id or null; `hover` shows
 // a critter's bubble while its directory entry is under the pointer.
+let libraryOpen = false
+let zoomed = null
+document.addEventListener('office:zoom', e => { zoomed = e.detail; if (lastArgs) render(lastArgs) })
+addEventListener('keydown', e => { if (e.key === 'Escape' && (zoomed || libraryOpen)) { if (zoomed) zoomed = null; else libraryOpen = false; if (lastArgs) render(lastArgs) } })
+
 export function render(args) {
   lastArgs = args
-  const { running, selected, pick, hover } = args
+  const { running, selected, pick, hover, answer } = args
+  answerable = () => Boolean(answer?.can())
   patch($('#now'), `<p>${escapeHtml(headline(running))}</p>`)
   renderInbox(running)
   patch($('#full'), fullWindows())
@@ -476,10 +509,30 @@ export function render(args) {
   patch($('#side'), !detail ? directory(running, selected) : clipboard(n, running))
   if (detail && tab === 'transcript') transcript.attach($('#side .transcript'), n)
   else transcript.detach()
+  // The Library drawer and the lightbox.
+  const made = outputs.filter(o => o.type !== 'file').length
+  patch($('#library-count'), String(made || ''))
+  $('#library').hidden = !libraryOpen
+  if (libraryOpen) patch($('#library'), assets.library())
+  $('#lightbox').hidden = !zoomed
+  if (zoomed) patch($('#lightbox'), assets.lightbox(zoomed))
   for (const b of document.querySelectorAll('[data-tab]')) b.onclick = () => setTab(b.dataset.tab)
   for (const b of document.querySelectorAll('[data-feed]')) b.onclick = () => { feed = b.dataset.feed; render(lastArgs) }
   for (const b of document.querySelectorAll('[data-pick]')) b.onclick = () => b.dataset.pick && pick(b.dataset.pick)
   for (const b of document.querySelectorAll('[data-back]')) b.onclick = () => pick(null)
+  $('#library-open').onclick = () => { libraryOpen = !libraryOpen; render(lastArgs) }
+  $('#lightbox').onclick = () => { zoomed = null; render(lastArgs) }
+  for (const b of document.querySelectorAll('[data-library]')) b.onclick = () => { libraryOpen = false; render(lastArgs) }
+  for (const b of document.querySelectorAll('[data-shelf]')) b.onclick = () => { assets.setShelf(b.dataset.shelf); render(lastArgs) }
+  for (const b of document.querySelectorAll('[data-zoom]')) b.onclick = e => { e.preventDefault(); zoomed = b.dataset.zoom; render(lastArgs) }
+  for (const b of document.querySelectorAll('[data-answer]')) {
+    b.onclick = e => {
+      e.stopPropagation()
+      const [session, id] = b.dataset.answer.split('|')
+      answer?.send(session, id, b.dataset.label)
+      b.classList.add('picked')
+    }
+  }
   for (const b of document.querySelectorAll('[data-hover]')) {
     b.onpointerenter = () => hover(b.dataset.hover)
     b.onpointerleave = () => hover(null)

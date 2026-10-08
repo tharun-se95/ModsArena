@@ -14,6 +14,7 @@
 //                  this bridge's version, so a newer mod can replace it
 //   POST /shutdown a newer bridge taking over the port (managed bridges only)
 //   GET  /transcript?session=&agent=&after=   a conversation, read from its transcript
+//   GET  /asset?session=&id=   a picture a session made or read, by the path its event named
 //   POST /chat     a message for a session or subagent (the office page only)
 //   GET  /inbox?session=   a session's mod picking up its messages
 //   GET  /         the office
@@ -23,8 +24,8 @@
 
 import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
-import { extname, join, dirname } from 'node:path'
+import { readFile, stat } from 'node:fs/promises'
+import { extname, join, dirname, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { normalize, GAUGES, gaugeKey } from './normalize.mjs'
 import { findProject } from './projects.mjs'
@@ -69,6 +70,13 @@ const TYPES = {
   '.svg': 'image/svg+xml',
 }
 
+// Pictures sessions made or read: `${session}|${id}` -> the file. Only
+// these paths are ever served, and only as images (see /asset).
+const pictures = new Map()
+const PICTURE_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml' }
+const PICTURE_LIMIT = 20 * 1024 * 1024
+const PICTURES_KEEP = 500
+
 // Events in order, plus the newest reading of each gauge, which would
 // otherwise crowd everything else out of the log.
 const log = []
@@ -89,6 +97,10 @@ function publish(events) {
   for (const raw of events) {
     const ev = enrich(raw)
     if (ev.kind === 'chat.delivered') chat.settle(ev.id, ev.ok !== false)
+    if (ev.kind === 'asset.add' && ev.type === 'image' && typeof ev.path === 'string' && isAbsolute(ev.path)) {
+      pictures.set(`${ev.session}|${ev.id}`, ev.path)
+      if (pictures.size > PICTURES_KEEP) pictures.delete(pictures.keys().next().value)
+    }
     if (GAUGES.has(ev.kind)) gauges.set(gaugeKey(ev), ev)
     else log.push(ev)
     // A finished agent's last reading has nothing left to show.
@@ -178,6 +190,27 @@ const server = createServer(async (req, res) => {
       json(res, 200, await readTranscript(path, after))
     } catch (err) {
       json(res, 500, { error: String(err.message ?? err) })
+    }
+    return
+  }
+
+  if (req.method === 'GET' && pathname === '/asset') {
+    const path = pictures.get(`${searchParams.get('session')}|${searchParams.get('id')}`)
+    const type = path && PICTURE_TYPES[extname(path).toLowerCase()]
+    if (!type) return json(res, 404, { error: 'no such picture' })
+    try {
+      const info = await stat(path)
+      if (!info.isFile() || info.size > PICTURE_LIMIT) return json(res, 404, { error: 'no such picture' })
+      // Shown in an <img> only: an SVG opened on its own runs nothing here.
+      res.writeHead(200, {
+        'content-type': type,
+        'cache-control': 'private, max-age=60',
+        'x-content-type-options': 'nosniff',
+        'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+      })
+      res.end(await readFile(path))
+    } catch {
+      json(res, 404, { error: 'no such picture' })
     }
     return
   }

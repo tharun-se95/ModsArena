@@ -579,8 +579,48 @@ export function desk(colors, tint) {
   let scroll = 0
   let lastDraw = -1
   let lastState = ''
+  // What the screen shows instead of code for a while: a picture the
+  // session just made, or a big "?" while it waits on your answer.
+  let shown = null // { img, until } or { ask, color }
+  function showImage(img, until) {
+    shown = { img, until }
+    lastState = ''
+  }
+  function showAsk(kind, color) {
+    const key = kind ? `${kind}|${color}` : null
+    if ((shown?.askKey ?? null) === key && !(shown?.img)) return
+    if (shown?.img && !kind) return
+    shown = kind ? { ask: kind, color, askKey: key } : null
+    lastState = ''
+  }
+  function drawShown(t) {
+    if (shown.img) {
+      ctx.fillStyle = '#1f2433'
+      ctx.fillRect(0, 0, 160, 96)
+      const { img } = shown
+      const k = Math.min(160 / img.width, 96 / img.height)
+      ctx.drawImage(img, (160 - img.width * k) / 2, (96 - img.height * k) / 2, img.width * k, img.height * k)
+    } else {
+      ctx.fillStyle = shown.color
+      ctx.fillRect(0, 0, 160, 96)
+      ctx.fillStyle = '#ffffff'
+      ctx.font = '700 64px Georgia, serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      const wobble = Math.sin(t * 3) * 3
+      ctx.fillText(shown.ask === 'permission' ? '>_' : shown.ask === 'plan' ? '✎' : '?', 80, 50 + wobble)
+    }
+    texture.needsUpdate = true
+  }
   // `state` is 'busy', 'idle' or 'off'; busy screens scroll.
   function draw(t, state, accent) {
+    if (shown?.img && t > shown.until) { shown = null; lastState = '' }
+    if (shown && state !== 'off') {
+      if (t - lastDraw < 0.1) return
+      lastDraw = t
+      drawShown(t)
+      return
+    }
     if (state !== 'busy' && state === lastState) return
     if (state === 'busy' && t - lastDraw < 0.12) return
     lastDraw = t
@@ -623,8 +663,151 @@ export function desk(colors, tint) {
       p.material.opacity = on ? 0.5 * (1 - k) * Math.min(1, k * 5) : 0
     }
   }
-  bake(g, [screen, mug, ...wisps])
-  return { group: g, draw, steam, mug }
+  // A picture frame by the monitor holds the latest picture the session
+  // made; an outbox tray on the other side stacks what it delivered.
+  const photoCanvas = document.createElement('canvas')
+  photoCanvas.width = 128
+  photoCanvas.height = 84
+  const photoTex = new THREE.CanvasTexture(photoCanvas)
+  photoTex.colorSpace = THREE.SRGBColorSpace
+  const photo = new THREE.Group()
+  const photoBack = new THREE.Mesh(rounded(13, 9.4, 1, 0.4), mat(colors.trim, { roughness: 0.5 }))
+  const photoFace = new THREE.Mesh(new THREE.PlaneGeometry(11.6, 8), new THREE.MeshBasicMaterial({ map: photoTex, toneMapped: false }))
+  photoFace.position.z = 0.55
+  photo.add(photoBack, photoFace)
+  photo.position.set(-22, 23.6, 1)
+  photo.rotation.set(-0.18, 0.3, 0)
+  photo.visible = false
+  g.add(photo)
+  function setPhoto(img) {
+    const pc = photoCanvas.getContext('2d')
+    const k = Math.max(128 / img.width, 84 / img.height)
+    pc.drawImage(img, (128 - img.width * k) / 2, (84 - img.height * k) / 2, img.width * k, img.height * k)
+    photoTex.needsUpdate = true
+    photo.visible = true
+  }
+  const tray = new THREE.Group()
+  const trayBase = new THREE.Mesh(rounded(11, 1.6, 8, 0.4), mat(colors.woodDark, { roughness: 0.6 }))
+  trayBase.position.y = 0.8
+  tray.add(trayBase)
+  tray.position.set(21, 18.3, -5)
+  tray.visible = false
+  g.add(tray)
+  const sheets = []
+  // `colors` of what was delivered, newest last: one sheet each, up to six.
+  function setTray(list) {
+    for (const m of sheets) { tray.remove(m); m.material.dispose() }
+    sheets.length = 0
+    list.slice(-6).forEach((color, i) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(9, 0.45, 6.4), new THREE.MeshStandardMaterial({ color, roughness: 0.8 }))
+      m.position.set((i % 2 ? 0.4 : -0.3), 1.9 + i * 0.5, (i % 3) * 0.2)
+      m.rotation.y = ((i * 37) % 9 - 4) * 0.03
+      m.castShadow = true
+      tray.add(m)
+      sheets.push(m)
+    })
+    tray.visible = list.length > 0
+  }
+  shadowed(photo)
+  photoFace.castShadow = photoFace.receiveShadow = false
+  bake(g, [screen, mug, ...wisps, photo, tray])
+  return { group: g, draw, steam, mug, showImage, showAsk, setPhoto, setTray }
+}
+
+// ---------------------------------------------------------------------------
+// The checklist easel: a small whiteboard on a stand beside a session's
+// desk, its rows ticked off as the session works through them.
+
+export function easel(colors) {
+  const g = new THREE.Group()
+  const wood = mat(colors.woodDark, { roughness: 0.6 })
+  for (const x of [-9, 9]) {
+    const leg = new THREE.Mesh(rounded(1.6, 44, 1.6, 0.5), wood)
+    leg.position.set(x, 22, 0)
+    leg.rotation.z = x < 0 ? 0.06 : -0.06
+    g.add(leg)
+  }
+  const back = new THREE.Mesh(rounded(1.4, 40, 1.4, 0.5), wood)
+  back.position.set(0, 20, -6)
+  back.rotation.x = -0.28
+  g.add(back)
+  const frame = new THREE.Mesh(rounded(26, 30, 1.6, 0.8), mat(colors.trim, { roughness: 0.4 }))
+  frame.position.set(0, 30, 0.6)
+  g.add(frame)
+  const ledge = new THREE.Mesh(rounded(24, 1.2, 3, 0.4), wood)
+  ledge.position.set(0, 14.6, 1.6)
+  const marker = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 5, 10), mat('#b85c3c'))
+  marker.rotation.z = Math.PI / 2
+  marker.position.set(5, 15.6, 1.8)
+  g.add(ledge, marker)
+  const canvas = document.createElement('canvas')
+  canvas.width = 192
+  canvas.height = 224
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  texture.anisotropy = 8
+  const board = new THREE.Mesh(new THREE.PlaneGeometry(24, 28), new THREE.MeshBasicMaterial({ map: texture, toneMapped: false }))
+  board.position.set(0, 30, 1.45)
+  g.add(board)
+  shadowed(g)
+  board.castShadow = board.receiveShadow = false
+  const ctx = canvas.getContext('2d')
+  let key = ''
+  // `items` as TodoWrite gives them; `accent` the session's own color.
+  function draw(items, accent, t) {
+    const now = items.findIndex(i => i.status === 'in_progress')
+    const blink = now >= 0 && Math.floor(t * 2) % 2
+    const k = `${items.map(i => i.status + i.text).join('|')}|${accent}|${blink}`
+    if (k === key) return
+    key = k
+    ctx.fillStyle = '#fdfcf8'
+    ctx.fillRect(0, 0, 192, 224)
+    const done = items.filter(i => i.status === 'completed').length
+    ctx.fillStyle = '#2b2a2e'
+    ctx.font = '600 19px Georgia, serif'
+    ctx.textBaseline = 'alphabetic'
+    ctx.fillText('To do', 12, 28)
+    ctx.font = '500 15px ui-monospace, Menlo, monospace'
+    ctx.fillStyle = '#8a8378'
+    ctx.textAlign = 'right'
+    ctx.fillText(`${done}/${items.length}`, 180, 28)
+    ctx.textAlign = 'left'
+    ctx.fillStyle = '#e6dfd3'
+    ctx.fillRect(12, 38, 168, 6)
+    ctx.fillStyle = '#5f8a68'
+    ctx.fillRect(12, 38, 168 * (items.length ? done / items.length : 0), 6)
+    items.slice(0, 6).forEach((item, i) => {
+      const y = 70 + i * 26
+      const isDone = item.status === 'completed'
+      const isNow = item.status === 'in_progress'
+      ctx.strokeStyle = isDone ? '#5f8a68' : isNow ? accent : '#b8afa2'
+      ctx.lineWidth = 2.5
+      ctx.strokeRect(12, y - 13, 15, 15)
+      if (isDone) {
+        ctx.beginPath()
+        ctx.moveTo(14, y - 6); ctx.lineTo(19, y - 1); ctx.lineTo(27, y - 14)
+        ctx.stroke()
+      } else if (isNow && blink) {
+        ctx.fillStyle = accent
+        ctx.fillRect(16, y - 9, 7, 7)
+      }
+      ctx.font = `${isNow ? 600 : 400} 15px -apple-system, "Segoe UI", sans-serif`
+      ctx.fillStyle = isDone ? '#a39b90' : '#2b2a2e'
+      let text = item.text
+      while (ctx.measureText(text).width > 146 && text.length > 4) text = `${text.slice(0, -2)}…`.replace(/……$/, '…')
+      ctx.fillText(text, 34, y)
+      if (isDone) {
+        ctx.strokeStyle = '#a39b90'
+        ctx.lineWidth = 1.5
+        ctx.beginPath()
+        ctx.moveTo(34, y - 5); ctx.lineTo(34 + ctx.measureText(text).width, y - 5)
+        ctx.stroke()
+      }
+    })
+    texture.needsUpdate = true
+  }
+  bake(g, [board])
+  return { group: g, draw }
 }
 
 // ---------------------------------------------------------------------------

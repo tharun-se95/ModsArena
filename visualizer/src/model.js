@@ -27,6 +27,11 @@ export const stats = { calls: 0, errors: 0 }
 export const notices = [] // compactions and other moments, newest first
 export const mail = [] // messages between loops, newest first: { t, session, from, to, fromName, toName, via, text }
 const MAIL_KEEP = 60
+// What the work produces and asks, newest first across the whole office:
+// { id, t, session, agent?, type, title, url?, path?, src?, meta? }
+//   type: image, artifact, pr, link, file, plan
+export const outputs = []
+const OUTPUTS_KEEP = 120
 let dirty = true
 
 export const isDirty = () => dirty
@@ -67,6 +72,7 @@ export function reset() {
   Object.assign(stats, { calls: 0, errors: 0 })
   notices.length = 0
   mail.length = 0
+  outputs.length = 0
   dirty = true
 }
 
@@ -272,6 +278,40 @@ const handlers = {
     node.endedAt = ev.t
     trimFinishedAgents()
   },
+  // A checklist, whole each time (TodoWrite sends the full list; the mod
+  // keeps TaskCreate/TaskUpdate's tasks and sends them the same way).
+  'todo.update'(ev) {
+    const node = owner(ev)
+    node.todos = (ev.items ?? []).map(i => ({ text: i.text, status: i.status, active: i.active }))
+    node.todosAt = ev.t
+    // The conversation shows a snapshot when an item is checked off.
+    const done = node.todos.filter(i => i.status === 'completed').length
+    if (done !== node.todosDone) {
+      node.todosDone = done
+      if (!done) return
+      node.todosLog = [...(node.todosLog ?? []).slice(-12), { kind: 'todo', items: node.todos, t: ev.t }]
+    }
+  },
+  // Claude Code waiting on you mid-turn: a question (AskUserQuestion), a
+  // plan to approve (ExitPlanMode) or a tool to allow.
+  'ask.open'(ev) {
+    const node = owner(ev)
+    node.asks = (node.asks ?? []).filter(a => a.id !== ev.id)
+    node.asks.push({ id: ev.id, t: ev.t, type: ev.type ?? 'question', questions: ev.questions, tool: ev.tool, summary: ev.summary, plan: ev.plan })
+    node.askAt = ev.t
+    if (ev.type === 'plan' && ev.plan) addOutput(ev, { id: `plan-${ev.id}`, type: 'plan', title: firstLine(ev.plan), text: ev.plan })
+  },
+  'ask.close'(ev) {
+    const node = owner(ev)
+    const ask = node.asks?.find(a => a.id === ev.id)
+    node.asks = (node.asks ?? []).filter(a => a.id !== ev.id)
+    if (!ask) return
+    const text = ask.type === 'question' ? ask.questions?.map(q => q.question).join(' ') : ask.type === 'plan' ? firstLine(ask.plan ?? '') : `${toolName(ask.tool)} ${ask.summary ?? ''}`.trim()
+    node.answered = [...(node.answered ?? []).slice(-12), { kind: 'ask', type: ask.type, text, answer: ev.answer, t: ask.t }]
+  },
+  'asset.add'(ev) {
+    addOutput(ev, ev)
+  },
   'tool.start'(ev) {
     const own = owner(ev)
     // A finished or waiting subagent at work again: it was resumed.
@@ -305,6 +345,42 @@ const handlers = {
     }
   },
 }
+
+// A tool as people say it: mcp__github__create_pull_request is "GitHub:
+// create pull request".
+export function toolName(tool) {
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(tool ?? '')
+  if (!mcp) return tool ?? 'a tool'
+  const server = mcp[1].replace(/^plugin_\w+_/, '').replace(/[-_]/g, ' ')
+  return `${server.charAt(0).toUpperCase()}${server.slice(1)}: ${mcp[2].replace(/_/g, ' ')}`
+}
+
+const firstLine = text => text.replace(/^#+\s*/gm, '').split('\n').find(l => l.trim())?.trim().slice(0, 80) ?? 'Plan'
+
+function addOutput(ev, item) {
+  const own = owner(ev)
+  const out = {
+    id: item.id, t: ev.t, session: ev.session, ...(ev.agent && { agent: ev.agent }),
+    type: item.type, title: item.title, url: item.url, path: item.path, src: item.src, text: item.text, meta: item.meta,
+  }
+  const at = outputs.findIndex(o => o.session === out.session && o.id === out.id)
+  if (at >= 0) outputs.splice(at, 1)
+  outputs.unshift(out)
+  if (outputs.length > OUTPUTS_KEEP) outputs.pop()
+  own.outputAt = ev.t
+  const host = nodes.get(sid(ev.session))
+  if (host) host.outputAt = ev.t
+}
+
+// What one thread (and its agents) has made, newest first.
+export const outputsOf = sessionNode => outputs.filter(o => o.session === sessionNode.session)
+
+// Everything a thread or agent is waiting on you for, oldest first.
+export const asksOf = n => n.asks ?? []
+export const openAsks = sessionNode => [...nodes.values()]
+  .filter(x => (x.kind === 'session' || x.kind === 'agent') && x.session === sessionNode.session && x.asks?.length)
+  .flatMap(x => x.asks.map(a => ({ ...a, who: x })))
+  .sort((a, b) => a.t - b.t)
 
 function trimFinishedAgents() {
   const finished = [...nodes.values()]
@@ -412,10 +488,13 @@ export const BUSY_MS = 2500
 // Where a thread stands, in the words claude.ai's Overview uses:
 //   working   a turn is running or a tool just ran
 //   waiting   it answered and the next move is yours
+//   asking    mid-turn, but Claude Code is holding it for you: a question,
+//             a plan to approve or a tool to allow
 //   stuck     its last turn ended on an error, a refusal or an interrupt
 //   ended     the session is over (or is a past one)
 export function threadState(n, running = new Set()) {
   if (n.past || n.status === 'done') return 'ended'
+  if (n.kind === 'session' && openAsks(n).length) return 'asking'
   if (n.turnOpen || running.has(n.id) || Date.now() - (n.lastAt ?? 0) < BUSY_MS) return 'working'
   if (n.lastReason && n.lastReason !== 'answer') return 'stuck'
   return 'waiting'
