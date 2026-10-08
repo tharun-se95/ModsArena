@@ -3,7 +3,7 @@
 // the bridge's Server-Sent Events and /history; words.js turns the same
 // events into plain sentences.
 
-import { startDemo, demoHistory, answerDemo } from '../../agent-office/server/demo.mjs'
+import { startDemo, demoHistory, answerDemo, stopDemo } from '../../agent-office/server/demo.mjs'
 import * as model from './model.js'
 import * as words from './words.js'
 import * as table from './table.js'
@@ -11,6 +11,7 @@ import * as panels from './panels.js'
 import { unlock, isMuted, setMuted } from './sound.js'
 import * as transcript from './transcript.js'
 import * as answering from './answer.js'
+import * as actions from './actions.js'
 
 const HISTORY_REFRESH_MS = 60000
 const PANEL_REFRESH_MS = 700
@@ -143,6 +144,22 @@ answering.setRoute({
   },
 })
 answering.listen()
+
+// Stop (actions.js): the session's mod ends its running turn.
+actions.setStopper(async n => {
+  if (isDemo) {
+    stopDemo(n.session) // Demo-only, with no bridge
+    return { ok: true }
+  }
+  const res = await fetch('/stop', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-agent-office-token': officeToken },
+    body: JSON.stringify({ session: n.session }),
+  })
+  const got = await res.json().catch(() => ({}))
+  return res.ok ? { ok: true } : { ok: false, status: got.error ?? `the bridge answered ${res.status}` }
+})
+actions.listen()
 const answer = { can: answering.canAnswer }
 
 function refreshPanels() {

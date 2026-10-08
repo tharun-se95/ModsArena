@@ -14,6 +14,7 @@ import { moments, activity, escapeHtml, quote, ago } from './words.js'
 import { pct, level, tintOf, sessionTint, roomKey } from './table.js'
 import * as transcript from './transcript.js'
 import * as assets from './assets.js'
+import * as actions from './actions.js'
 
 const $ = sel => document.querySelector(sel)
 const k = n => (n === undefined ? '—' : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : `${Math.round(n / 1000)}k`)
@@ -421,7 +422,8 @@ function head(n, running) {
   return `
     ${crumbs(n)}
     <h2 class="dtitle"><i class="dot ${isAgent ? tintOf(n.type) : sessionTint(n.session)}"></i>${escapeHtml(isAgent ? n.label : title(n))}</h2>
-    <p class="dmeta">${pill(state)} ${escapeHtml(sub)}</p>`
+    <p class="dmeta">${pill(state)} ${escapeHtml(sub)}</p>
+    ${actions.bar(n, state)}`
 }
 
 // ---------------------------------------------------------------------------
@@ -491,6 +493,7 @@ function clipboard(n, running) {
 let libraryOpen = false
 let zoomed = null
 document.addEventListener('office:answered', () => { if (lastArgs) render(lastArgs) })
+document.addEventListener('office:refresh', () => { if (lastArgs) render(lastArgs) })
 document.addEventListener('office:zoom', e => { zoomed = e.detail; if (lastArgs) render(lastArgs) })
 addEventListener('keydown', e => { if (e.key === 'Escape' && (zoomed || libraryOpen)) { if (zoomed) zoomed = null; else libraryOpen = false; if (lastArgs) render(lastArgs) } })
 

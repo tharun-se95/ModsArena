@@ -120,6 +120,7 @@ The box at the bottom sends it a message:
 - **To a session:** the message becomes its next prompt, marked as from Agent Office. If the session is mid-turn, it waits until that turn ends.
 - **To a subagent:** the message goes to that subagent directly. A finished one is resumed to answer, which uses tokens.
 - **Past sessions** show their transcript but no message box. Resume one in Claude Code to talk to it again.
+- **Quick actions** under a thread's name: **Explain what you did** and **Wrap up** send a ready-worded message; **Stop** (it asks once more) ends the turn a session is running, as Esc would in Claude Code. A single subagent can't be stopped from the office.
 
 Enter sends and Shift+Enter starts a new line.
 

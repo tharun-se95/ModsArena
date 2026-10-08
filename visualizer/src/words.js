@@ -139,6 +139,9 @@ export function ingest(ev) {
     case 'chat.sent':
       moment(ev, `You messaged ${ev.agent ? (nodes.get(aid(ev.session, ev.agent))?.label ?? 'a subagent') : quote(sessionName(ev.session))}.`, 'note', ev.agent ? aid(ev.session, ev.agent) : sid(ev.session))
       break
+    case 'stop.sent':
+      moment(ev, `You asked ${quote(sessionName(ev.session))} to stop.`, 'note', sid(ev.session))
+      break
     case 'chat.delivered':
       if (ev.ok === false) moment(ev, `Your message to ${ev.agent ? (nodes.get(aid(ev.session, ev.agent))?.label ?? 'a subagent') : quote(sessionName(ev.session))} couldn't be delivered${ev.how ? `: ${ev.how}` : ''}.`, 'bad', ev.agent ? aid(ev.session, ev.agent) : sid(ev.session))
       break

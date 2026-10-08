@@ -374,3 +374,41 @@ test('answered in the terminal first, the office stops waiting', async ($, on) =
   expect(ran.result?.plan).toBe('# Ship it')
   expect(waits).toBeLessThan(3)
 })
+
+test('Stop from the office ends the running turn, and says so when nothing runs', async ($, on) => {
+  const clock = mock.clock(on, { now: 1000 })
+  const posted: Array<Record<string, unknown>> = []
+  const aborted: string[] = []
+  let inbox = [{ id: 'x1', action: 'stop', text: '' }]
+  on('http.fetch', async (_$, e) => {
+    if (e.url.endsWith('/event')) posted.push(...JSON.parse(e.init?.body ?? '[]'))
+    if (e.url.includes('/inbox?session=sess-stop')) {
+      const body = JSON.stringify({ messages: inbox })
+      inbox = []
+      return { value: { status: 200, ok: true, headers: {}, text: body } }
+    }
+    return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }
+  })
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  on('session.id', async () => ({ value: 'sess-stop' }))
+  on('session.model', async () => ({ value: 'test-model' }))
+  on('command.register', async () => ({ value: { command: 'office' } }))
+  on('turn.start', async (_$, e) => ({ turnId: e.turnId }))
+  on('turn.complete', async (_$, e) => ({ text: e.answer }))
+  on('session.usage', async () => ({ value: { context: {} } as never }))
+  on('turn.abort', async (_$, e) => { aborted.push(e.turnId); return { value: undefined } })
+
+  await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+  await $.turn.start({ text: 'Refactor everything', turnId: 'turn-7' })
+  await clock.advance(1300)
+  await clock.advance(300)
+  expect(aborted).toEqual(['turn-7'])
+  expect(posted.find(ev => ev.kind === 'chat.delivered')?.how).toBe('stopped its turn')
+
+  await $.turn.complete({ answer: '', durationMs: 5, isAborted: true, turnId: 'turn-7', reason: 'aborted' })
+  inbox = [{ id: 'x2', action: 'stop', text: '' }]
+  await clock.advance(1000)
+  await clock.advance(300)
+  expect(aborted).toEqual(['turn-7'])
+  expect(posted.filter(ev => ev.kind === 'chat.delivered').map(ev => ev.how)).toEqual(['stopped its turn', 'nothing was running'])
+})

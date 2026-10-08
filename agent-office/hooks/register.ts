@@ -5,7 +5,8 @@ import type { EngineInterface, Register } from 'claude-code'
 // page. `/office` opens the page (starting the bridge first if need be) and
 // `/office status` says what's running. Messages you send from the office
 // come back through the bridge's inbox: to the session as its next prompt,
-// to a subagent as a message (see deliver()).
+// to a subagent as a message, or Stop, which ends the running turn (see
+// deliver()).
 //
 // Hooks run in a sandbox with no Node, so events are queued here and flushed
 // over `$.http.fetch` on a timer: a tool call never waits on the bridge.
@@ -37,6 +38,8 @@ const link = {
   activeTools: 0,
   isCheckingInbox: false,
   version: undefined as string | undefined,
+  // The main loop's running turn, which Stop in the office ends.
+  turnId: undefined as string | undefined,
 }
 
 const bridgeUrl = () => `http://127.0.0.1:${link.port}`
@@ -403,7 +406,7 @@ async function settleAgent($: EngineInterface, agent: string) {
   showStatus($)
 }
 
-type ChatMessage = { id: string; agent?: string; text: string }
+type ChatMessage = { id: string; agent?: string; text: string; action?: string }
 
 // Messages from the office for this session. A session's message becomes
 // its next prompt (the engine queues it until the session is free), framed
@@ -411,7 +414,13 @@ type ChatMessage = { id: string; agent?: string; text: string }
 // finished one is resumed to answer. Either way the office hears back.
 export async function deliver($: EngineInterface, message: ChatMessage) {
   try {
-    if (message.agent) {
+    if (message.action === 'stop') {
+      // Stop from the office: end the running turn, as Esc would.
+      const turnId = link.turnId
+      if (!turnId) return emit({ kind: 'chat.delivered', id: message.id, ok: false, how: 'nothing was running' })
+      await $.turn.abort({ turnId })
+      emit({ kind: 'chat.delivered', id: message.id, ok: true, how: 'stopped its turn' })
+    } else if (message.agent) {
       const sent = await $.session.send({ to: { agentId: message.agent }, text: message.text })
       emit({
         kind: 'chat.delivered', id: message.id, agent: message.agent, ok: sent.isDelivered,
@@ -585,6 +594,7 @@ export const register: Register = (on, options) => {
   })
 
   on('turn.start', async ($, e, next) => {
+    link.turnId = e.turnId
     emit({ kind: 'turn.start', turnId: e.turnId, text: summarize({ prompt: e.text }) })
     return next(e)
   })
@@ -593,6 +603,7 @@ export const register: Register = (on, options) => {
     const agent = e.agentId
     emit({ kind: 'turn.complete', agent, turnId: e.turnId, durationMs: e.durationMs, reason: e.reason, answer: clip(e.answer) })
     if (agent === undefined) {
+      if (link.turnId === e.turnId) link.turnId = undefined
       await sendBreakdown($)
     } else if (link.teammates.has(agent)) {
       // A teammate waits for its next message rather than ending.

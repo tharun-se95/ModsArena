@@ -17,6 +17,7 @@
 //   GET  /asset?session=&id=   a picture a session made or read, by the path its event named
 //   POST /chat     a message for a session or subagent (the office page only)
 //   GET  /inbox?session=   a session's mod picking up its messages
+//   POST /stop     stop the turn a session is running (the office page only; its mod does it)
 //   POST /answer   an answer to a question or plan a session is holding (the office page only)
 //   GET  /answer/wait?session=&id=   that session's mod waiting for one (asks.mjs)
 //   GET  /         the office
@@ -32,7 +33,7 @@ import { fileURLToPath } from 'node:url'
 import { normalize, GAUGES, gaugeKey } from './normalize.mjs'
 import { findProject } from './projects.mjs'
 import { readHistory, tailContext } from './history.mjs'
-import { startDemo, answerDemo } from './demo.mjs'
+import { startDemo, answerDemo, stopDemo } from './demo.mjs'
 import { refusal, newToken, tokenMatches, TOKEN_HEADER, INBOX_HEADER, CONTROL_HEADER } from './guard.mjs'
 import * as chat from './chat.mjs'
 import * as asks from './asks.mjs'
@@ -183,6 +184,24 @@ const server = createServer(async (req, res) => {
     // A custom header: a web page can't send it to another origin unasked.
     if (req.headers[INBOX_HEADER] !== '1') return json(res, 403, { error: 'missing inbox header' })
     json(res, 200, { messages: chat.take(searchParams.get('session') ?? '') })
+    return
+  }
+
+  // Stopping a turn: a message of its own kind, through the same inbox.
+  if (req.method === 'POST' && pathname === '/stop') {
+    if (!tokenMatches(req.headers[TOKEN_HEADER], TOKEN)) return json(res, 403, { error: 'missing or wrong token' })
+    try {
+      const body = JSON.parse(await readBody(req))
+      const sent = chat.send({ session: body?.session, action: 'stop' })
+      if (sent.error) return json(res, 400, { error: sent.error })
+      const { id, session, t } = sent.message
+      publish([{ t, kind: 'stop.sent', session, id }])
+      // Demo-only: the sample session stops itself.
+      if (flag('demo')) stopDemo(session)
+      json(res, 200, { id })
+    } catch (err) {
+      json(res, 400, { error: String(err.message ?? err) })
+    }
     return
   }
 

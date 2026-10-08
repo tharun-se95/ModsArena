@@ -113,6 +113,12 @@ export function answerDemo(session, id, answer) {
   return true
 }
 
+// Demo-only: Stop from the office ends a sample session's turn at its next step.
+const stopping = new Set()
+export function stopDemo(session) {
+  stopping.add(session)
+}
+
 const pick = list => list[Math.floor(Math.random() * list.length)]
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const rand = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo))
@@ -223,7 +229,13 @@ export function startDemo(publish) {
         const work = []
         for (let i = 0; i < rand(0, 3); i++) work.push(runAgent(undefined, 0))
         const hue = rand(0, 360)
+        let isStopped = false
+        stopping.delete(session)
         for (let step = 0; step < items.length; step++) {
+          if (stopping.delete(session)) {
+            isStopped = true
+            break
+          }
           checklist(items, step, true)
           await runTool(undefined)
           messages += rand(3000, 12000)
@@ -253,6 +265,11 @@ export function startDemo(publish) {
               await ask({ type: 'plan', plan: PLAN_TEXT }, 'Approved')
             }
           }
+        }
+        if (isStopped) {
+          emit({ kind: 'turn.complete', turnId, reason: 'aborted', durationMs: 4000 })
+          await sleep(rand(15000, 25000) * pace)
+          continue
         }
         checklist(items, items.length, false)
         await Promise.all(work)

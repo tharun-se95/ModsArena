@@ -249,6 +249,18 @@ export async function sendTo(n, text) {
   }
 }
 
+// A message from a quick action (actions.js): into the open conversation
+// when it's this one's, so it shows there with its progress; else as from
+// the inbox.
+export async function say(n, text) {
+  if (view?.id === n.id && view.root.isConnected) {
+    await send(text)
+    const last = view?.pending.at(-1)
+    return last?.ok === false ? { ok: false, status: last.status } : { ok: true }
+  }
+  return sendTo(n, text)
+}
+
 export const canMessage = () => demo || Boolean(token)
 
 // Put the cursor in the open transcript's message box, if there is one.

@@ -88,3 +88,14 @@ test('answering a question from the office is guarded like chat, and reaches the
   assert.equal((await call('POST', '/answer', { body, headers: { 'x-agent-office-token': token, origin: base } })).status, 200)
   assert.deepEqual((await waiting).json(), { answer: { answers: { 'Which one?': 'B' } } })
 })
+
+test('Stop is guarded like chat and reaches the session’s mod through its inbox', async () => {
+  const token = /name="agent-office-token" content="([0-9a-f]{48})"/.exec((await call('GET', '/')).text)?.[1]
+  const body = { session: 'sess-stop' }
+  assert.equal((await call('POST', '/stop', { body })).status, 403, 'no token')
+  assert.equal((await call('POST', '/stop', { body, headers: { 'x-agent-office-token': token, origin: 'https://evil.example' } })).status, 403, 'foreign origin')
+  const sent = await call('POST', '/stop', { body, headers: { 'x-agent-office-token': token, origin: base } })
+  assert.equal(sent.status, 200)
+  const inbox = (await call('GET', '/inbox?session=sess-stop', { headers: { 'x-agent-office-inbox': '1' } })).json()
+  assert.deepEqual(inbox.messages, [{ id: sent.json().id, action: 'stop', text: '' }])
+})
