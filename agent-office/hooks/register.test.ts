@@ -134,7 +134,7 @@ test('/office starts the bridge, waits for it, then opens the page', async ($, o
   })
   on('process.spawn', async function* () {
     isUp = true // the bridge comes up once started
-    return { code: 0, signal: null }
+    return { value: { code: 0, signal: null } }
   })
   on('clock.sleep', async () => ({ value: undefined }))
 
@@ -171,7 +171,7 @@ test('/office replaces a bridge from an older copy before opening the page', asy
   on('process.spawn', async function* (_$, e) {
     spawned.push([...e.argv])
     bridge = { version: '9.9.9', managed: true } // the new bridge takes over
-    return { code: 0, signal: null }
+    return { value: { code: 0, signal: null } }
   })
   on('clock.sleep', async () => ({ value: undefined }))
 
