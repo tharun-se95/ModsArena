@@ -15,7 +15,7 @@ import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRe
 import { makeCharacter, pose, emote } from './character.js'
 import { moodOf } from './moods.js'
 import {
-  buildRoom, rug, desk, easel, coffeeCorner, officeShell, glassMat, lampMat,
+  buildRoom, rug, desk, easel, coffeeCorner, officeShell, glassMat, lampMat, roomDecor,
   FLOOR_TOP, WALL_H, COFFEE_W, COFFEE_D,
 } from './office.js'
 import { nodes, fill, sid, aid, WARN_AT, outputs, openAsks, mail } from './model.js'
@@ -24,6 +24,8 @@ import { createBubbles } from './bubbles.js'
 import { beadColor, escapeHtml, activity, ago } from './words.js'
 import { sound } from './sound.js'
 import { who } from './names.js'
+import * as milestones from './milestones.js'
+import { toast } from './toast.js'
 
 const ROW_DEPTH = 160 // one row: helpers, desk, the session, its label
 const BACK_SPACE = 44 // along the back wall, for the shelf, window and plants
@@ -381,6 +383,10 @@ function ensureRoom(p) {
     const built = buildRoom({ w, d, name: p.name, colors: roomColors(roomOf(p.name)) })
     t.mesh = built.group
     t.plants = built.plants
+    // What the project has earned so far; grow() shows it.
+    t.decor = roomDecor({ w, d, colors: roomColors(roomOf(p.name)), shelfAt: built.shelfAt })
+    t.mesh.add(t.decor.group)
+    t.decorKey = ''
     t.mesh.position.copy(t.center)
     t.mesh.add(t.label.obj)
     scene.add(t.mesh)
@@ -696,6 +702,7 @@ function startBreak(a, s) {
 // Reconcile with the model
 
 export function sync(showPast) {
+  if (clock() - grownAt > 1) grow()
   const list = chooseSessions(showPast)
   const shownSessions = new Set()
   for (const p of list) {
@@ -754,6 +761,68 @@ export function sync(showPast) {
     frame()
   }
   return list
+}
+
+// ---------------------------------------------------------------------------
+// An office that grows: once a second, tally what each thread has done into
+// its project's milestones (milestones.js), celebrate what's new, and dress
+// each room in what its project has earned.
+
+let grownAt = -9
+
+function countsOf(n, made) {
+  const m = made.get(n.session)
+  let team = n.pastAgents?.length ?? 0
+  if (!n.past) for (const a of nodes.values()) if (a.kind === 'agent' && a.session === n.session && a.status !== 'done') team++
+  return { turns: n.turns ?? 0, tools: n.toolCalls ?? 0, outputs: m?.outputs ?? 0, pictures: m?.pictures ?? 0, prs: m?.prs ?? 0, team }
+}
+
+function grow() {
+  grownAt = clock()
+  const store = milestones.mine()
+  const made = new Map()
+  for (const o of outputs) {
+    if (o.type === 'file') continue
+    const m = made.get(o.session) ?? { outputs: 0, pictures: 0, prs: 0 }
+    m.outputs++
+    if (o.type === 'image') m.pictures++
+    if (o.type === 'pr') m.prs++
+    made.set(o.session, m)
+  }
+  let changed = false
+  const projects = new Map()
+  for (const n of nodes.values()) {
+    if (n.kind !== 'session' || !n.project) continue
+    projects.set(n.project, n.projectName ?? nodes.get(`p:${n.project}`)?.label ?? n.project)
+    if (milestones.record(store, n.project, n.session, countsOf(n, made))) changed = true
+  }
+  // What was already reached when the page opened arrives quietly.
+  const quiet = clock() - mountedAt < 6
+  for (const [project, name] of projects) {
+    const fresh = milestones.check(store, project)
+    if (!fresh.length) continue
+    changed = true
+    if (!quiet) celebrate(project, name, fresh)
+  }
+  if (changed) milestones.save(store)
+  for (const t of rooms.values()) {
+    if (!t.decor) continue
+    const state = milestones.decorOf(store, t.id.slice(2))
+    const key = `${state.trophies}|${state.poster}|${state.neon}|${state.plant}`
+    if (key === t.decorKey) continue
+    t.decorKey = key
+    t.decor.set(state, t.plants?.[1])
+    renderer.shadowMap.needsUpdate = true
+  }
+}
+
+function celebrate(project, name, fresh) {
+  const m = fresh.at(-1)
+  const more = fresh.length > 1 ? ` (and ${fresh.length - 1} more)` : ''
+  toast({ icon: '★', title: `${name}: ${m.title}!${more}`, text: m.adds, onClick: () => focusProject(`p:${project}`) })
+  sound.chime()
+  const t = rooms.get(`p:${project}`)
+  if (t) addConfetti(t.center.clone().add(v.set(0, WALL_H, -t.d / 2 + 20)))
 }
 
 // ---------------------------------------------------------------------------
@@ -986,6 +1055,7 @@ export function animate() {
     t.center.lerp(t.target, 0.12)
     t.mesh.position.copy(t.center)
     for (const p of t.plants ?? []) p.rotation.z = Math.sin(now * 0.8 + p.userData.plant) * 0.035
+    t.decor?.animate(now)
   }
   if (coffee) {
     coffee.center.lerp(coffee.target, 0.12)

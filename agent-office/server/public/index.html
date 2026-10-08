@@ -196,6 +196,24 @@
   .tag.agent.on { opacity: 1; pointer-events: auto; }
   .tag.agent .dot { width: 6px; height: 6px; margin: 0; }
 
+  /* Toasts: a milestone reached, a snapshot saved. */
+  .toasts { position: absolute; z-index: 20; left: 50%; bottom: 52px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; width: max-content; max-width: calc(100% - 32px); }
+  .toast { display: flex; align-items: center; gap: 10px; padding: 9px 16px 9px 12px; border-radius: 999px; font-size: 13px; line-height: 1.35; pointer-events: auto; opacity: 0; transform: translateY(10px) scale(0.96); transition: opacity 0.25s, transform 0.3s cubic-bezier(.3, 1.4, .5, 1); text-align: left; }
+  .toast.on { opacity: 1; transform: none; }
+  .toast i { display: grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: 50%; background: color-mix(in srgb, var(--mustard) 28%, var(--paper)); color: color-mix(in srgb, var(--mustard) 70%, var(--ink)); font-style: normal; font-size: 14px; }
+  .toast b { font-weight: 600; }
+  button.toast:hover b { color: var(--accent); }
+  @media (prefers-reduced-motion: reduce) { .toast { transition: opacity 0.2s; transform: none; } }
+
+  /* Milestones in a thread's Details. */
+  .milestones li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: baseline; padding: 4px 0; border-top: 1px dashed var(--line); font-size: 12.5px; color: var(--muted); }
+  .milestones li:first-child { border-top: 0; }
+  .milestones li i { font-style: normal; color: var(--line); }
+  .milestones li.got { color: var(--ink); }
+  .milestones li.got i { color: var(--mustard); }
+  .milestones li small { display: block; font-size: 11px; color: var(--muted); }
+  .milestones time { font: 11px var(--mono); color: var(--muted); white-space: nowrap; }
+
   /* The hover bubble over a critter, and the flags that float over one.
      The bubble sits above every label (the label layer is one stacking
      context at z-index 1), below the panels. */

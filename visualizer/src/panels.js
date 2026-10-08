@@ -15,6 +15,7 @@ import { pct, level, tintOf, sessionTint, roomKey } from './table.js'
 import * as transcript from './transcript.js'
 import * as assets from './assets.js'
 import { who } from './names.js'
+import * as milestones from './milestones.js'
 
 const $ = sel => document.querySelector(sel)
 const k = n => (n === undefined ? '—' : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : `${Math.round(n / 1000)}k`)
@@ -402,7 +403,20 @@ function sessionDetails(n) {
     ${live ? breakdown(n) + limits(n) : ''}
     ${files.length ? `<h3>Files it has worked on</h3>${files.map(fileLine).join('')}` : ''}
     ${act?.actions.length ? `<h3>Recently</h3>${act.actions.slice(0, 8).map(x => line(escapeHtml(x.text), ago(x.t), x.ok ? '' : 'bad')).join('')}` : ''}
-    ${n.prompts?.length ? `<h3>What you asked</h3>${[...n.prompts].reverse().slice(0, 6).map(p => line(asked(p), ago(p.t))).join('')}` : ''}`
+    ${n.prompts?.length ? `<h3>What you asked</h3>${[...n.prompts].reverse().slice(0, 6).map(p => line(asked(p), ago(p.t))).join('')}` : ''}
+    ${projectMilestones(n)}`
+}
+
+// What the thread's project has reached so far, and how close the rest are.
+const day = t => new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+function projectMilestones(n) {
+  if (!n.project) return ''
+  const list = milestones.progress(milestones.mine(), n.project)
+  const got = list.filter(m => m.at).length
+  return `<h3>Milestones <small class="muted">${escapeHtml(n.projectName ?? '')} · ${got} of ${list.length}</small></h3>
+    <ul class="milestones">${list.map(m => `
+      <li class="${m.at ? 'got' : ''}"><i aria-hidden="true">${m.at ? '★' : '☆'}</i><span>${escapeHtml(m.title)}${m.note ? `<small>${escapeHtml(m.note)}</small>` : ''}</span><time>${m.at ? day(m.at) : m.goal > 1 ? `${m.have.toLocaleString()} of ${m.goal.toLocaleString()}` : 'not yet'}</time></li>`).join('')}
+    </ul>`
 }
 
 function agentDetails(n) {
