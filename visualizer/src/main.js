@@ -11,6 +11,7 @@ import * as panels from './panels.js'
 import { unlock, isMuted, setMuted } from './sound.js'
 import * as transcript from './transcript.js'
 import * as welcome from './welcome.js'
+import * as tour from './tour.js'
 
 const HISTORY_REFRESH_MS = 60000
 const PANEL_REFRESH_MS = 700
@@ -214,6 +215,9 @@ transcript.setDemo(isDemo)
 if (!isDemo) {
   fetch('/healthz').then(r => r.json()).then(h => { if (h.demo) transcript.setDemo(true) }).catch(() => {})
 }
+
+// The guided tour: on its own the first time, and from the top bar.
+tour.mount({ pick, ingest, table })
 
 await loadHistory()
 setInterval(loadHistory, HISTORY_REFRESH_MS)
