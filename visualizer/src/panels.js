@@ -234,13 +234,27 @@ function fullWindows() {
 // Activity: every moment, or only messages, or only problems.
 
 let feed = 'all'
-const FEEDS = { all: () => true, mail: m => m.tone === 'mail', bad: m => m.tone === 'bad' }
+const FEEDS = { all: () => true, mail: m => m.tone === 'mail', bad: m => ['bad', 'block', 'bumps'].includes(m.tone) }
+// What leads each outcome: finished, made something, asked you.
+const MARKS = { done: '✓', made: '✦', ask: '?', block: '!', cleared: '✓' }
+const openBumps = new Set() // the bump lines you've opened, by when they started
+
+function momentRow(m) {
+  const mark = MARKS[m.tone] ? `<i class="mark" aria-hidden="true">${MARKS[m.tone]}</i>` : ''
+  const answered = m.answer ? ` <em>You picked ${escapeHtml(quote(m.answer))}.</em>` : ''
+  if (m.tone === 'bumps') {
+    const key = `${m.target}|${m.bumps.at(-1)?.t}`
+    return `<li class="bumps"><details data-bumps="${escapeHtml(key)}" ${openBumps.has(key) ? 'open' : ''}><summary><span>${escapeHtml(m.text)}</span><time>${ago(m.t)}</time></summary>
+      <ul>${m.bumps.map(b => `<li>${escapeHtml(devView() ? b.raw : b.text)}<time>${ago(b.t)}</time></li>`).join('')}</ul>
+      <button data-pick="${escapeHtml(m.target ?? '')}">Open the thread</button></details></li>`
+  }
+  return `<li class="${m.tone}"><button data-pick="${escapeHtml(m.target ?? '')}"><span>${mark}${escapeHtml(momentText(m))}${answered}</span><time>${ago(m.t)}</time></button></li>`
+}
 
 function activityList() {
   const list = moments.filter(FEEDS[feed]).slice(0, 14)
   const empty = { all: 'Quiet so far.', mail: 'No messages between agents yet.', bad: 'Nothing has gone wrong.' }[feed]
-  return list.map(m => `<li class="${m.tone}"><button data-pick="${escapeHtml(m.target ?? '')}"><span>${escapeHtml(momentText(m))}</span><time>${ago(m.t)}</time></button></li>`).join('') ||
-    `<li class="muted"><span>${empty}</span></li>`
+  return list.map(momentRow).join('') || `<li class="muted"><span>${empty}</span></li>`
 }
 
 // ---------------------------------------------------------------------------
@@ -545,6 +559,7 @@ export function render(args) {
   if (zoomed) patch($('#lightbox'), assets.lightbox(zoomed))
   for (const b of document.querySelectorAll('[data-tab]')) b.onclick = () => setTab(b.dataset.tab)
   for (const b of document.querySelectorAll('[data-feed]')) b.onclick = () => { feed = b.dataset.feed; render(lastArgs) }
+  for (const d of document.querySelectorAll('[data-bumps]')) d.ontoggle = () => { if (d.open) openBumps.add(d.dataset.bumps); else openBumps.delete(d.dataset.bumps) }
   for (const b of document.querySelectorAll('[data-pick]')) b.onclick = () => b.dataset.pick && pick(b.dataset.pick)
   for (const b of document.querySelectorAll('[data-back]')) b.onclick = () => pick(null)
   for (const b of document.querySelectorAll('[data-edit-project]')) b.onclick = e => { e.stopPropagation(); openProjectEditor(b.dataset.editProject, b.dataset.raw, b) }
