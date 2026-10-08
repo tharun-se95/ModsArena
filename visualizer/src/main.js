@@ -10,6 +10,7 @@ import * as table from './table.js'
 import * as panels from './panels.js'
 import { unlock, isMuted, setMuted } from './sound.js'
 import * as transcript from './transcript.js'
+import { mountSettings } from './settings.js'
 
 const HISTORY_REFRESH_MS = 60000
 const PANEL_REFRESH_MS = 700
@@ -100,6 +101,9 @@ function showSound() {
 soundButton.addEventListener('click', () => { setMuted(!isMuted()); showSound() })
 showSound()
 for (const type of ['pointerdown', 'keydown']) addEventListener(type, unlock, { once: true })
+
+// Developer view: plain words everywhere, or the raw tool lines.
+mountSettings(() => { transcript.redraw(); refreshPanels() })
 
 const pastToggle = document.getElementById('show-past')
 pastToggle.addEventListener('change', () => {

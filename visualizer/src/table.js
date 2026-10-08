@@ -20,7 +20,7 @@ import {
 import { nodes, fill, sid, aid, WARN_AT, outputs, openAsks, mail } from './model.js'
 import { srcOf, toolName } from './assets.js'
 import { createBubbles } from './bubbles.js'
-import { beadColor, escapeHtml, activity, ago } from './words.js'
+import { beadColor, escapeHtml, activity, ago, say, doingNow } from './words.js'
 import { sound } from './sound.js'
 
 const ROW_DEPTH = 160 // one row: helpers, desk, the session, its label
@@ -1307,13 +1307,14 @@ function runningTool(id) {
 }
 
 const k = n => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1000)}k`)
-const row = (name, value) => (value ? `<div><dt>${name}</dt><dd>${escapeHtml(value)}</dd></div>` : '')
+const row = (name, value, cls = '') => (value ? `<div><dt>${name}</dt><dd${cls ? ` class="${cls}"` : ''}>${escapeHtml(value)}</dd></div>` : '')
 
 function bubbleFor(pick) {
   const n = nodes.get(pick.id)
   if (!n) return ''
   const tool = runningTool(n.id)
-  const doing = tool ? `${tool.tool}${tool.summary ? ` ${tool.summary}` : ''}` : ''
+  // Plain words, or the raw call in Developer view.
+  const doing = doingNow(n.id) ?? ''
   const ctx = n.context?.tokens ? `${pct(fill(n))} · ${k(n.context.tokens)} of ${k(n.context.window)}` : ''
   if (n.kind === 'agent') {
     const host = nodes.get(sid(n.session))
@@ -1322,7 +1323,7 @@ function bubbleFor(pick) {
       : view?.walk ? 'finished, heading for coffee' : view?.onBreak && !view.leaving ? 'finished, on a coffee break' : 'finished'
     return `<b><i class="dot ${tintOf(n.type)}"></i>${escapeHtml(n.label)}</b>
       ${n.description ? `<p>${escapeHtml(n.description)}</p>` : ''}
-      <dl>${row('status', status)}${row('doing', doing)}${row('context', ctx)}${row('model', n.model)}${row('tool calls', n.history ? String(n.history) : '')}${row('for', host?.label)}</dl>`
+      <dl>${row('status', status)}${row('doing', doing, 'words')}${row('context', ctx)}${row('model', n.model)}${row('tool calls', n.history ? String(n.history) : '')}${row('for', host?.label)}</dl>`
   }
   const live = !resting(n)
   const helpers = [...nodes.values()].filter(x => x.kind === 'agent' && x.session === n.session && x.status !== 'done').length
@@ -1330,7 +1331,7 @@ function bubbleFor(pick) {
   const status = !live ? `ended ${ago(n.endedAt ?? n.lastAt)}` : tool || Date.now() - (n.lastAt ?? 0) < BUSY_MS ? 'working' : `waiting · last active ${ago(n.lastAt)}`
   return `<b><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(n.prompts?.[0]?.text ?? n.label)}</b>
     <p>${escapeHtml([n.projectName, n.gitBranch].filter(Boolean).join(' · '))}</p>
-    <dl>${row('status', status)}${row('doing', doing || (lastDone ? lastDone.text : ''))}${row('context', ctx)}${row('helpers', helpers ? String(helpers) : '')}${row('model', n.model)}${row('cost', n.costUsd !== undefined ? `$${n.costUsd.toFixed(2)}` : '')}</dl>`
+    <dl>${row('status', status)}${row('doing', doing || (lastDone ? say(lastDone) : ''), 'words')}${row('context', ctx)}${row('helpers', helpers ? String(helpers) : '')}${row('model', n.model)}${row('cost', n.costUsd !== undefined ? `$${n.costUsd.toFixed(2)}` : '')}</dl>`
 }
 
 function placeBubble(refresh) {

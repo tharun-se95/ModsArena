@@ -10,7 +10,7 @@
 //                          agent you pick: Conversation, Team, Details
 
 import { nodes, outputs, fill, warnings, sid, WARN_AT, threadState, agentState, teamOf, lineage, mailOf } from './model.js'
-import { moments, activity, escapeHtml, quote, ago } from './words.js'
+import { moments, activity, escapeHtml, quote, ago, say, doingNow, momentText } from './words.js'
 import { pct, level, tintOf, sessionTint, roomKey } from './table.js'
 import * as transcript from './transcript.js'
 import * as assets from './assets.js'
@@ -226,7 +226,7 @@ const FEEDS = { all: () => true, mail: m => m.tone === 'mail', bad: m => m.tone 
 function activityList() {
   const list = moments.filter(FEEDS[feed]).slice(0, 14)
   const empty = { all: 'Quiet so far.', mail: 'No messages between agents yet.', bad: 'Nothing has gone wrong.' }[feed]
-  return list.map(m => `<li class="${m.tone}"><button data-pick="${escapeHtml(m.target ?? '')}"><span>${escapeHtml(m.text)}</span><time>${ago(m.t)}</time></button></li>`).join('') ||
+  return list.map(m => `<li class="${m.tone}"><button data-pick="${escapeHtml(m.target ?? '')}"><span>${escapeHtml(momentText(m))}</span><time>${ago(m.t)}</time></button></li>`).join('') ||
     `<li class="muted"><span>${empty}</span></li>`
 }
 
@@ -271,7 +271,7 @@ function threadRow(n, running, selected) {
   const f = fill(n)
   const doing = !live ? `ended ${ago(n.endedAt ?? n.lastAt)}`
     : state === 'asking' ? `asks: ${assets.asksFor(n)[0]?.questions?.[0]?.question ?? assets.asksFor(n)[0]?.summary ?? 'a plan to approve'}`
-    : state === 'working' ? (n.todos?.find(i => i.status === 'in_progress')?.text ?? activity.get(n.id)?.actions[0]?.text ?? 'working')
+    : state === 'working' ? (n.todos?.find(i => i.status === 'in_progress')?.text ?? doingNow(n.id) ?? (activity.get(n.id)?.actions[0] ? say(activity.get(n.id).actions[0]) : 'working'))
       : state === 'stuck' ? 'its last turn didn’t finish'
         : n.answer?.text ? `said ${quote(n.answer.text)}` : 'ready for you'
   return `
@@ -348,7 +348,7 @@ function messagesFor(n) {
   const list = mailOf(host).filter(m => n.kind === 'session' || m.from === n.id || m.to === n.id).slice(0, 5)
   if (!list.length) return ''
   return `<h3>Messages</h3>${list.map(m => `
-    <p class="mail"><b>${escapeHtml(m.fromName ?? 'Someone')} → ${escapeHtml(m.toName ?? 'someone')}</b>${m.text ? `<span>${escapeHtml(m.text)}</span>` : ''}<time>${ago(m.t)}</time></p>`).join('')}`
+    <p class="mail"><b>${escapeHtml(m.fromName ?? 'Someone')} → ${escapeHtml(m.toName ?? 'someone')}</b>${m.text ? `<span>${escapeHtml(momentText(m))}</span>` : ''}<time>${ago(m.t)}</time></p>`).join('')}`
 }
 
 // The Team tab: the lead, then everyone it spawned, nested.
@@ -400,7 +400,7 @@ function sessionDetails(n) {
     ${facts ? `<p class="dmeta">${escapeHtml(facts)}</p>` : ''}
     ${live ? breakdown(n) + limits(n) : ''}
     ${files.length ? `<h3>Files it has worked on</h3>${files.map(fileLine).join('')}` : ''}
-    ${act?.actions.length ? `<h3>Recently</h3>${act.actions.slice(0, 8).map(x => line(escapeHtml(x.text), ago(x.t), x.ok ? '' : 'bad')).join('')}` : ''}
+    ${act?.actions.length ? `<h3>Recently</h3>${act.actions.slice(0, 8).map(x => line(escapeHtml(say(x)), ago(x.t), x.ok ? '' : 'bad')).join('')}` : ''}
     ${n.prompts?.length ? `<h3>What you asked</h3>${[...n.prompts].reverse().slice(0, 6).map(p => line(asked(p), ago(p.t))).join('')}` : ''}`
 }
 

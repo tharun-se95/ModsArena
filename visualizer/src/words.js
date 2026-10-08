@@ -3,8 +3,10 @@
 // Pure bookkeeping over model.js; it knows nothing about Three.js.
 
 import { nodes, sid, aid, mail } from './model.js'
+import { describe } from './plain.js'
+import { devView } from './prefs.js'
 
-const ACTION_KEEP = 12
+const ACTION_KEEP = 30
 const MOMENT_KEEP = 40
 
 export const moments = [] // newest first: { t, text, tone, target }
@@ -59,8 +61,9 @@ function phrase(tool, summary, ok) {
 const sessionName = session => nodes.get(sid(session))?.label ?? 'A session'
 const who = ev => (ev.agent ? (nodes.get(aid(ev.session, ev.agent))?.label ?? 'A subagent') : 'The session')
 
-function moment(ev, text, tone = '', target = sid(ev.session)) {
-  moments.unshift({ t: ev.t, text, tone, target })
+// `raw` is how Developer view says the same moment, when it differs.
+function moment(ev, text, tone = '', target = sid(ev.session), raw) {
+  moments.unshift({ t: ev.t, text, tone, target, ...(raw && { raw }) })
   if (moments.length > MOMENT_KEEP) moments.pop()
 }
 
@@ -72,6 +75,30 @@ function record(ev) {
 }
 
 const pending = new Map() // tool id -> { summary, tool }
+
+const lower = s => s.charAt(0).toLowerCase() + s.slice(1)
+
+// What a finished call says in plain words: "Checked the tests" for the
+// session itself, "Explore read the sign-in code" for one of its agents.
+function plainDone(ev, tool, summary) {
+  const d = describe(tool, summary)
+  const said = ev.ok ? d.done : d.fail
+  return ev.agent ? `${who(ev)} ${lower(said)}` : said
+}
+
+// An action as the page shows it: plain words, or the raw line in
+// Developer view.
+export const say = action => (devView() ? action.text : action.plain ?? action.text)
+
+// What a session or agent is doing this moment, from its running tool:
+// "Checking the tests" (or "Bash npm test" in Developer view), or null.
+export function doingNow(id) {
+  for (const n of nodes.values()) {
+    if (n.kind !== 'tool' || n.status !== 'active' || n.owner !== id) continue
+    return devView() ? `${n.tool}${n.summary ? ` ${n.summary}` : ''}` : describe(n.tool, n.summary).now
+  }
+  return null
+}
 
 // Read one event after model.apply() has seen it.
 export function ingest(ev) {
@@ -85,9 +112,10 @@ export function ingest(ev) {
       const key = `${ev.session}:${ev.id}`
       const start = pending.get(key) ?? { tool: ev.tool }
       pending.delete(key)
-      const text = `${who(ev)} ${phrase(start.tool ?? ev.tool, start.summary, ev.ok)}`
+      const tool = start.tool ?? ev.tool
+      const text = `${who(ev)} ${phrase(tool, start.summary, ev.ok)}`
       const a = record(ev)
-      a.actions.unshift({ t: ev.t, text, ok: ev.ok })
+      a.actions.unshift({ t: ev.t, text, plain: plainDone(ev, tool, start.summary), ok: ev.ok, tool, summary: start.summary, agent: ev.agent })
       if (a.actions.length > ACTION_KEEP) a.actions.pop()
       const fam = family(start.tool ?? ev.tool)
       if (fam.file && start.summary) {
@@ -97,8 +125,8 @@ export function ingest(ev) {
         f.t = ev.t
         a.files.set(start.summary, f)
       }
-      lastAction = { session: sid(ev.session), text }
-      if (!ev.ok) moment(ev, `${text} in ${quote(sessionName(ev.session))}.`, 'bad')
+      lastAction = { session: sid(ev.session), text, plain: a.actions[0].plain }
+      if (!ev.ok) moment(ev, `${a.actions[0].plain} in ${quote(sessionName(ev.session))}.`, 'bad', undefined, `${text} in ${quote(sessionName(ev.session))}.`)
       break
     }
     case 'agent.spawn':
@@ -144,6 +172,9 @@ export function ingest(ev) {
       break
   }
 }
+
+// A moment as the page shows it.
+export const momentText = m => (devView() && m.raw ? m.raw : m.text)
 
 export function ago(t, now = Date.now()) {
   if (!t) return ''
