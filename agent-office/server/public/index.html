@@ -450,6 +450,36 @@
   .out.pic span { font-size: 10.5px; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .out.pic small { font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+  /* Deliverables (deliverables.js): each one a sheet of paper with a
+     folded corner and its kind's color down the edge, Open and Copy on it.
+     A new one slides in like a sheet landing in a tray. In the Library,
+     each thread's sheets sit in a manila folder with its name on the tab. */
+  .dvs { display: flex; flex-direction: column; gap: 8px; }
+  .dv { --kind: var(--muted); position: relative; display: flex; flex-direction: column; gap: 2px; padding: 9px 12px 9px 15px; border-radius: 3px; background: linear-gradient(225deg, transparent 10px, var(--paper) 10.5px); filter: drop-shadow(0 0 0.6px color-mix(in srgb, var(--ink) 35%, transparent)) drop-shadow(0 3px 5px rgba(60, 40, 10, 0.10)); }
+  .dv::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--kind); border-radius: 3px 0 0 3px; }
+  .dv::after { content: ""; position: absolute; top: 0; right: 0; width: 14.5px; height: 14.5px; background: linear-gradient(225deg, transparent 50%, color-mix(in srgb, var(--line) 90%, var(--paper)) 50%); border-bottom-left-radius: 3px; }
+  .dv.pr { --kind: var(--leaf); } .dv.artifact { --kind: var(--lilac); } .dv.plan { --kind: var(--sky); } .dv.link { --kind: var(--teal); }
+  .dv-kind { display: flex; align-items: center; gap: 6px; margin: 0; font: 500 10px var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: color-mix(in srgb, var(--kind) 70%, var(--ink)); }
+  .dv-kind i { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 4px; background: var(--kind); color: #fff; font: 700 10px var(--sans); font-style: normal; }
+  .dv-kind .diff { margin-left: auto; font: 500 10.5px var(--mono); letter-spacing: 0; }
+  .dv-title { margin: 2px 0 0; font: 600 14px/1.3 var(--serif); text-wrap: pretty; overflow-wrap: anywhere; }
+  .dv-sub { margin: 0; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dv-acts { display: flex; gap: 6px; margin: 6px 0 0; }
+  .dv-btn { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; font: 500 11.5px var(--sans); color: var(--ink); text-decoration: none; border: 1px solid var(--line); background: var(--paper); transition: background 0.15s, border-color 0.15s, color 0.15s; }
+  .dv-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .dv-btn.primary { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+  .dv-btn.primary:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .dv-btn.done { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, var(--line)); }
+  a.dv-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .dv.fresh { animation: dv-land 0.7s cubic-bezier(.25, 1.3, .5, 1) both; }
+  @keyframes dv-land { 0% { opacity: 0; transform: translateY(-22px) rotate(-4deg); } 60% { opacity: 1; transform: translateY(2px) rotate(0.6deg); } 100% { transform: none; } }
+  .lb-frame figcaption .dv-btn { align-self: flex-start; margin-top: 6px; }
+  .lib-group.folder { position: relative; margin-top: 16px; padding: 12px 10px 10px; border: 0; border-radius: 0 10px 10px 10px; background: color-mix(in srgb, var(--mustard) 16%, var(--paper)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mustard) 30%, var(--line)), 0 3px 8px rgba(60, 40, 10, 0.08); }
+  .lib-group.folder::before { content: ""; position: absolute; left: 0; top: -12px; width: 46%; height: 13px; border-radius: 8px 10px 0 0; background: inherit; box-shadow: inset 1px 1px 0 color-mix(in srgb, var(--mustard) 30%, var(--line)), inset -1px 0 0 color-mix(in srgb, var(--mustard) 30%, var(--line)); }
+  .lib-group.folder .lib-thread small { font: 500 10px var(--mono); color: var(--muted); }
+  .lib-group.folder .dv { background: linear-gradient(225deg, transparent 10px, var(--paper) 10.5px); }
+  @media (prefers-reduced-motion: reduce) { .dv.fresh { animation: none; } }
+
   /* In the conversation: what it made, its checklist, what it asked. */
   .tx.made { align-self: flex-start; max-width: 86%; }
   .tx.made.image { width: 62%; }

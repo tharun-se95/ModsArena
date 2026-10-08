@@ -78,6 +78,11 @@ const DELIVERABLES = [
   ['artifact', 'Flaky build: what broke and why', 'https://claude.ai/artifact/demo-'],
   ['pr', 'Fix the stale CI cache key', 'https://github.com/acme/web-dashboard/pull/'],
   ['artifact', 'Refund flow test report', 'https://claude.ai/artifact/demo-'],
+  ['pr', 'Rotate session tokens on login', 'https://github.com/acme/payments-api/pull/'],
+  ['artifact', 'Chart tokens: before and after', 'https://claude.ai/artifact/demo-'],
+  ['pr', 'Cover partial refunds with tests', 'https://github.com/acme/payments-api/pull/'],
+  ['link', 'CI run: three green builds in a row', 'https://github.com/acme/web-dashboard/actions/runs/'],
+  ['artifact', 'How webhook retries back off', 'https://claude.ai/artifact/demo-'],
 ]
 
 // A small picture for the demo's images: an SVG drawn from a few shapes.

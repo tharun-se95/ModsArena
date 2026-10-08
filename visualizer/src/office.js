@@ -694,12 +694,25 @@ export function desk(colors, tint) {
   tray.visible = false
   g.add(tray)
   const sheets = []
-  // `colors` of what was delivered, newest last: one sheet each, up to six.
+  const paperMat = new THREE.MeshStandardMaterial({ color: '#fbf8f1', roughness: 0.85 })
+  const sheetGeo = new THREE.BoxGeometry(9, 0.45, 6.4)
+  const tabGeo = new THREE.BoxGeometry(3.2, 0.5, 1.6)
+  let delivered = 0
+  let dropping = null // the sheet that just landed: { m, at, rest }
+  const calm = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+  // `colors` of what was delivered, newest last: a sheet of paper each,
+  // with a tab in its kind's color, up to six. A new one drops in.
   function setTray(list) {
-    for (const m of sheets) { tray.remove(m); m.material.dispose() }
+    const grew = list.length > delivered
+    delivered = list.length
+    for (const m of sheets) { tray.remove(m); m.children[0]?.material.dispose() }
     sheets.length = 0
+    dropping = null
     list.slice(-6).forEach((color, i) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(9, 0.45, 6.4), new THREE.MeshStandardMaterial({ color, roughness: 0.8 }))
+      const m = new THREE.Mesh(sheetGeo, paperMat)
+      const tab = new THREE.Mesh(tabGeo, new THREE.MeshStandardMaterial({ color, roughness: 0.7 }))
+      tab.position.set(-2.4, 0.05, -3.4)
+      m.add(tab)
       m.position.set((i % 2 ? 0.4 : -0.3), 1.9 + i * 0.5, (i % 3) * 0.2)
       m.rotation.y = ((i * 37) % 9 - 4) * 0.03
       m.castShadow = true
@@ -707,11 +720,34 @@ export function desk(colors, tint) {
       sheets.push(m)
     })
     tray.visible = list.length > 0
+    const top = sheets.at(-1)
+    if (grew && top && !calm) dropping = { m: top, at: -1, rest: top.position.clone(), turn: top.rotation.y }
+  }
+  // Each frame: the newest sheet floats down into the tray, rocking like
+  // paper does, and settles with a little bounce.
+  const DROP_S = 1.4
+  function animateTray(t) {
+    if (!dropping) return
+    if (dropping.at < 0) dropping.at = t
+    const k = Math.min(1, (t - dropping.at) / DROP_S)
+    const { m, rest, turn } = dropping
+    const fall = 1 - k * k
+    const bounce = k > 0.75 ? Math.sin((k - 0.75) / 0.25 * Math.PI) * 0.6 : 0
+    m.position.set(rest.x + Math.sin(k * 9) * 3 * fall, rest.y + 34 * fall + bounce, rest.z + Math.cos(k * 7) * 1.2 * fall)
+    m.rotation.set(Math.sin(k * 11) * 0.35 * fall, turn + fall * 1.4, Math.cos(k * 9) * 0.3 * fall)
+    // Big enough to catch your eye on the way down.
+    m.scale.setScalar(1 + 0.8 * fall)
+    if (k >= 1) {
+      m.position.copy(rest)
+      m.rotation.set(0, turn, 0)
+      m.scale.setScalar(1)
+      dropping = null
+    }
   }
   shadowed(photo)
   photoFace.castShadow = photoFace.receiveShadow = false
   bake(g, [screen, mug, ...wisps, photo, tray])
-  return { group: g, draw, steam, mug, showImage, showAsk, setPhoto, setTray }
+  return { group: g, draw, steam, mug, showImage, showAsk, setPhoto, setTray, animateTray }
 }
 
 // ---------------------------------------------------------------------------
