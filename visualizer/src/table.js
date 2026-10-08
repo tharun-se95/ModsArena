@@ -22,6 +22,7 @@ import { srcOf, toolName } from './assets.js'
 import { createBubbles } from './bubbles.js'
 import { beadColor, escapeHtml, activity, ago } from './words.js'
 import { sound } from './sound.js'
+import { who } from './names.js'
 
 const ROW_DEPTH = 160 // one row: helpers, desk, the session, its label
 const BACK_SPACE = 44 // along the back wall, for the shelf, window and plants
@@ -441,7 +442,11 @@ function ensureAgent(n, s) {
   a.char.root.scale.setScalar(AG)
   a.oops = flag('oops small', '!')
   a.oops.obj.position.set(0, AG * a.char.height + 8, 0)
-  a.group.add(a.char.root, a.oops.obj)
+  // Its name tag, at its feet; shown when you're looking at its room.
+  a.tag = label(`<i class="dot ${tint}"></i>${escapeHtml(who(n).name)}`, 'agent')
+  a.tag.obj.position.set(0, 0, 9)
+  a.tag.el.addEventListener('click', () => onPick(n.id))
+  a.group.add(a.char.root, a.oops.obj, a.tag.obj)
   a.group.visible = !a.gone
   scene.add(a.group)
   agentViews.set(n.id, a)
@@ -458,6 +463,7 @@ function dropAgent(id) {
   if (!a) return
   scene.remove(a.group)
   a.oops.el.remove()
+  a.tag.el.remove()
   if (a.spot !== undefined) coffee?.taken.delete(a.spot)
   agentViews.delete(id)
 }
@@ -1018,7 +1024,7 @@ export function animate() {
     if (warn && !s.alarm) { s.alarm = flatRing(26.5, 27.5, palette.crit); s.group.add(s.alarm) }
     if (!warn && s.alarm) { s.group.remove(s.alarm); s.alarm = null }
     if (s.alarm) s.alarm.material.opacity = 0.35 + 0.45 * (Math.sin(now * 3) + 1) / 2
-    const html = `<span class="sname">${escapeHtml(n.label)}</span>${n.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span>` : ''}`
+    const html = `<span class="who">${escapeHtml(who(n).name)}</span><span class="sname">${escapeHtml(n.label)}</span>${n.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span>` : ''}`
     if (s.html !== html) s.label.el.innerHTML = s.html = html
     s.label.el.classList.toggle('selected', selected === s.id)
     s.label.el.classList.toggle('past', asleep)
@@ -1078,6 +1084,9 @@ export function animate() {
       alarm: n.status === 'active' && fill(n) >= WARN_AT,
     })
     waving(a, a.char, now)
+    // Name tags show for the room you're in, or the thread you're on.
+    const host = nodes.get(s.id)
+    a.tag.el.classList.toggle('on', Boolean(shown || hovered === s.id || (host && focusedProject === `p:${host.project}`)))
     a.group.scale.setScalar(Math.max(0.01, grow < 1 ? grow * (1 + 0.2 * Math.sin(grow * Math.PI)) : 1))
     // New helpers drop in from above.
     target.y = FLOOR_TOP + (1 - grow) * (1 - grow) * 40
@@ -1320,7 +1329,7 @@ function bubbleFor(pick) {
     const view = agentViews.get(n.id)
     const status = n.status !== 'done' ? (n.status === 'idle' ? 'waiting' : 'working')
       : view?.walk ? 'finished, heading for coffee' : view?.onBreak && !view.leaving ? 'finished, on a coffee break' : 'finished'
-    return `<b><i class="dot ${tintOf(n.type)}"></i>${escapeHtml(n.label)}</b>
+    return `<b><i class="dot ${tintOf(n.type)}"></i>${escapeHtml(who(n).title)}</b>
       ${n.description ? `<p>${escapeHtml(n.description)}</p>` : ''}
       <dl>${row('status', status)}${row('doing', doing)}${row('context', ctx)}${row('model', n.model)}${row('tool calls', n.history ? String(n.history) : '')}${row('for', host?.label)}</dl>`
   }
@@ -1330,7 +1339,7 @@ function bubbleFor(pick) {
   const status = !live ? `ended ${ago(n.endedAt ?? n.lastAt)}` : tool || Date.now() - (n.lastAt ?? 0) < BUSY_MS ? 'working' : `waiting · last active ${ago(n.lastAt)}`
   return `<b><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(n.prompts?.[0]?.text ?? n.label)}</b>
     <p>${escapeHtml([n.projectName, n.gitBranch].filter(Boolean).join(' · '))}</p>
-    <dl>${row('status', status)}${row('doing', doing || (lastDone ? lastDone.text : ''))}${row('context', ctx)}${row('helpers', helpers ? String(helpers) : '')}${row('model', n.model)}${row('cost', n.costUsd !== undefined ? `$${n.costUsd.toFixed(2)}` : '')}</dl>`
+    <dl>${row('who', who(n).title)}${row('status', status)}${row('doing', doing || (lastDone ? lastDone.text : ''))}${row('context', ctx)}${row('helpers', helpers ? String(helpers) : '')}${row('model', n.model)}${row('cost', n.costUsd !== undefined ? `$${n.costUsd.toFixed(2)}` : '')}</dl>`
 }
 
 function placeBubble(refresh) {

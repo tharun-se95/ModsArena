@@ -14,6 +14,7 @@ import { moments, activity, escapeHtml, quote, ago } from './words.js'
 import { pct, level, tintOf, sessionTint, roomKey } from './table.js'
 import * as transcript from './transcript.js'
 import * as assets from './assets.js'
+import { who } from './names.js'
 
 const $ = sel => document.querySelector(sel)
 const k = n => (n === undefined ? '—' : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : `${Math.round(n / 1000)}k`)
@@ -239,7 +240,7 @@ function agentRow(a, depth) {
   return `
     <button class="agent-row ${state}" style="--depth:${depth}" data-pick="${escapeHtml(a.id)}" data-hover="${escapeHtml(a.id)}">
       <i class="dot ${tintOf(a.type)}"></i>
-      <span class="aname">${escapeHtml(a.label)}${a.description && a.description !== a.label ? `<span class="muted"> · ${escapeHtml(a.description)}</span>` : ''}</span>
+      <span class="aname">${escapeHtml(who(a).title)}${a.description && a.description !== a.label ? `<span class="muted"> · ${escapeHtml(a.description)}</span>` : ''}</span>
       <span class="astate">${a.mailAt && Date.now() - a.mailAt < 8000 ? '<i class="env" title="Just got a message">✉</i>' : ''}${state === 'working' && a.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span>` : `<i class="sdot ${state}" title="${STATE_WORDS[state]}"></i>`}</span>
     </button>`
 }
@@ -281,7 +282,7 @@ function threadRow(n, running, selected) {
         <span class="ename">${escapeHtml(title(n))}${n.thread ? '<span class="badge" title="A claude.ai project’s coordinator handed this session its work">thread</span>' : ''}</span>
         ${live ? pill(state) : n.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span>` : '<span></span>'}
         ${live ? assets.progress(n) : ''}
-        <span class="estate">${live && n.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span> · ` : ''}${escapeHtml(doing)}</span>
+        <span class="estate">${escapeHtml(who(n).name)} · ${live && n.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span> · ` : ''}${escapeHtml(doing)}</span>
       </button>
       ${live ? teamRows(n) : ''}
     </div>`
@@ -339,7 +340,7 @@ function gauge(n, live, whose) {
 function crumbs(n) {
   const chain = lineage(n)
   const parts = [`<button data-back>${escapeHtml(chain[0]?.projectName ?? 'Projects')}</button>`]
-  chain.slice(0, -1).forEach(x => parts.push(`<button data-pick="${escapeHtml(x.id)}">${escapeHtml(x.label)}</button>`))
+  chain.slice(0, -1).forEach(x => parts.push(`<button data-pick="${escapeHtml(x.id)}">${escapeHtml(x.kind === 'agent' ? who(x).name : x.label)}</button>`))
   return `<nav class="crumbs" aria-label="Where this is">${parts.join('<span aria-hidden="true">›</span>')}</nav>`
 }
 
@@ -362,11 +363,11 @@ function teamTab(n, running) {
   const rows = []
   const walk = (branch, d) => branch.forEach(({ node, children }) => {
     const state = agentState(node)
-    const kind = [node.teammate ? 'teammate' : node.fork ? 'fork' : node.background ? 'background' : '', node.type !== node.label ? node.type : ''].filter(Boolean).join(' · ')
+    const kind = [node.teammate ? 'teammate' : node.fork ? 'fork' : node.background ? 'background' : '', node.name ? '' : node.type].filter(Boolean).join(' · ')
     rows.push(`
       <button class="member ${node.id === n.id ? 'on' : ''}" style="--depth:${d}" data-pick="${escapeHtml(node.id)}" data-hover="${escapeHtml(node.id)}">
         <i class="dot ${tintOf(node.type)}"></i>
-        <span class="mname">${escapeHtml(node.label)}${kind ? `<small>${escapeHtml(kind)}</small>` : ''}</span>
+        <span class="mname">${escapeHtml(who(node).title)}${kind ? `<small>${escapeHtml(kind)}</small>` : ''}</span>
         ${pill(state)}
         <span class="mdesc">${escapeHtml(node.description ?? '')}${node.context?.tokens ? ` · ${pct(fill(node))} of its window` : ''}</span>
       </button>`)
@@ -376,7 +377,7 @@ function teamTab(n, running) {
   return `
     <button class="member lead ${host.id === n.id ? 'on' : ''}" style="--depth:0" data-pick="${escapeHtml(host.id)}">
       <i class="dot ${sessionTint(host.session)}"></i>
-      <span class="mname">Lead<small>the main conversation</small></span>
+      <span class="mname">${escapeHtml(who(host).title)}<small>the main conversation</small></span>
       ${pill(threadState(host, running))}
       <span class="mdesc">${host.model ? escapeHtml(host.model) : ''}</span>
     </button>
@@ -417,10 +418,10 @@ function head(n, running) {
   const state = isAgent ? agentState(n) : threadState(n, running)
   const sub = isAgent
     ? [n.description, n.teammateId ?? (n.teammate ? 'teammate' : ''), n.fork ? 'fork of its parent' : n.background ? 'in the background' : ''].filter(Boolean).join(' · ')
-    : [n.thread ? 'Thread of a claude.ai project' : '', n.gitBranch, isLive(n) ? '' : `ended ${ago(n.endedAt ?? n.lastAt)}`].filter(Boolean).join(' · ')
+    : [who(n).title, n.thread ? 'Thread of a claude.ai project' : '', n.gitBranch, isLive(n) ? '' : `ended ${ago(n.endedAt ?? n.lastAt)}`].filter(Boolean).join(' · ')
   return `
     ${crumbs(n)}
-    <h2 class="dtitle"><i class="dot ${isAgent ? tintOf(n.type) : sessionTint(n.session)}"></i>${escapeHtml(isAgent ? n.label : title(n))}</h2>
+    <h2 class="dtitle"><i class="dot ${isAgent ? tintOf(n.type) : sessionTint(n.session)}"></i>${escapeHtml(isAgent ? who(n).title : title(n))}</h2>
     <p class="dmeta">${pill(state)} ${escapeHtml(sub)}</p>`
 }
 

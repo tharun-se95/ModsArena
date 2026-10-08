@@ -188,6 +188,13 @@
   .tag.session.crowded .sname { display: none; }
   .tag.session.covered, .tag.project.covered { visibility: hidden; }
   .tag.session.past .sname { font-weight: 400; }
+  /* Names: "Mika" on a session's tag, and a small tag at each helper's feet
+     for the room you're looking at. */
+  .tag .who { font-weight: 600; color: var(--ink); }
+  .tag.session.crowded .who { font-weight: 500; }
+  .tag.agent { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px 0 4px; border-radius: 999px; font: 500 9.5px/1.6 var(--sans); background: color-mix(in srgb, var(--paper) 78%, transparent); color: color-mix(in srgb, var(--ink) 80%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--line) 70%, transparent); opacity: 0; pointer-events: none; transition: opacity 0.25s; }
+  .tag.agent.on { opacity: 1; pointer-events: auto; }
+  .tag.agent .dot { width: 6px; height: 6px; margin: 0; }
 
   /* The hover bubble over a critter, and the flags that float over one.
      The bubble sits above every label (the label layer is one stacking
