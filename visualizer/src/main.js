@@ -12,6 +12,7 @@ import { unlock, isMuted, setMuted } from './sound.js'
 import * as transcript from './transcript.js'
 import * as welcome from './welcome.js'
 import * as tour from './tour.js'
+import * as notify from './notify.js'
 
 const HISTORY_REFRESH_MS = 60000
 const PANEL_REFRESH_MS = 700
@@ -138,6 +139,7 @@ const answer = {
 function refreshPanels() {
   if (selected && !model.nodes.has(selected)) selected = null
   panels.render({ running: running(), selected, pick, hover: table.setHover, answer })
+  notify.update(running())
   welcome.showEmpty(heard && ![...model.nodes.values()].some(n => n.kind === 'session'), { hasPast: history.length > 0 })
 }
 
@@ -216,6 +218,8 @@ if (!isDemo) {
   fetch('/healthz').then(r => r.json()).then(h => { if (h.demo) transcript.setDemo(true) }).catch(() => {})
 }
 
+// Alerts: the tab's count and, if you turn them on, desktop alerts.
+notify.mount({ pick })
 // The guided tour: on its own the first time, and from the top bar.
 tour.mount({ pick, ingest, table })
 
