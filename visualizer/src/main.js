@@ -10,11 +10,18 @@ import * as table from './table.js'
 import * as panels from './panels.js'
 import { unlock, isMuted, setMuted } from './sound.js'
 import * as transcript from './transcript.js'
+import * as welcome from './welcome.js'
 
 const HISTORY_REFRESH_MS = 60000
 const PANEL_REFRESH_MS = 700
 const params = new URLSearchParams(location.search)
 const isDemo = Boolean(window.AGENT_OFFICE_DEMO) || params.get('demo') === '1'
+// Previews (welcome.js): ?empty=1 keeps the office empty, ?offline=1 shows
+// the lost-connection card.
+const forceEmpty = params.get('empty') === '1'
+// Whether the office has heard from its source yet: until then it isn't
+// empty, only loading, and the greeter waits.
+let heard = isDemo
 
 let showPast = true
 let history = []
@@ -130,6 +137,7 @@ const answer = {
 function refreshPanels() {
   if (selected && !model.nodes.has(selected)) selected = null
   panels.render({ running: running(), selected, pick, hover: table.setHover, answer })
+  welcome.showEmpty(heard && ![...model.nodes.values()].some(n => n.kind === 'session'), { hasPast: history.length > 0 })
 }
 
 function frame() {
@@ -155,7 +163,7 @@ document.addEventListener('office:event', e => ingest(e.detail))
 
 async function loadHistory() {
   try {
-    history = isDemo ? demoHistory() : (await (await fetch('/history')).json()).sessions ?? []
+    history = forceEmpty ? [] : isDemo ? demoHistory() : (await (await fetch('/history')).json()).sessions ?? []
   } catch {
     history = []
   }
@@ -170,8 +178,10 @@ function setStatus(text, state) {
 
 function connect() {
   const source = new EventSource('/stream')
-  source.addEventListener('open', () => setStatus('Live', 'live'))
+  source.addEventListener('open', () => { setStatus('Live', 'live'); welcome.found() })
   source.addEventListener('replay', msg => {
+    heard = true
+    if (forceEmpty) return refreshPanels()
     // A fresh replay: start over so a reconnect never doubles anything.
     model.reset()
     words.reset()
@@ -182,8 +192,13 @@ function connect() {
     model.applyHistory(history, showPast)
     refreshPanels()
   })
-  source.addEventListener('message', msg => ingest(JSON.parse(msg.data)))
-  source.addEventListener('error', () => setStatus('Reconnecting…', 'down'))
+  source.addEventListener('message', msg => forceEmpty || ingest(JSON.parse(msg.data)))
+  source.addEventListener('error', () => {
+    setStatus('Reconnecting…', 'down')
+    // The browser retries on its own while it can; the office retries too,
+    // with a calm card, so a stopped bridge never leaves a frozen page.
+    welcome.lost(() => { source.close(); connect() })
+  })
 }
 
 // A page with no bridge behind it (the hosted preview) plays the same
@@ -202,8 +217,12 @@ if (!isDemo) {
 
 await loadHistory()
 setInterval(loadHistory, HISTORY_REFRESH_MS)
-if (isDemo) playDemo()
-else connect()
+if (params.get('offline') === '1') {
+  setStatus('Reconnecting…', 'down')
+  welcome.lost()
+} else if (!isDemo) connect()
+else if (forceEmpty) setStatus('Preview', 'live')
+else playDemo()
 refreshPanels()
 requestAnimationFrame(frame)
 // ?debug exposes the model to the console.

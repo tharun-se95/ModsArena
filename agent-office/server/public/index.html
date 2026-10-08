@@ -172,6 +172,59 @@
   .line.pick:hover { background: color-mix(in srgb, var(--line) 55%, transparent); }
 
   [hidden] { display: none !important; }
+
+  /* Before anyone's in: a greeter critter at the front door, with a speech
+     bubble saying what will appear and the first command to copy. And a
+     calm card when the bridge goes quiet (welcome.js). */
+  #greeter { left: 50%; bottom: 58px; transform: translateX(-50%); display: flex; align-items: flex-end; gap: 6px; width: min(520px, calc(100% - 32px)); pointer-events: none; }
+  #greeter > * { pointer-events: auto; }
+  .greeter-bubble { position: relative; flex: 1; padding: 14px 16px 12px; border-radius: 18px 18px 6px 18px; margin-bottom: 64px; }
+  .greeter-bubble::after { content: ""; position: absolute; right: -7px; bottom: 14px; width: 14px; height: 14px; background: var(--paper); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); transform: rotate(-45deg); }
+  .greeter-title { display: block; font: 600 17px/1.3 var(--serif); }
+  .greeter-body { margin: 4px 0 10px; font-size: 13px; color: var(--muted); text-wrap: pretty; }
+  .greeter-steps { margin: 0; padding: 0; list-style: none; counter-reset: step; display: grid; gap: 8px; }
+  .greeter-steps li { counter-increment: step; display: grid; grid-template-columns: 22px 1fr; gap: 2px 8px; align-items: center; font-size: 13px; }
+  .greeter-steps li::before { content: counter(step); grid-row: span 2; align-self: start; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 16%, var(--paper)); color: var(--accent); font: 600 12px var(--mono); }
+  .greeter-steps q { font-style: italic; }
+  .greeter-cmd { display: inline-flex; align-items: center; justify-self: start; gap: 6px; margin-top: 4px; padding: 3px 4px 3px 10px; border-radius: 9px; background: color-mix(in srgb, var(--ink) 88%, var(--paper)); color: var(--paper); }
+  .greeter-cmd code { font: 500 13px var(--mono); }
+  .greeter-cmd code::before { content: "$ "; opacity: 0.55; }
+  .greeter-copy { padding: 3px 9px; border-radius: 6px; background: color-mix(in srgb, var(--paper) 18%, transparent); color: var(--paper); font-size: 12px; text-align: center; min-width: 54px; }
+  .greeter-copy:hover { background: color-mix(in srgb, var(--paper) 28%, transparent); }
+  .greeter-copy.done { background: var(--ok); color: #fff; }
+  .greeter-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 12px 0 0; padding-top: 10px; border-top: 1px dashed var(--line); font-size: 12px; }
+  .greeter-tour { color: var(--accent); font-weight: 500; }
+  .greeter-tour:hover { text-decoration: underline; }
+  .greeter-wait { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); margin-left: auto; }
+  .greeter-wait i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); animation: greeter-breathe 2.4s ease-in-out infinite; }
+  .greeter-door { position: relative; flex: none; width: 96px; display: grid; justify-items: center; }
+  .greeter-critter { position: relative; z-index: 1; width: 86px; height: 94px; color: var(--ink); animation: greeter-bob 3.2s ease-in-out infinite; }
+  .greeter-arm { transform-origin: 74px 48px; animation: greeter-wave 2.8s ease-in-out infinite; }
+  .greeter-eyes { transform-origin: 48px 56px; animation: greeter-blink 4.6s infinite; }
+  .greeter-gem { transform-origin: 48px 20px; animation: greeter-spin 5s linear infinite; }
+  .greeter-mat { width: 104px; height: 16px; margin-top: -10px; border-radius: 6px; background: repeating-linear-gradient(90deg, var(--clay) 0 6px, color-mix(in srgb, var(--clay) 70%, var(--paper)) 6px 12px); box-shadow: 0 2px 6px rgba(40, 30, 20, 0.18); transform: perspective(80px) rotateX(38deg); }
+  @keyframes greeter-bob { 50% { transform: translateY(-3px); } }
+  @keyframes greeter-wave { 0%, 40%, 100% { transform: rotate(0); } 10%, 30% { transform: rotate(-22deg); } 20% { transform: rotate(14deg); } }
+  @keyframes greeter-blink { 0%, 46%, 50%, 100% { transform: scaleY(1); } 48% { transform: scaleY(0.1); } }
+  @keyframes greeter-spin { to { transform: rotateY(360deg); } }
+  @keyframes greeter-breathe { 50% { opacity: 0.35; } }
+  #offline { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(400px, calc(100% - 32px)); padding: 18px 20px 16px; z-index: 8; }
+  .offline-title { display: block; font: 600 18px/1.3 var(--serif); }
+  .offline-body { margin: 6px 0 12px; font-size: 13px; color: var(--muted); text-wrap: pretty; }
+  .offline-try { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; }
+  .offline-try i { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); animation: greeter-breathe 1.6s ease-in-out infinite; }
+  .offline-now { margin-left: auto; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); font-size: 12.5px; }
+  .offline-now:hover { border-color: var(--accent); color: var(--accent); }
+  .offline-help { margin: 10px 0 0; font-size: 12px; color: var(--muted); }
+  .offline-help code, .greeter-body code { font: 12px var(--mono); padding: 1px 5px; border-radius: 5px; background: color-mix(in srgb, var(--line) 60%, transparent); color: var(--ink); }
+  @media (max-width: 900px) {
+    #greeter { bottom: auto; top: 50%; transform: translate(-50%, -50%); flex-direction: column; align-items: center; gap: 0; }
+    .greeter-bubble { margin: 0 0 10px; border-radius: 18px; }
+    .greeter-bubble::after { right: auto; left: 50%; bottom: -7px; margin-left: -7px; transform: rotate(45deg); }
+    .greeter-door { width: 80px; }
+    .greeter-critter { width: 64px; height: 70px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .greeter-critter, .greeter-arm, .greeter-eyes, .greeter-gem, .greeter-wait i, .offline-try i { animation: none; } }
   .status.down i { background: var(--crit); box-shadow: 0 0 0 4px color-mix(in srgb, var(--crit) 20%, transparent); }
   .sound { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; padding: 3px 8px; border-radius: 999px; }
   .sound:hover { color: var(--ink); background: color-mix(in srgb, var(--line) 50%, transparent); }
