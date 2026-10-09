@@ -26,6 +26,7 @@ import * as a11y from './a11y.js'
 import * as motion from './motion.js'
 import * as phone from './phone.js'
 import * as power from './power.js'
+import * as updates from './updates.js'
 
 const HISTORY_REFRESH_MS = 60000
 const PANEL_REFRESH_MS = 700
@@ -272,6 +273,8 @@ settings.add({
   get: power.isSaving, set: power.setSaving,
 })
 power.onChange(table.setPower)
+// Updates: automatic, when the bridge can switch it.
+if (!isDemo) void updates.mount()
 
 // ---------------------------------------------------------------------------
 // Sources

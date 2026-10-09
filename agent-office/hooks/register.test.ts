@@ -1,5 +1,5 @@
 import { test, expect, mock } from 'claude-code/testing'
-import { summarize, contextTokens, projectOf, nodeProblem, isNewer, isStale, beforeTool, afterTool, diffStats, officeResult } from './register'
+import { summarize, contextTokens, projectOf, nodeProblem, isNewer, isStale, beforeTool, afterTool, diffStats, officeResult, parseOffice, welcomeText, OFFER_TEXT, OFFICE_USAGE } from './register'
 
 test('summarize picks the most telling field and trims it', async () => {
   expect(summarize({ command: 'npm   test\n --watch' })).toBe('npm test --watch')
@@ -411,4 +411,118 @@ test('Stop from the office ends the running turn, and says so when nothing runs'
   await clock.advance(300)
   expect(aborted).toEqual(['turn-7'])
   expect(posted.filter(ev => ev.kind === 'chat.delivered').map(ev => ev.how)).toEqual(['stopped its turn', 'nothing was running'])
+})
+
+test('parseOffice reads the /office subcommands', async () => {
+  expect(parseOffice('')).toEqual({ verb: 'open' })
+  expect(parseOffice(' Status ')).toEqual({ verb: 'status' })
+  expect(parseOffice('auto-update')).toEqual({ verb: 'auto-update', on: true })
+  expect(parseOffice('auto-update ON')).toEqual({ verb: 'auto-update', on: true })
+  expect(parseOffice('auto-update off')).toEqual({ verb: 'auto-update', on: false })
+  expect(parseOffice('auto-update maybe')).toBe(undefined)
+  expect(parseOffice('status now')).toBe(undefined)
+  expect(parseOffice('dance')).toBe(undefined)
+})
+
+// The engine beneath the mod for auto-update: Node answers, and
+// autoupdate.mjs (run with it) answers from `state`.
+function updatesHost(on: Parameters<Parameters<typeof test>[1]>[1], state: { now: string; ran: string[][] }) {
+  on('process.run', async (_$, e) => {
+    state.ran.push([...e.argv])
+    const verb = e.argv[2]
+    if (verb === 'on' || verb === 'off') state.now = verb
+    const stdout = e.argv[0] !== 'node' ? '' : e.argv[1] === '--version' ? 'v22.3.0\n'
+      : JSON.stringify({ state: state.now, pending: verb !== 'status', text: `Auto-update is ${state.now}.`, summary: `Updates: ${state.now === 'on' ? 'automatic' : 'by hand'}.` })
+    return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+}
+
+test('/office auto-update turns it on with the bridge\'s module, and /office status says so', async ($, on) => {
+  const state = { now: 'off', ran: [] as string[][] }
+  mock.store(on)
+  updatesHost(on, state)
+  on('http.fetch', async () => ({ value: { status: 503, ok: false, headers: {}, text: '' } }))
+
+  const before = await $.command.run({ command: 'office', args: 'status' })
+  expect(before.text).toContain('Updates: by hand.')
+  const turned = await $.command.run({ command: 'office', args: 'auto-update' })
+  expect(turned.text).toBe('Auto-update is on.')
+  const call = state.ran.find(argv => argv[2] === 'on')!
+  expect(call[1].endsWith('/server/autoupdate.mjs')).toBe(true)
+  expect(call[3]).toBe('--json')
+  const after = await $.command.run({ command: 'office', args: 'status' })
+  expect(after.text).toContain('Updates: automatic.')
+  expect((await $.command.run({ command: 'office', args: 'auto-update sideways' })).text).toBe(OFFICE_USAGE)
+})
+
+test('/office auto-update says plainly when Node is missing', async ($, on) => {
+  on('process.run', async () => { throw new Error('spawn node ENOENT') })
+  const answer = await $.command.run({ command: 'office', args: 'auto-update' })
+  expect(answer.text).toContain('needs Node 18 or newer')
+})
+
+function startHost(on: Parameters<Parameters<typeof test>[1]>[1], toasts: string[]) {
+  on('http.fetch', async () => ({ value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }))
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  on('session.id', async () => ({ value: 'sess-u' }))
+  on('session.model', async () => ({ value: 'test-model' }))
+  on('command.register', async () => ({ value: { command: 'office' } }))
+  on('ui.status', async () => ({ value: undefined }))
+  on('ui.toast', async (_$, e) => { toasts.push(e.text); return { value: undefined } })
+}
+
+const WEEK = 7 * 24 * 60 * 60 * 1000
+
+test('the welcome offers /office auto-update while it is off, once that week', async ($, on) => {
+  const clock = mock.clock(on, { now: 1000 })
+  const toasts: string[] = []
+  mock.store(on)
+  updatesHost(on, { now: 'off', ran: [] })
+  startHost(on, toasts)
+
+  await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+  await clock.settle()
+  expect(toasts).toEqual([welcomeText('off')])
+  expect(toasts[0]).toContain('/office auto-update')
+  await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+  await clock.settle()
+  expect(toasts.length).toBe(1)
+})
+
+test('a week on, still off: one reminder', async ($, on) => {
+  const clock = mock.clock(on, { now: 2 * WEEK })
+  const toasts: string[] = []
+  const state = { now: 'off', ran: [] as string[][] }
+  mock.store(on, { welcomed: true, updatesOfferedAt: 1000 })
+  updatesHost(on, state)
+  startHost(on, toasts)
+
+  await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+  await clock.settle()
+  expect(toasts).toEqual([OFFER_TEXT])
+  expect(OFFER_TEXT).toContain('/office auto-update')
+
+})
+
+test('said no with /office auto-update off: no reminder', async ($, on) => {
+  const clock = mock.clock(on, { now: 2 * WEEK })
+  const toasts: string[] = []
+  mock.store(on, { welcomed: true, updatesOfferedAt: 1000, updatesDeclined: true })
+  updatesHost(on, { now: 'off', ran: [] })
+  startHost(on, toasts)
+  await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+  await clock.settle()
+  expect(toasts).toEqual([])
+})
+
+test('once auto-update is on, the welcome is just the welcome', async ($, on) => {
+  const clock = mock.clock(on, { now: 1000 })
+  const toasts: string[] = []
+  mock.store(on)
+  updatesHost(on, { now: 'on', ran: [] })
+  startHost(on, toasts)
+  await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+  await clock.settle()
+  expect(toasts).toEqual([welcomeText(undefined)])
+  expect(toasts[0]).not.toContain('auto-update')
 })
