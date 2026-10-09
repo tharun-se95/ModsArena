@@ -65,6 +65,10 @@ const QUESTIONS = [
   { header: 'Scope', question: 'Open a PR now, or keep going on partial refunds first?', multiSelect: false, options: [
     { label: 'Open the PR', description: 'Ship what passes; partial refunds next.' },
     { label: 'Keep going', description: 'One PR with everything.' }] },
+  { header: 'Checks', question: 'Which checks should run before the PR?', multiSelect: true, options: [
+    { label: 'Unit tests', description: 'The fast suite, about a minute.' },
+    { label: 'Lint', description: 'Style and obvious mistakes.' },
+    { label: 'End-to-end', description: 'Slow, but catches the most.' }] },
 ]
 const PERMISSIONS = [['Bash', 'npm publish --dry-run'], ['Bash', 'git push origin fix/stale-cache'], ['mcp__github__create_pull_request', 'acme/payments-api']]
 const PLAN_TEXT = `# Rotate session tokens\n\n1. Issue a fresh token on every login and privilege change\n2. Keep the old one valid for 30s so in-flight requests finish\n3. Compare tokens with timingSafeEqual\n4. Add tests for reuse and expiry\n\nTouches src/auth/session.ts and src/auth/login.ts.`
@@ -114,6 +118,12 @@ export function answerDemo(session, id, answer) {
   return true
 }
 
+// Demo-only: Stop from the office ends a sample session's turn at its next step.
+const stopping = new Set()
+export function stopDemo(session) {
+  stopping.add(session)
+}
+
 const pick = list => list[Math.floor(Math.random() * list.length)]
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const rand = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo))
@@ -126,7 +136,7 @@ export function startDemo(publish) {
 
   // `job`, for a session the front desk started: it stops once for your OK
   // (job.onAsk says when), and ends after its first turn.
-  runSession = function (session, project, pace, asThread = false, first = pick(PROMPTS), job = null) {
+  runSession = function (session, project, pace, asThread = false, first = pick(PROMPTS), job = null, firstAsk = undefined) {
     const emit = ev => publish([{ t: Date.now(), session, ...ev }])
     let messages = rand(8000, 40000)
     let turns = 0
@@ -194,11 +204,11 @@ export function startDemo(publish) {
     // office, in the demo) or the demo answers itself.
     async function ask(fields, auto) {
       const id = `demo-ask-${++seq}`
-      emit({ kind: 'ask.open', id, ...fields })
+      emit({ kind: 'ask.open', id, answerable: true, ...fields })
       job?.onAsk(true)
       const answer = await new Promise(resolve => {
         waiting.set(`${session}|${id}`, resolve)
-        setTimeout(() => answerDemo(session, id, auto), rand(10000, 20000) * pace)
+        setTimeout(() => answerDemo(session, id, auto), rand(45000, 75000) * pace)
       })
       emit({ kind: 'ask.close', id, answer })
       job?.onAsk(false)
@@ -229,7 +239,13 @@ export function startDemo(publish) {
         const work = []
         for (let i = 0; i < rand(0, 3); i++) work.push(runAgent(undefined, 0))
         const hue = rand(0, 360)
+        let isStopped = false
+        stopping.delete(session)
         for (let step = 0; step < items.length; step++) {
+          if (stopping.delete(session)) {
+            isStopped = true
+            break
+          }
           checklist(items, step, true)
           // A few calls per item, so the conversation has runs of work to
           // gather into one plain step.
@@ -245,10 +261,11 @@ export function startDemo(publish) {
             emit({ kind: 'asset.add', id: `img-${++seq}`, type: 'image', title, path: `screenshots/${shot}.png`, src: demoShot(shot, hue) })
           }
           // Now and then it stops to ask you something.
-          if (step === 1 && (job || Math.random() < 0.4)) {
-            const roll = job ? 0.7 : Math.random()
+          const early = turns === 1 && firstAsk !== undefined
+          if (step === (early ? 0 : 1) && (job || early || Math.random() < 0.4)) {
+            const roll = job ? 0.7 : early ? firstAsk : Math.random()
             if (roll < 0.6) {
-              const q = pick(QUESTIONS)
+              const q = early ? QUESTIONS[0] : pick(QUESTIONS)
               const questions = [{ ...q, options: q.options.map(o => ({ ...o, ...(o.preview && { preview: demoShot(o.preview, hue) }) })) }]
               await ask({ type: 'question', questions }, q.options[0].label)
             } else if (roll < 0.85) {
@@ -258,6 +275,11 @@ export function startDemo(publish) {
               await ask({ type: 'plan', plan: PLAN_TEXT }, 'Approved')
             }
           }
+        }
+        if (isStopped) {
+          emit({ kind: 'turn.complete', turnId, reason: 'aborted', durationMs: 4000 })
+          await sleep(rand(15000, 25000) * pace)
+          continue
         }
         checklist(items, items.length, false)
         await Promise.all(work)
@@ -288,9 +310,9 @@ export function startDemo(publish) {
     void loop()
   }
 
-  runSession('demo-payments-1', PROJECTS[0], 1, false, 'Harden the session handling')
+  runSession('demo-payments-1', PROJECTS[0], 1, false, 'Harden the session handling', null, 0)
   setTimeout(() => runSession('demo-payments-2', PROJECTS[0], 1.6, false, 'Why is the build flaky?'), 2500)
-  setTimeout(() => runSession('demo-dashboard-1', PROJECTS[1], 1.3, true, 'Migrate charts to the new tokens'), 5000)
+  setTimeout(() => runSession('demo-dashboard-1', PROJECTS[1], 1.3, true, 'Migrate charts to the new tokens', null, 0.9), 5000)
 }
 
 // Demo only: a front-desk job taken by a sample session instead of a real

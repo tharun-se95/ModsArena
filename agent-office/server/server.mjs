@@ -20,6 +20,9 @@
 //                  knows (the office page only; see jobs.mjs)
 //   POST /jobs/stop   stop a job the front desk started (the office page only)
 //   GET  /inbox?session=   a session's mod picking up its messages
+//   POST /stop     stop the turn a session is running (the office page only; its mod does it)
+//   POST /answer   an answer to a question or plan a session is holding (the office page only)
+//   GET  /answer/wait?session=&id=   that session's mod waiting for one (asks.mjs)
 //   GET  /         the office
 //
 // Every request must be addressed to the bridge itself, and chat needs the
@@ -33,10 +36,11 @@ import { fileURLToPath } from 'node:url'
 import { normalize, GAUGES, gaugeKey } from './normalize.mjs'
 import { findProject } from './projects.mjs'
 import { readHistory, tailContext } from './history.mjs'
-import { startDemo, demoJob } from './demo.mjs'
+import { startDemo, demoJob, answerDemo, stopDemo } from './demo.mjs'
 import { refusal, newToken, tokenMatches, TOKEN_HEADER, INBOX_HEADER, CONTROL_HEADER } from './guard.mjs'
 import * as chat from './chat.mjs'
 import { createJobs } from './jobs.mjs'
+import * as asks from './asks.mjs'
 import { findTranscript, readTranscript } from './transcript.mjs'
 
 const args = process.argv.slice(2)
@@ -116,6 +120,7 @@ function publish(events) {
     const ev = enrich(raw)
     if (ev.kind === 'session.start') know(ev.cwd, ev.project?.id)
     if (ev.kind === 'chat.delivered') chat.settle(ev.id, ev.ok !== false)
+    if (ev.kind === 'ask.open' || ev.kind === 'ask.close') asks.track(ev)
     if (ev.kind === 'asset.add' && ev.type === 'image' && typeof ev.path === 'string' && isAbsolute(ev.path)) {
       pictures.set(`${ev.session}|${ev.id}`, ev.path)
       if (pictures.size > PICTURES_KEEP) pictures.delete(pictures.keys().next().value)
@@ -213,6 +218,50 @@ const server = createServer(async (req, res) => {
     return
   }
 
+  // Stopping a turn: a message of its own kind, through the same inbox.
+  if (req.method === 'POST' && pathname === '/stop') {
+    if (!tokenMatches(req.headers[TOKEN_HEADER], TOKEN)) return json(res, 403, { error: 'missing or wrong token' })
+    try {
+      const body = JSON.parse(await readBody(req))
+      const sent = chat.send({ session: body?.session, action: 'stop' })
+      if (sent.error) return json(res, 400, { error: sent.error })
+      const { id, session, t } = sent.message
+      publish([{ t, kind: 'stop.sent', session, id }])
+      // Demo-only: the sample session stops itself.
+      if (flag('demo')) stopDemo(session)
+      json(res, 200, { id })
+    } catch (err) {
+      json(res, 400, { error: String(err.message ?? err) })
+    }
+    return
+  }
+
+  // Answering from the office: guarded like chat, since it speaks for you.
+  if (req.method === 'POST' && pathname === '/answer') {
+    if (!tokenMatches(req.headers[TOKEN_HEADER], TOKEN)) return json(res, 403, { error: 'missing or wrong token' })
+    try {
+      const body = JSON.parse(await readBody(req))
+      // Demo-only: the sample sessions also take a permission or a plan
+      // approval, which a real session's mod can't.
+      if (flag('demo') && typeof body?.say === 'string') {
+        const isTaken = answerDemo(body.session, body.id, body.say.slice(0, 200))
+        return json(res, isTaken ? 200 : 404, isTaken ? { ok: true } : { error: 'that question has moved on' })
+      }
+      const { status, error, answer } = asks.answer(body)
+      if (flag('demo') && answer) answerDemo(body.session, body.id, asks.line(answer))
+      json(res, status, error ? { error } : { ok: true, answer })
+    } catch (err) {
+      json(res, 400, { error: String(err.message ?? err) })
+    }
+    return
+  }
+
+  if (req.method === 'GET' && pathname === '/answer/wait') {
+    if (req.headers[INBOX_HEADER] !== '1') return json(res, 403, { error: 'missing inbox header' })
+    json(res, 200, await asks.wait(searchParams.get('session') ?? '', searchParams.get('id') ?? ''))
+    return
+  }
+
   if (req.method === 'GET' && pathname === '/transcript') {
     const path = await findTranscript(searchParams.get('session') ?? '', searchParams.get('agent') ?? undefined)
     if (!path) return json(res, 404, { error: 'no transcript for that session yet' })
@@ -286,7 +335,7 @@ const server = createServer(async (req, res) => {
   }
 
   if (pathname === '/healthz') {
-    json(res, 200, { ok: true, name: 'agent-office', version: VERSION, managed: MANAGED, demo: flag('demo'), chat: true, jobs: true, events: log.length, viewers: clients.size })
+    json(res, 200, { ok: true, name: 'agent-office', version: VERSION, managed: MANAGED, demo: flag('demo'), chat: true, jobs: true, answers: true, events: log.length, viewers: clients.size })
     return
   }
 

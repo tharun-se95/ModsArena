@@ -24,6 +24,7 @@ import { createBubbles } from './bubbles.js'
 import { beadColor, escapeHtml, activity, ago, say, doingNow } from './words.js'
 import { goalTitle, projectName, projectIcon, energy, energyMeter } from './names.js'
 import { devView } from './prefs.js'
+import * as answering from './answer.js'
 import { sound } from './sound.js'
 
 const ROW_DEPTH = 160 // one row: helpers, desk, the session, its label
@@ -1232,7 +1233,10 @@ function askWords(ask) {
 function showWork(s, n, now, asleep) {
   // 💬 a question it's holding the turn for, and the monitor turns into it.
   const ask = asleep ? null : openAsks(n)[0]
-  talk.hold(s.id, 'ask', ask && { key: ask.id, type: ask.type, ...askWords(ask), thread: s.id }, now)
+  // Its choices too, when the office can answer it: tap one on the bubble.
+  const choices = ask && answering.canAnswer(ask) ? answering.bubbleOptions(ask) : undefined
+  if (choices) answering.remember(ask)
+  talk.hold(s.id, 'ask', ask && { key: ask.id, type: ask.type, ...askWords(ask), thread: s.id, ...(choices && { options: choices, answerKey: answering.keyOf(ask) }) }, now)
   s.desk.showAsk(ask?.type, ask?.type === 'permission' ? `#${palette.mustard.getHexString()}` : ask?.type === 'plan' ? `#${palette.sky.getHexString()}` : `#${palette.clay.getHexString()}`)
 
   // 💭 the item in hand, while it works.
@@ -1470,6 +1474,15 @@ export function landmarks() {
     sign,
     coffee: coffee && centre(coffee.label.el),
   }
+}
+
+// The critter under a point on the page (a drop, say), or null.
+const dropRay = new THREE.Raycaster()
+export function critterAt(clientX, clientY) {
+  if (!renderer) return null
+  const r = renderer.domElement.getBoundingClientRect()
+  dropRay.setFromCamera(new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1), camera)
+  return dropRay.intersectObjects(scene.children, true).find(h => h.object.userData.pick && h.object.visible)?.object.userData.pick?.id ?? null
 }
 
 // ?debug reaches these through window.cluster.table.debug.

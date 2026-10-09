@@ -315,7 +315,7 @@ const handlers = {
   'ask.open'(ev) {
     const node = owner(ev)
     node.asks = (node.asks ?? []).filter(a => a.id !== ev.id)
-    node.asks.push({ id: ev.id, t: ev.t, type: ev.type ?? 'question', questions: ev.questions, tool: ev.tool, summary: ev.summary, plan: ev.plan })
+    node.asks.push({ id: ev.id, t: ev.t, type: ev.type ?? 'question', questions: ev.questions, tool: ev.tool, summary: ev.summary, plan: ev.plan, answerable: ev.answerable === true })
     node.askAt = ev.t
     if (ev.type === 'plan' && ev.plan) addOutput(ev, { id: `plan-${ev.id}`, type: 'plan', title: firstLine(ev.plan), text: ev.plan })
   },

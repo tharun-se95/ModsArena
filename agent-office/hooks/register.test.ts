@@ -1,5 +1,5 @@
 import { test, expect, mock } from 'claude-code/testing'
-import { summarize, contextTokens, projectOf, nodeProblem, isNewer, isStale, beforeTool, afterTool, diffStats } from './register'
+import { summarize, contextTokens, projectOf, nodeProblem, isNewer, isStale, beforeTool, afterTool, diffStats, officeResult } from './register'
 
 test('summarize picks the most telling field and trims it', async () => {
   expect(summarize({ command: 'npm   test\n --watch' })).toBe('npm test --watch')
@@ -134,7 +134,7 @@ test('/office starts the bridge, waits for it, then opens the page', async ($, o
   })
   on('process.spawn', async function* () {
     isUp = true // the bridge comes up once started
-    return { code: 0, signal: null }
+    return { value: { code: 0, signal: null } }
   })
   on('clock.sleep', async () => ({ value: undefined }))
 
@@ -171,7 +171,7 @@ test('/office replaces a bridge from an older copy before opening the page', asy
   on('process.spawn', async function* (_$, e) {
     spawned.push([...e.argv])
     bridge = { version: '9.9.9', managed: true } // the new bridge takes over
-    return { code: 0, signal: null }
+    return { value: { code: 0, signal: null } }
   })
   on('clock.sleep', async () => ({ value: undefined }))
 
@@ -303,4 +303,112 @@ test('the Task tools build one checklist per loop', async () => {
   afterTool({ tool: 'TaskCreate', subject: 'Fix it' }, { result: { task: { id: '2', subject: 'Fix it' } } })
   const [list] = afterTool({ tool: 'TaskUpdate', taskId: '1', status: 'completed' }, { result: { success: true } })
   expect(list.items).toEqual([{ text: 'Map it', status: 'completed', active: undefined }, { text: 'Fix it', status: 'pending', active: undefined }])
+})
+
+test('an answer from the office becomes the question’s result, or sends a plan back', async () => {
+  const questions = [{ question: 'Which one?', header: 'Lib', multiSelect: false, options: [] }, { question: 'Tests too?', header: 'Tests', multiSelect: false, options: [] }]
+  const e = { tool: 'AskUserQuestion', questions }
+  expect(officeResult(e, { answers: { 'Which one?': 'A', 'Tests too?': 'Yes' } })).toEqual({ result: { questions, answers: { 'Which one?': 'A', 'Tests too?': 'Yes' } } })
+  // Your own words fill what you didn't pick.
+  expect(officeResult(e, { answers: { 'Which one?': 'A' }, note: 'only unit tests' }).result?.answers).toEqual({ 'Which one?': 'A', 'Tests too?': 'only unit tests' })
+  expect(officeResult(e, { answers: { 'Which one?': 'A', 'Tests too?': 'No' }, note: 'thanks' }).context).toEqual(['The user also wrote, answering from Agent Office: thanks'])
+  expect(officeResult({ tool: 'ExitPlanMode' }, { choice: 'keep', note: 'Smaller steps' }).deny).toContain('Their note: Smaller steps')
+})
+
+test('a question is answered from the office while the terminal’s dialog waits', async ($, on) => {
+  const clock = mock.clock(on, { now: 1000 })
+  const posted: Array<Record<string, unknown>> = []
+  let isDialogDown = false
+  on('http.fetch', async (_$, e) => {
+    if (e.url.endsWith('/event')) posted.push(...JSON.parse(e.init?.body ?? '[]'))
+    if (e.url.includes('/answer/wait?')) {
+      expect(e.url).toContain('id=toolu_q')
+      return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ answer: { answers: { 'Which one?': 'B' } } }) } }
+    }
+    return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }
+  })
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  on('session.id', async () => ({ value: 'sess-ask' }))
+  on('session.model', async () => ({ value: 'test-model' }))
+  on('command.register', async () => ({ value: { command: 'office' } }))
+  on('ui.status', async () => ({ value: undefined }))
+  // Claude Code's dialog: nobody answers it in the terminal.
+  on('tool.call', { tool: 'AskUserQuestion' }, async (_$, _e, next) => {
+    await new Promise(resolve => next.signal.addEventListener('abort', resolve))
+    isDialogDown = true
+    return { deny: 'dismissed' }
+  })
+
+  await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+  await clock.advance(300) // the bridge answered a flush: it's up
+  const questions = [{ question: 'Which one?', header: 'Lib', multiSelect: false, options: [{ label: 'A', description: '' }, { label: 'B', description: '' }] }]
+  const ran = await $.tool.call({ tool: 'AskUserQuestion', tool_use_id: 'toolu_q', questions })
+  expect(ran.result?.answers).toEqual({ 'Which one?': 'B' })
+  await clock.advance(300)
+  expect(posted.find(ev => ev.kind === 'ask.open')?.answerable).toBe(true)
+  expect(posted.find(ev => ev.kind === 'ask.close')?.answer).toBe('B')
+  expect(isDialogDown).toBe(true)
+})
+
+test('answered in the terminal first, the office stops waiting', async ($, on) => {
+  const clock = mock.clock(on, { now: 1000 })
+  let waits = 0
+  on('http.fetch', async (_$, e) => {
+    if (e.url.includes('/answer/wait?')) {
+      waits++
+      return { value: { status: 200, ok: true, headers: {}, text: waits > 1 ? '{"closed":true}' : '{}' } }
+    }
+    return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }
+  })
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  on('session.id', async () => ({ value: 'sess-term' }))
+  on('session.model', async () => ({ value: 'test-model' }))
+  on('command.register', async () => ({ value: { command: 'office' } }))
+  on('ui.status', async () => ({ value: undefined }))
+  on('tool.call', { tool: 'ExitPlanMode' }, async () => ({ result: { plan: '# Ship it', isAgent: false } }))
+
+  await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+  await clock.advance(300)
+  const ran = await $.tool.call({ tool: 'ExitPlanMode', tool_use_id: 'toolu_p' })
+  expect(ran.deny).toBe(undefined)
+  expect(ran.result?.plan).toBe('# Ship it')
+  expect(waits).toBeLessThan(3)
+})
+
+test('Stop from the office ends the running turn, and says so when nothing runs', async ($, on) => {
+  const clock = mock.clock(on, { now: 1000 })
+  const posted: Array<Record<string, unknown>> = []
+  const aborted: string[] = []
+  let inbox = [{ id: 'x1', action: 'stop', text: '' }]
+  on('http.fetch', async (_$, e) => {
+    if (e.url.endsWith('/event')) posted.push(...JSON.parse(e.init?.body ?? '[]'))
+    if (e.url.includes('/inbox?session=sess-stop')) {
+      const body = JSON.stringify({ messages: inbox })
+      inbox = []
+      return { value: { status: 200, ok: true, headers: {}, text: body } }
+    }
+    return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }
+  })
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  on('session.id', async () => ({ value: 'sess-stop' }))
+  on('session.model', async () => ({ value: 'test-model' }))
+  on('command.register', async () => ({ value: { command: 'office' } }))
+  on('turn.start', async (_$, e) => ({ turnId: e.turnId }))
+  on('turn.complete', async (_$, e) => ({ text: e.answer }))
+  on('session.usage', async () => ({ value: { context: {} } as never }))
+  on('turn.abort', async (_$, e) => { aborted.push(e.turnId); return { value: undefined } })
+
+  await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+  await $.turn.start({ text: 'Refactor everything', turnId: 'turn-7' })
+  await clock.advance(1300)
+  await clock.advance(300)
+  expect(aborted).toEqual(['turn-7'])
+  expect(posted.find(ev => ev.kind === 'chat.delivered')?.how).toBe('stopped its turn')
+
+  await $.turn.complete({ answer: '', durationMs: 5, isAborted: true, turnId: 'turn-7', reason: 'aborted' })
+  inbox = [{ id: 'x2', action: 'stop', text: '' }]
+  await clock.advance(1000)
+  await clock.advance(300)
+  expect(aborted).toEqual(['turn-7'])
+  expect(posted.filter(ev => ev.kind === 'chat.delivered').map(ev => ev.how)).toEqual(['stopped its turn', 'nothing was running'])
 })

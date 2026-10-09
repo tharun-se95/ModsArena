@@ -99,8 +99,12 @@ export function createBubbles({ stage, headAt, onPick }) {
   function body(b, full) {
     const n = full ? LONG : SHORT
     switch (b.kind) {
-      case 'ask':
-        return `<i class="badge ${b.type}">${b.type === 'permission' ? '&gt;_' : b.type === 'plan' ? '✎' : '?'}</i><span>${escapeHtml(full && b.long ? clip(b.long, LONG) : b.text)}</span>`
+      case 'ask': {
+        const said = `<i class="badge ${b.type}">${b.type === 'permission' ? '&gt;_' : b.type === 'plan' ? '✎' : '?'}</i><span>${escapeHtml(full && b.long ? clip(b.long, LONG) : b.text)}</span>`
+        // The selected thread's question, answerable right here (answer.js).
+        if (!full || !b.options) return said
+        return `${said}<div class="bub-opts" role="group" aria-label="Answer">${b.options.map(label => `<button type="button" data-ans="pick" data-key="${escapeHtml(b.answerKey)}" data-q="0" data-label="${escapeHtml(label)}">${escapeHtml(clip(label, 24))}</button>`).join('')}</div>`
+      }
       case 'made':
         return `${b.src ? `<img alt="" src="${escapeHtml(b.src)}">` : `<i class="badge ${b.type}">${b.icon ?? '•'}</i>`}<span>${escapeHtml(clip(b.text, n))}</span>`
       case 'mail':

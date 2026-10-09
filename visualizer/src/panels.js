@@ -19,6 +19,8 @@ import * as deliverables from './deliverables.js'
 import { goalTitle, projectName, projectIcon, energy, energyMeter } from './names.js'
 import { devView } from './prefs.js'
 import { openProjectEditor } from './project-editor.js'
+import * as actions from './actions.js'
+import * as mentions from './mentions.js'
 
 const $ = sel => document.querySelector(sel)
 const k = n => (n === undefined ? '—' : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : `${Math.round(n / 1000)}k`)
@@ -101,7 +103,7 @@ function headline(running) {
   return `${yours} waiting on you, ${working} working${helping}.`
 }
 
-let answerable = () => false
+let answerable = () => false // (ask) -> can the office answer it
 
 function cardInfo(n, running) {
   const state = threadState(n, running)
@@ -112,7 +114,7 @@ function cardInfo(n, running) {
       <span class="card-where"><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(where(n))}${n.thread ? '<span class="badge">thread</span>' : ''}<time>${ago(first.t)}</time></span>
       <b>${escapeHtml(title(n))}</b>
     </button>
-    ${assets.askCard(first, { answerable: answerable(), compact: true })}
+    ${assets.askCard(first, { answerable: answerable(first), compact: true })}
     ${more.length ? `<p class="ask-more">${plural(more.length, 'more question')} after this one</p>` : ''}`
   }
   const said = n.answer?.text
@@ -120,8 +122,10 @@ function cardInfo(n, running) {
     ? (n.lastReason === 'aborted' ? 'You stopped its last turn.' : n.lastReason === 'refusal' ? 'Its last turn ended on a refusal.' : 'Its last turn ended on an error.')
     : state === 'working' ? 'Back at work.'
       : said ? quote(said) : n.turns ? 'Done with your last request.' : 'Ready for its first prompt.'
+  // A letter with an answer in it can be passed on: dragged onto a critter, or H.
+  const letter = said && state !== 'working' ? ` draggable="true" data-handoff="letter|${escapeHtml(n.id)}"` : ''
   return `
-    <button class="card-head" data-pick="${escapeHtml(n.id)}" data-hover="${escapeHtml(n.id)}" title="Open the conversation">
+    <button class="card-head" data-pick="${escapeHtml(n.id)}" data-hover="${escapeHtml(n.id)}"${letter} title="${letter ? 'Open the conversation. Drag it onto a critter (or press H) to pass it on' : 'Open the conversation'}">
       <span class="card-where"><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(where(n))}${n.thread ? '<span class="badge">thread</span>' : ''}<time>${ago(n.answeredAt ?? n.startedAt)}</time></span>
       <b>${escapeHtml(title(n))}</b>
       ${assets.progress(n)}
@@ -139,13 +143,14 @@ function cardElement(n) {
   li.innerHTML = `
     <div class="card-info"></div>
     <form class="card-reply">
-      <textarea rows="1" aria-label="Reply to ${escapeHtml(title(n))}" placeholder="Reply…"></textarea>
+      <textarea rows="1" aria-label="Reply to ${escapeHtml(title(n))}" placeholder="Reply… (@ to pick an agent)"></textarea>
       <button type="submit" aria-label="Send">↵</button>
       <p class="card-status" hidden></p>
     </form>`
   const form = li.querySelector('form')
   const field = form.querySelector('textarea')
   field.value = drafts.get(n.id) ?? ''
+  mentions.attach(field, () => nodes.get(n.id))
   field.addEventListener('input', () => drafts.set(n.id, field.value))
   field.addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -162,7 +167,10 @@ function cardElement(n) {
     drafts.delete(n.id)
     sending.set(n.id, { status: 'Sending…' })
     showStatus(li, n.id)
-    const result = await transcript.sendTo(node, text)
+    // @name sends it to that agent of the thread instead.
+    const to = mentions.resolve(node, text)
+    const result = await transcript.sendTo(to.node, to.text)
+    if (result.ok && to.to) result.status = `Sent to ${to.node.label}`
     sending.set(n.id, result)
     showStatus(li, n.id)
     if (!result.ok) {
@@ -465,7 +473,8 @@ function head(n, running) {
     ${crumbs(n)}
     <h2 class="dtitle"><i class="dot ${isAgent ? tintOf(n.type) : sessionTint(n.session)}"></i>${escapeHtml(isAgent ? n.label : title(n))}</h2>
     <p class="dmeta">${pill(state)} ${escapeHtml(sub)}</p>
-    ${progressHtml(n.todos, { big: true })}`
+    ${progressHtml(n.todos, { big: true })}
+    ${actions.bar(n, state)}`
 }
 
 // ---------------------------------------------------------------------------
@@ -522,7 +531,7 @@ function clipboard(n, running) {
   // Above the conversation: what it's holding for you, then where it is in
   // its checklist.
   const asks = assets.asksFor(host ?? n).filter(a => n.kind === 'session' || a.who?.id === n.id)
-  const pinned = asks.map(a => assets.askCard(a, { answerable: answerable() })).join('') + assets.checklist(n, { open: !asks.length })
+  const pinned = asks.map(a => assets.askCard(a, { answerable: answerable(a) })).join('') + assets.checklist(n, { open: !asks.length })
   const body = tab === 'transcript' ? `${pinned ? `<div class="pinned">${pinned}</div>` : ''}<div class="transcript" data-keep="${escapeHtml(n.id)}"></div>`
     : tab === 'outputs' ? assets.outputsTab(n)
       : tab === 'team' ? teamTab(n, running)
@@ -534,13 +543,15 @@ function clipboard(n, running) {
 // a critter's bubble while its directory entry is under the pointer.
 let libraryOpen = false
 let zoomed = null
+document.addEventListener('office:answered', () => { if (lastArgs) render(lastArgs) })
+document.addEventListener('office:refresh', () => { if (lastArgs) render(lastArgs) })
 document.addEventListener('office:zoom', e => { zoomed = e.detail; if (lastArgs) render(lastArgs) })
 addEventListener('keydown', e => { if (e.key === 'Escape' && (zoomed || libraryOpen)) { if (zoomed) zoomed = null; else libraryOpen = false; if (lastArgs) render(lastArgs) } })
 
 export function render(args) {
   lastArgs = args
   const { running, selected, pick, hover, answer } = args
-  answerable = () => Boolean(answer?.can())
+  answerable = ask => Boolean(answer?.can(ask))
   patch($('#now'), `<p>${escapeHtml(headline(running))}</p>`)
   renderInbox(running)
   patch($('#full'), fullWindows())
@@ -572,14 +583,6 @@ export function render(args) {
   for (const b of document.querySelectorAll('[data-shelf]')) b.onclick = () => { assets.setShelf(b.dataset.shelf); render(lastArgs) }
   for (const b of document.querySelectorAll('[data-zoom]')) b.onclick = e => { e.preventDefault(); zoomed = b.dataset.zoom; render(lastArgs) }
   deliverables.bind(document, { find: key => outputs.find(o => `${o.session}|${o.id}` === key), redraw: () => render(lastArgs) })
-  for (const b of document.querySelectorAll('[data-answer]')) {
-    b.onclick = e => {
-      e.stopPropagation()
-      const [session, id] = b.dataset.answer.split('|')
-      answer?.send(session, id, b.dataset.label)
-      b.classList.add('picked')
-    }
-  }
   for (const b of document.querySelectorAll('[data-hover]')) {
     b.onpointerenter = () => hover(b.dataset.hover)
     b.onpointerleave = () => hover(null)
