@@ -28,6 +28,7 @@ import { goalTitle, projectName, projectIcon, energy, energyMeter } from './name
 import { devView } from './prefs.js'
 import * as answering from './answer.js'
 import { sound } from './sound.js'
+import { summaryOf } from './summary.js'
 import { who } from './critters.js'
 import * as milestones from './milestones.js'
 import { toast } from './toast.js'
@@ -1726,6 +1727,7 @@ function bubbleFor(pick) {
   const lastDone = activity.get(n.id)?.actions[0]
   const status = sessionViews.get(n.id)?.away ? (live ? 'gone home for the night · back when there’s work' : `ended ${ago(n.endedAt ?? n.lastAt)} · gone home`) : !live ? `ended ${ago(n.endedAt ?? n.lastAt)}` : tool || Date.now() - (n.lastAt ?? 0) < BUSY_MS ? 'working' : `waiting · last active ${ago(n.lastAt)}`
   return `<b><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(goalTitle(n.prompts?.[0]?.text) || n.label)}</b>
+    ${live ? `<p class="sum">${escapeHtml(summaryOf(n))}</p>` : ''}
     <p>${escapeHtml([n.project ? projectName(n.project, n.projectName) : n.projectName, n.gitBranch].filter(Boolean).join(' · '))}</p>
     <dl>${row('who', who(n).title)}${row('status', status)}${row('doing', doing || (lastDone ? say(lastDone) : ''), 'words')}${row(devView() ? 'context' : 'energy', ctx)}${row('helpers', helpers ? String(helpers) : '')}${row('model', n.model)}${row('cost', n.costUsd !== undefined ? `$${n.costUsd.toFixed(2)}` : '')}</dl>`
 }

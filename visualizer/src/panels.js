@@ -15,6 +15,7 @@ import { pct, level, tintOf, sessionTint, roomKey } from './table.js'
 import * as transcript from './transcript.js'
 import * as assets from './assets.js'
 import { progressHtml } from './progress.js'
+import { summaryOf } from './summary.js'
 import * as deliverables from './deliverables.js'
 import { goalTitle, projectName, projectIcon, energy, energyMeter } from './names.js'
 import { who } from './critters.js'
@@ -309,11 +310,8 @@ function threadRow(n, running, selected) {
   const live = isLive(n)
   const state = threadState(n, running)
   const f = fill(n)
-  const doing = !live ? `ended ${ago(n.endedAt ?? n.lastAt)}`
-    : state === 'asking' ? `asks: ${assets.asksFor(n)[0]?.questions?.[0]?.question ?? assets.asksFor(n)[0]?.summary ?? 'a plan to approve'}`
-    : state === 'working' ? (n.todos?.find(i => i.status === 'in_progress')?.text ?? doingNow(n.id) ?? (activity.get(n.id)?.actions[0] ? say(activity.get(n.id).actions[0]) : 'working'))
-      : state === 'stuck' ? 'its last turn didn’t finish'
-        : n.answer?.text ? `said ${quote(n.answer.text)}` : 'ready for you'
+  // A live thread's line is its summary (summary.js); a past one says when it ended.
+  const ended = `ended ${ago(n.endedAt ?? n.lastAt)}`
   return `
     <div class="thread ${live ? '' : 'past'} ${selected === n.id ? 'on' : ''}">
       <button class="entry" data-pick="${escapeHtml(n.id)}" data-hover="${escapeHtml(n.id)}">
@@ -321,7 +319,8 @@ function threadRow(n, running, selected) {
         <span class="ename">${escapeHtml(title(n))}${n.thread ? '<span class="badge" title="A claude.ai project’s coordinator handed this session its work">thread</span>' : ''}</span>
         ${live ? pill(state) : n.context?.tokens ? ctxBadge(f, { bare: true }) : '<span></span>'}
         ${live ? assets.progress(n) : ''}
-        <span class="estate">${escapeHtml(who(n).name)} · ${live && n.context?.tokens ? `${ctxBadge(f)} · ` : ''}${escapeHtml(doing)}</span>
+        ${live ? `<span class="esum">${escapeHtml(summaryOf(n, running))}</span>` : ''}
+        <span class="estate">${escapeHtml(who(n).name)}${live && n.context?.tokens ? ` · ${ctxBadge(f)}` : ''}${live ? '' : ` · ${escapeHtml(ended)}`}</span>
       </button>
       ${live ? teamRows(n) : ''}
     </div>`
@@ -489,6 +488,7 @@ function head(n, running) {
     ${crumbs(n)}
     <h2 class="dtitle"><i class="dot ${isAgent ? tintOf(n.type) : sessionTint(n.session)}"></i>${escapeHtml(isAgent ? who(n).title : title(n))}</h2>
     <p class="dmeta">${pill(state)} ${escapeHtml(sub)}</p>
+    ${isAgent ? '' : `<p class="dsum">${escapeHtml(summaryOf(n, running))}</p>`}
     ${progressHtml(n.todos, { big: true })}
     ${actions.bar(n, state)}`
 }
