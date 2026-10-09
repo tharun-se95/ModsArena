@@ -7,8 +7,26 @@ git tag (`v0.2.1`) with a GitHub Release, and the same version is in
 modsarena (`/plugin` → Marketplaces), a new one arrives on its own;
 otherwise `claude plugin update agent-office@modsarena` fetches it.
 
-## Unreleased
+## 0.9.0
 
+The v1.0 candidate, for review before 1.0.
+
+- **Show the work.** Questions, checklists, pictures and outputs appear in
+  the office as bubbles and cards; every thread shows "3 of 7 done"; a
+  Today recap says what got done, to copy or save as a picture.
+- **Plain words.** Work is described the way a person would say it, with a
+  Developer view switch for the raw lines. Projects get friendly names and
+  icons, threads are titled by their goal, and the feed leads with
+  outcomes.
+- **Run the office.** Start new jobs from the front desk, answer Claude's
+  questions from the office, drag a letter onto a critter to pass it on,
+  and Wrap up, Explain or Stop a thread.
+- **A team with personality.** Critters have names, roles and moods;
+  milestones decorate each room; a finished thread rings a bell; snapshot
+  the office to share it.
+- **For everyone.** A guided first run, a friendly empty office, alerts
+  when something waits on you, spend in plain terms, a phone check-in
+  view, an accessibility pass and a battery saver.
 - **Setup in one step.** Install, then type `/office`. The first time,
   Agent Office offers `/office auto-update`, one command that turns on
   auto-update so new versions arrive on their own (no hunting through
