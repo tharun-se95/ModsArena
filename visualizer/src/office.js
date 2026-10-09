@@ -738,7 +738,7 @@ export function desk(colors, tint) {
     shown = kind ? { ask: kind, color, askKey: key } : null
     lastState = ''
   }
-  function drawShown(t) {
+  function drawShown(t, still) {
     if (shown.img) {
       ctx.fillStyle = '#1f2433'
       ctx.fillRect(0, 0, 160, 96)
@@ -752,22 +752,23 @@ export function desk(colors, tint) {
       ctx.font = '700 64px Georgia, serif'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      const wobble = Math.sin(t * 3) * 3
+      const wobble = still ? 0 : Math.sin(t * 3) * 3
       ctx.fillText(shown.ask === 'permission' ? '>_' : shown.ask === 'plan' ? '✎' : '?', 80, 50 + wobble)
     }
     texture.needsUpdate = true
   }
-  // `state` is 'busy', 'idle' or 'off'; busy screens scroll.
-  function draw(t, state, accent) {
+  // `state` is 'busy', 'idle' or 'off'; busy screens scroll, unless `still`
+  // (less motion), when a busy screen stays bright and doesn't move.
+  function draw(t, state, accent, still = false) {
     if (shown?.img && t > shown.until) { shown = null; lastState = '' }
     if (shown && state !== 'off') {
       if (t - lastDraw < 0.1) return
       lastDraw = t
-      drawShown(t)
+      drawShown(t, still)
       return
     }
     if (state !== 'busy' && state === lastState) return
-    if (state === 'busy' && t - lastDraw < 0.12) return
+    if (state === 'busy' && (t - lastDraw < 0.12 || (still && state === lastState))) return
     lastDraw = t
     lastState = state
     ctx.fillStyle = state === 'off' ? '#141416' : '#1f2433'
@@ -776,7 +777,7 @@ export function desk(colors, tint) {
     ctx.fillStyle = accent
     ctx.fillRect(0, 0, 160, 7)
     ctx.globalAlpha = state === 'busy' ? 1 : 0.55
-    if (state === 'busy') scroll = (scroll + 1) % lines.length
+    if (state === 'busy' && !still) scroll = (scroll + 1) % lines.length
     for (let row = 0; row < 9; row++) {
       const line = lines[(row + scroll) % lines.length]
       let x = 8 + line.indent
@@ -786,7 +787,7 @@ export function desk(colors, tint) {
         x += part.w + 4
       }
     }
-    if (state === 'busy' && Math.floor(t * 3) % 2) {
+    if (state === 'busy' && !still && Math.floor(t * 3) % 2) {
       ctx.fillStyle = '#ffffff'
       ctx.fillRect(8, 13 + 8 * 9, 5, 5)
     }

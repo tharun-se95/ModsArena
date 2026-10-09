@@ -23,6 +23,7 @@
 // you've selected always speaks in full.
 
 import { escapeHtml } from './words.js'
+import { reduced } from './motion.js'
 
 const RANK = { ask: 0, you: 1, relay: 2, mail: 3, made: 4, answer: 5, think: 6 }
 const TTL = { answer: 6, mail: 4, relay: 5, you: 4, made: 5 }
@@ -88,6 +89,8 @@ export function createBubbles({ stage, headAt, onPick }) {
 
   // An envelope flying from one critter to another.
   function fly(from, to, tint, now) {
+    // With less motion, the bubble says who it's to; no envelope flies.
+    if (reduced()) return
     const el = document.createElement('div')
     el.className = 'bub-fly'
     el.style.setProperty('--tint', `var(--${tint})`)
@@ -140,19 +143,31 @@ export function createBubbles({ stage, headAt, onPick }) {
       el.dataset.pick = b.thread ?? ''
       const html = body(b, mine)
       if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html }
+      // A bubble is measured only when its words or size change (and while
+      // its width eases), not every frame: reading offsetWidth after the
+      // last bubble moved forced a layout per bubble per frame.
+      const shape = `${html}|${Boolean(mine)}`
+      if (el._shape !== shape) { el._shape = shape; el._measureUntil = now + 0.3 }
       el.classList.toggle('mine', Boolean(mine))
       // Behind a panel: a question still peeks out at the panel's edge, the
       // rest wait until the critter walks back into view.
       const hidden = head.x < open.l - 10 || head.x > open.r + 10
       el.classList.toggle('far', (i >= MAX_SHOWN && !mine) || (hidden && b.kind !== 'ask'))
-      const w = el.offsetWidth
+      if (el._w === undefined || now < el._measureUntil) {
+        const wasDot = el.classList.contains('dot')
+        if (wasDot) el.classList.remove('dot')
+        el._w = el.offsetWidth
+        el._h = el.offsetHeight
+        if (wasDot) el.classList.add('dot')
+      }
+      const w = el._w
       const x = Math.min(Math.max(head.x, open.l + w / 2 + 8), open.r - w / 2 - 8)
       // The tail still points at the critter.
       el.style.setProperty('--tx', `${Math.max(-w / 2 + 14, Math.min(w / 2 - 14, head.x - x))}px`)
       el.style.left = `${x}px`
       el.style.top = `${head.y}px`
       // Collisions: the lower-ranked bubble shrinks to its badge.
-      const r = { left: x - w / 2, right: x + w / 2, top: head.y - el.offsetHeight, bottom: head.y }
+      const r = { left: x - w / 2, right: x + w / 2, top: head.y - el._h, bottom: head.y }
       const hit = placed.some(p => r.left < p.right && r.right > p.left && r.top < p.bottom && r.bottom > p.top)
       // Helpers' thoughts shrink even on the selected thread, or they pile up.
       el.classList.toggle('dot', hit && b.kind !== 'ask' && (!mine || b.kind === 'think'))

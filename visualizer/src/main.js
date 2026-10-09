@@ -12,7 +12,7 @@ import { unlock, isMuted, setMuted } from './sound.js'
 import * as transcript from './transcript.js'
 import * as recap from './recap.js'
 import * as desk from './desk.js'
-import { mountSettings } from './settings.js'
+import * as settings from './settings.js'
 import { mountHelp } from './help.js'
 import * as answering from './answer.js'
 import * as actions from './actions.js'
@@ -22,11 +22,18 @@ import * as welcome from './welcome.js'
 import * as tour from './tour.js'
 import * as notify from './notify.js'
 import * as spend from './spend.js'
+import * as a11y from './a11y.js'
+import * as motion from './motion.js'
+import * as phone from './phone.js'
+import * as power from './power.js'
 
 const HISTORY_REFRESH_MS = 60000
 const PANEL_REFRESH_MS = 700
 const params = new URLSearchParams(location.search)
-const isDemo = Boolean(window.AGENT_OFFICE_DEMO) || params.get('demo') === '1'
+// ?busy=1 plays a crowded demo in the page (about 12 threads and 25 agents)
+// for checking the office stays smooth; demo-only, it never reads the bridge.
+const isBusy = params.get('busy') === '1'
+const isDemo = Boolean(window.AGENT_OFFICE_DEMO) || params.get('demo') === '1' || isBusy
 // Previews (welcome.js): ?empty=1 keeps the office empty, ?offline=1 shows
 // the lost-connection card.
 const forceEmpty = params.get('empty') === '1'
@@ -48,6 +55,8 @@ function pick(id) {
   selected = n && (n.kind === 'session' || n.kind === 'agent') ? id : null
   table.setSelected(selected)
   if (selected) table.focusOn(selected)
+  // On a phone, a thread you pick opens on the Projects view.
+  if (selected && phone.isPhone()) phone.show('projects')
   refreshPanels()
 }
 
@@ -58,7 +67,9 @@ const stageEl = document.getElementById('stage')
 function measureInsets() {
   const W = stageEl.clientWidth, H = stageEl.clientHeight
   const insets = { left: 0, right: 0, top: 0, bottom: 0 }
-  for (const el of document.querySelectorAll('.hud.left > *, #side, .topbar')) {
+  // The phone's little office in the Inbox has nothing over it.
+  if (phone.isMini()) return table.setInsets(insets)
+  for (const el of document.querySelectorAll('.hud.left > *, #side, .topbar, .phone-tabs')) {
     const r = el.getBoundingClientRect()
     if (!r.width || !r.height || getComputedStyle(el).display === 'none') continue
     if (r.height > H * 0.5 && r.width < W * 0.5) {
@@ -120,7 +131,7 @@ showSound()
 for (const type of ['pointerdown', 'keydown']) addEventListener(type, unlock, { once: true })
 
 // Developer view: plain words everywhere, or the raw tool lines.
-mountSettings(() => { transcript.redraw(); refreshPanels() })
+settings.mountSettings(() => { transcript.redraw(); refreshPanels() })
 // "What am I looking at?": the ? button and the ? key.
 mountHelp()
 // A project renamed or given a new icon.
@@ -138,6 +149,15 @@ snapButton?.addEventListener('click', async () => {
   const label = snapButton.querySelector('span')
   label.textContent = saved ? 'Saved' : 'Couldn’t save'
   setTimeout(() => { label.textContent = 'Snapshot' }, 2200)
+})
+
+// The clipboard's tabs answer the arrow keys.
+addEventListener('keydown', a11y.tabKeys, true)
+
+settings.add({
+  id: 'reduce-motion', type: 'toggle', label: 'Reduce motion',
+  hint: () => (motion.bySystem() ? 'On because your system asks for less motion' : 'No camera glides, hops, confetti or bobbing'),
+  get: motion.reduced, set: motion.setReduced, disabled: motion.bySystem,
 })
 
 const pastToggle = document.getElementById('show-past')
@@ -202,22 +222,56 @@ const answer = { can: answering.canAnswer }
 
 function refreshPanels() {
   if (selected && !model.nodes.has(selected)) selected = null
+  const now = running()
   // Spend first: the directory shows each project's.
   spend.update(history)
-  panels.render({ running: running(), selected, pick, hover: table.setHover, answer })
-  recap.tick(running())
-  notify.update(running())
+  phone.render()
+  panels.render({ running: now, selected, pick, hover: table.setHover, answer })
+  a11y.render({ running: now, pick })
+  recap.tick(now)
+  notify.update(now)
   welcome.showEmpty(heard && ![...model.nodes.values()].some(n => n.kind === 'session'), { hasPast: history.length > 0 })
 }
 
-function frame() {
+// ?debug keeps the last 600 frames' main-thread cost (ms) for profiling.
+const frameCost = params.has('debug') ? [] : null
+
+// A tab you can't see draws nothing; "Save battery" draws 30 frames a
+// second (power.js). The loop starts again when the tab comes back.
+let rafId = 0
+let lastFrame = -Infinity
+
+function frame(t) {
+  rafId = requestAnimationFrame(frame)
+  if (!power.due(t, lastFrame, power.budget().fps)) return
+  // Nothing to draw while the phone shows Projects over the office.
+  if (!phone.sceneShown()) return
+  lastFrame = t
+  const t0 = frameCost && performance.now()
   model.sweep(Date.now())
   table.sync(showPast)
   table.animate()
-  requestAnimationFrame(frame)
+  if (frameCost) { frameCost.push(performance.now() - t0); if (frameCost.length > 600) frameCost.shift() }
 }
 
-setInterval(refreshPanels, PANEL_REFRESH_MS)
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    cancelAnimationFrame(rafId)
+    rafId = 0
+  } else if (!rafId) {
+    rafId = requestAnimationFrame(frame)
+    refreshPanels()
+  }
+})
+
+setInterval(() => { if (!document.hidden) refreshPanels() }, PANEL_REFRESH_MS)
+
+settings.add({
+  id: 'low-power', type: 'toggle', label: 'Save battery',
+  hint: 'Draws 30 frames a second, a little softer, with simpler shadows',
+  get: power.isSaving, set: power.setSaving,
+})
+power.onChange(table.setPower)
 
 // ---------------------------------------------------------------------------
 // Sources
@@ -278,7 +332,7 @@ function connect() {
 // synthetic activity as `server.mjs --demo`.
 function playDemo() {
   setStatus('Sample activity', 'live')
-  startDemo(events => events.forEach(ingest))
+  startDemo(events => events.forEach(ingest), { busy: isBusy })
 }
 
 // The front desk: new jobs from the office. Without a bridge (the hosted
@@ -301,6 +355,7 @@ spend.mount()
 // The guided tour: on its own the first time, and from the top bar.
 tour.mount({ pick, ingest, table })
 
+phone.mount({ changed: () => { measureInsets(); refreshPanels() } })
 await loadHistory()
 setInterval(loadHistory, HISTORY_REFRESH_MS)
 if (params.get('offline') === '1') {
@@ -310,6 +365,6 @@ if (params.get('offline') === '1') {
 else if (forceEmpty) setStatus('Preview', 'live')
 else playDemo()
 refreshPanels()
-requestAnimationFrame(frame)
+if (!document.hidden) rafId = requestAnimationFrame(frame)
 // ?debug exposes the model to the console.
-if (params.has('debug')) window.cluster = { model, words, table }
+if (params.has('debug')) window.cluster = { model, words, table, frameCost }

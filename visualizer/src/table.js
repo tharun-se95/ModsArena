@@ -20,7 +20,7 @@ import {
   FLOOR_TOP, WALL_H, COFFEE_W, COFFEE_D, FRONT_W,
 } from './office.js'
 import { jobFor } from './desk.js'
-import { nodes, fill, sid, aid, WARN_AT, outputs, openAsks, mail } from './model.js'
+import { nodes, fill, sid, aid, WARN_AT, outputs, mail } from './model.js'
 import { srcOf, toolName } from './assets.js'
 import { createBubbles } from './bubbles.js'
 import { beadColor, escapeHtml, activity, ago, say, doingNow } from './words.js'
@@ -32,6 +32,8 @@ import { who } from './critters.js'
 import * as milestones from './milestones.js'
 import { toast } from './toast.js'
 import { cropOf } from './snapshot.js'
+import { budget } from './power.js'
+import { reduced } from './motion.js'
 
 const ROW_DEPTH = 160 // one row: helpers, desk, the session, its label
 const BACK_SPACE = 44 // along the back wall, for the shelf, window and plants
@@ -126,6 +128,7 @@ let slowFrames = 0
 let last = 0
 let tick = 0
 const v = new THREE.Vector3()
+const spot = new THREE.Vector3() // scratch, so a frame allocates no vectors
 
 const clock = () => performance.now() / 1000
 // Moods keep their shapes but drop the bouncing for people who ask for less
@@ -148,11 +151,12 @@ export function mount(el, { pick }) {
   stage = el
   onPick = pick
   renderer = new THREE.WebGLRenderer({ antialias: true })
-  renderer.setPixelRatio(Math.min(2, devicePixelRatio))
+  renderer.setPixelRatio(Math.min(budget().pixelRatio, devicePixelRatio))
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
   // The light never moves, so the shadows only change as the critters do;
-  // animate() redraws them every other frame instead of every frame.
+  // animate() redraws them every few frames (power.js) instead of every
+  // frame: the shadow pass draws the whole office a second time.
   renderer.shadowMap.autoUpdate = false
   renderer.outputColorSpace = THREE.SRGBColorSpace
   stage.append(renderer.domElement)
@@ -196,7 +200,7 @@ export function mount(el, { pick }) {
   sun = new THREE.DirectionalLight('#fffaf2', SUN)
   sun.position.set(-90, 220, 120)
   sun.castShadow = true
-  sun.shadow.mapSize.set(2048, 2048)
+  sun.shadow.mapSize.set(budget().shadowSize, budget().shadowSize)
   sun.shadow.radius = 6
   sun.shadow.bias = -0.0005
   // A shadow-map texel is close to a unit across a big office; nudging the
@@ -614,7 +618,8 @@ function frame(jump = false) {
   const goal = { pos: new THREE.Vector3(c.x, Math.sin(TILT) * dist, c.z + Math.cos(TILT) * dist), target }
   // Zoomed all the way out shows the whole office and no more.
   if (!t) controls.maxDistance = dist
-  if (jump || !framedOnce) {
+  // With less motion the camera cuts to the new view instead of gliding.
+  if (jump || !framedOnce || reduced()) {
     framedOnce = true
     camera.position.copy(goal.pos)
     controls.target.copy(goal.target)
@@ -685,7 +690,8 @@ function walk(view, group, path, then) {
 function stepWalk(view, dt) {
   const w = view.walk
   if (!w) return false
-  let step = WALK_SPEED * dt
+  // With less motion a critter is simply where it was going.
+  let step = reduced() ? Infinity : WALK_SPEED * dt
   while (step > 0 && w.path.length) {
     const to = w.path[0]
     // A stop on the way: a callback, or a pause of `wait` seconds.
@@ -924,8 +930,13 @@ function headAt(id) {
   return { x, y }
 }
 
+// Beads and confetti share their shapes: a busy office fires several tool
+// calls a second, and each used to build (and throw away) its own sphere.
+const BEAD = new THREE.SphereGeometry(1.7, 12, 10)
+const PAPER = new THREE.BoxGeometry(1.6, 0.3, 1)
+
 function addBead(from, color) {
-  const m = new THREE.Mesh(new THREE.SphereGeometry(1.7, 16, 16), new THREE.MeshStandardMaterial({ color, roughness: 0.5, transparent: true }))
+  const m = new THREE.Mesh(BEAD, new THREE.MeshStandardMaterial({ color, roughness: 0.5, transparent: true }))
   m.castShadow = true
   m.position.copy(from)
   scene.add(m)
@@ -934,9 +945,8 @@ function addBead(from, color) {
 
 // A little burst of colored paper when a session finishes a turn.
 function addConfetti(from) {
-  const geo = new THREE.BoxGeometry(1.6, 0.3, 1)
   for (let i = 0; i < 18; i++) {
-    const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: palette[TINTS[i % TINTS.length]], transparent: true }))
+    const m = new THREE.Mesh(PAPER, new THREE.MeshStandardMaterial({ color: palette[TINTS[i % TINTS.length]], transparent: true }))
     m.position.copy(from)
     scene.add(m)
     const a = Math.random() * Math.PI * 2
@@ -986,7 +996,7 @@ export function pulse(ev) {
     if (ev.reason === 'answer' || !ev.reason) session.cheerAt = t
     else if (ev.reason !== 'aborted') session.sulkAt = t
     const from = headOf(session.id)
-    if (from) addConfetti(from)
+    if (from && !reduced()) addConfetti(from)
     sound.chime()
     // 💬 the first words of its answer.
     if (ev.answer) talk.say(session.id, 'answer', { text: ev.answer, thread: session.id }, t)
@@ -1161,9 +1171,9 @@ function updateGauge(s, f) {
 }
 
 // A short wobble and a "!" after a failed call.
-function oops(view, char, el, now) {
+function oops(view, char, el, now, still) {
   const k = view.failAt ? (now - view.failAt) / 1.4 : 1
-  char.rig.rotation.z = k < 1 ? Math.sin(now * 38) * 0.09 * (1 - k) : 0
+  char.rig.rotation.z = k < 1 && !still ? Math.sin(now * 38) * 0.09 * (1 - k) : 0
   el.classList.toggle('on', k < 1)
 }
 
@@ -1204,8 +1214,10 @@ function greetings(now) {
 }
 
 // Standing helpers nudge apart so nobody stands inside anybody else.
+const standing = []
 function makeRoom() {
-  const standing = [...agentViews.values()].filter(a => !a.gone && !a.walk && !a.leaving && a.settled)
+  standing.length = 0
+  for (const a of agentViews.values()) if (!a.gone && !a.walk && !a.leaving && a.settled) standing.push(a)
   for (let i = 0; i < standing.length; i++) {
     for (let j = i + 1; j < standing.length; j++) {
       const p = standing[i].group.position, q = standing[j].group.position
@@ -1223,6 +1235,13 @@ export function animate() {
   const now = clock()
   const dt = Math.min(0.1, now - last)
   last = now
+  // Less motion (motion.js): no hops, bobbing, swaying, wobbles or waves,
+  // and nothing slides into place. `idle` is the clock the decorative
+  // motion runs on, stopped when motion is reduced; states still show
+  // (a busy critter's bulb glows, an alarm ring stays lit).
+  const still = reduced()
+  const idle = still ? 0 : now
+  const ease = still ? 1 : 0.12
   const wall = Date.now()
   // Who has a tool running right now.
   const running = new Set()
@@ -1230,29 +1249,30 @@ export function animate() {
 
   daylight(now)
   for (const t of rooms.values()) {
-    t.center.lerp(t.target, 0.12)
+    t.center.lerp(t.target, ease)
     t.mesh.position.copy(t.center)
-    for (const p of t.plants ?? []) p.rotation.z = Math.sin(now * 0.8 + p.userData.plant) * 0.035
-    t.decor?.animate(now)
+    for (const p of t.plants ?? []) p.rotation.z = Math.sin(idle * 0.8 + p.userData.plant) * 0.035
+    t.decor?.animate(idle)
   }
   if (front?.ringAt !== undefined) {
     const k = (now - front.ringAt) / 0.9
-    front.bell.rotation.z = k < 1 && !calm.matches ? Math.sin(now * 42) * 0.25 * (1 - k) : 0
+    front.bell.rotation.z = k < 1 && !calm.matches && !still ? Math.sin(now * 42) * 0.25 * (1 - k) : 0
   }
   if (coffee) {
-    coffee.center.lerp(coffee.target, 0.12)
+    coffee.center.lerp(coffee.target, ease)
     coffee.group.position.copy(coffee.center)
-    coffee.animate(now)
+    coffee.animate(idle)
   }
   if (shell) {
-    for (const p of shell.plants) p.rotation.z = Math.sin(now * 0.7 + p.userData.plant) * 0.03
+    for (const p of shell.plants) p.rotation.z = Math.sin(idle * 0.7 + p.userData.plant) * 0.03
     const d = new Date()
     const secs = d.getSeconds() + d.getMilliseconds() / 1000
     shell.clock.second.rotation.z = -(secs / 60) * Math.PI * 2
     shell.clock.minute.rotation.z = -((d.getMinutes() + secs / 60) / 60) * Math.PI * 2
     shell.clock.hour.rotation.z = -(((d.getHours() % 12) + d.getMinutes() / 60) / 12) * Math.PI * 2
   }
-  if (vacuum?.loop) {
+  // The vacuum parks while motion is reduced.
+  if (vacuum?.loop && !still) {
     const to = vacuum.loop[vacuum.i]
     const g = vacuum.group
     const dx = to.x - g.position.x
@@ -1267,12 +1287,13 @@ export function animate() {
       g.rotation.y += turn * Math.min(1, dt * 4)
     }
     vacuum.led.visible = Math.floor(now * 2) % 2 === 0
-  }
+  } else if (vacuum) vacuum.led.visible = true
 
+  gatherAsks()
   for (const s of sessionViews.values()) {
     const n = nodes.get(s.id)
     if (!n) continue
-    s.group.position.lerp(s.home, 0.12)
+    s.group.position.lerp(s.home, ease)
     const asleep = resting(n)
     const f = fill(n)
     const walking = stepWalk(s, dt)
@@ -1285,9 +1306,9 @@ export function animate() {
         v.copy(s.gatherTo).sub(s.group.position)
         const far = v.length()
         v.setY(0).multiplyScalar(Math.min(1, Math.max(0, far - 30) / Math.max(1, far), GATHER_REACH / Math.max(1, far)) * g)
-        const ease = 1 - Math.pow(0.0005, dt)
-        s.body.position.lerp(v, ease)
-        s.body.rotation.y += (Math.atan2(s.gatherTo.x - s.group.position.x - s.body.position.x, s.gatherTo.z - s.group.position.z - s.body.position.z) * Math.min(1, g * 2) - s.body.rotation.y) * ease
+        const glide = still ? 1 : 1 - Math.pow(0.0005, dt)
+        s.body.position.lerp(v, glide)
+        s.body.rotation.y += (Math.atan2(s.gatherTo.x - s.group.position.x - s.body.position.x, s.gatherTo.z - s.group.position.z - s.body.position.z) * Math.min(1, g * 2) - s.body.rotation.y) * glide
       } else if (s.gatherAt !== undefined) {
         s.body.position.lerp(v.set(0, 0, 0), 1 - Math.pow(0.0005, dt))
         s.body.rotation.y *= Math.pow(0.0005, dt)
@@ -1298,33 +1319,33 @@ export function animate() {
     const dozing = asleep || (!working && !walking && wall - (n.lastAt ?? n.startedAt ?? wall) > DOZE_MS)
     const helper = s.lookAt && agentViews.get(s.lookAt)
     const look = helper && !helper.endedAt ? Math.atan2(helper.group.position.x - s.group.position.x, helper.group.position.z - s.group.position.z) : 0
-    pose(s.char, now, {
+    pose(s.char, idle, {
       busy,
       look: walking ? 0 : Math.max(-0.45, Math.min(0.45, look * 0.3)),
-      hop: s.hopAt ? (now - s.hopAt) / 0.35 : 1,
+      hop: s.hopAt && !still ? (now - s.hopAt) / 0.35 : 1,
       alarm: !asleep && !walking && f >= WARN_AT,
       asleep: dozing,
     })
     // Thinking between tools mid-turn; yawning once it has waited on you a while.
     const thinking = !walking && n.turnOpen && !running.has(s.id) && !n.asks?.length && now - (s.lastAt ?? -9) > 1.2
     const idleFor = !walking && !working && !n.turnOpen ? (wall - (n.lastAt ?? wall)) / 1000 : 0
-    emote(s.char, now, feel(s, dozing || walking, thinking, idleFor), lessMotion.matches)
-    oops(s, s.char, s.oops.el, now)
-    waving(s, s.char, now)
+    emote(s.char, now, feel(s, dozing || walking, thinking, idleFor), lessMotion.matches || still)
+    oops(s, s.char, s.oops.el, now, still)
+    if (!still) waving(s, s.char, now)
     s.bell.el.classList.toggle('on', s.bellAt !== undefined && now - s.bellAt < 2.4)
     // A resting critter fades toward the floor's color.
     s.char.bodyMat.color.copy(palette[s.tint]).lerp(palette.line, asleep ? 0.6 : 0)
     s.char.bulb.visible = !asleep
     s.zzz.el.classList.toggle('on', dozing && !walking && !away)
-    s.desk.draw(now, asleep || away ? 'off' : busy > 0.5 && !walking ? 'busy' : 'idle', `#${palette[s.tint].getHexString()}`)
-    s.desk.steam(now, !asleep && !away && working)
-    s.desk.animateTray?.(now)
+    s.desk.draw(now, asleep || away ? 'off' : busy > 0.5 && !walking ? 'busy' : 'idle', `#${palette[s.tint].getHexString()}`, still)
+    s.desk.steam(idle, !asleep && !away && working)
+    s.desk.animateTray?.(idle)
     showWork(s, n, now, asleep || (away && !walking))
     updateGauge(s, f)
     const warn = !asleep && f >= WARN_AT
     if (warn && !s.alarm) { s.alarm = flatRing(26.5, 27.5, palette.crit); s.group.add(s.alarm) }
     if (!warn && s.alarm) { s.group.remove(s.alarm); s.alarm = null }
-    if (s.alarm) s.alarm.material.opacity = 0.35 + 0.45 * (Math.sin(now * 3) + 1) / 2
+    if (s.alarm) s.alarm.material.opacity = still ? 0.7 : 0.35 + 0.45 * (Math.sin(now * 3) + 1) / 2
     const html = `<span class="who">${escapeHtml(who(n).name)}</span><span class="sname">${escapeHtml(n.label)}</span>${n.context?.tokens ? (devView() ? `<span class="pct ${level(f)}">${pct(f)}</span>` : energyMeter(f, { bare: true })) : ''}`
     if (s.html !== html) s.label.el.innerHTML = s.html = html
     s.label.el.classList.toggle('selected', selected === s.id)
@@ -1345,26 +1366,26 @@ export function animate() {
     }
     if (a.gone) continue
     if (a.departAt && now >= a.departAt) { a.departAt = null; startBreak(a, s) }
-    oops(a, a.char, a.oops.el, now)
+    oops(a, a.char, a.oops.el, now, still)
     const walking = stepWalk(a, dt)
 
     if (a.endedAt) {
       // On the way to coffee, on a break, then off home.
       if (!walking && a.onBreak && !a.leaving && now - a.onBreak > BREAK_S) a.leaving = now
-      pose(a.char, now + a.slot, { busy: walking ? 1 : 0, hop: 1 })
-      emote(a.char, now, feel(a, false, false, 0), lessMotion.matches)
-      waving(a, a.char, now)
+      pose(a.char, idle + a.slot, { busy: walking ? 1 : 0, hop: 1 })
+      emote(a.char, now, feel(a, false, false, 0), lessMotion.matches || still)
+      if (!still) waving(a, a.char, now)
       if (a.onBreak && !a.leaving) {
-        const table = coffee.target.clone().add(coffee.tableAt)
+        const table = spot.copy(coffee.target).add(coffee.tableAt)
         const face = Math.atan2(table.x - a.group.position.x, table.z - a.group.position.z)
         a.group.rotation.y += Math.atan2(Math.sin(face - a.group.rotation.y), Math.cos(face - a.group.rotation.y)) * Math.min(1, dt * 6)
         // The mug arm rests forward, with a sip now and then.
-        const sip = Math.sin((now - a.onBreak) * 1.3) > 0.85
+        const sip = !still && Math.sin((now - a.onBreak) * 1.3) > 0.85
         a.char.arms[1].rotation.x = sip ? -1.3 : -0.5
         a.char.arms[1].rotation.z = 0.35
       }
       if (a.leaving) {
-        const k = Math.min(1, (now - a.leaving) / 1.6)
+        const k = still ? 1 : Math.min(1, (now - a.leaving) / 1.6)
         a.group.scale.setScalar(Math.max(0.01, 1 - k))
         if (k >= 1) {
           a.gone = true
@@ -1379,23 +1400,23 @@ export function animate() {
     const shown = selected && (selected === s.id || nodes.get(selected)?.session === nodes.get(s.id)?.session)
     talk.hold(a.id, 'think', shown && n.status === 'active' && n.description ? { key: n.description, text: n.description, thread: s.id } : null, now)
     const [sx, sz] = slotAt(a.slot)
-    const target = new THREE.Vector3(s.group.position.x + sx, FLOOR_TOP, s.group.position.z + sz)
+    const target = spot.set(s.group.position.x + sx, FLOOR_TOP, s.group.position.z + sz)
     const g = gathering(a, now)
     if (g > 0) target.lerp(a.gatherTo, g)
-    const grow = Math.min(1, (now - a.born) / 0.6)
+    const grow = still ? 1 : Math.min(1, (now - a.born) / 0.6)
     a.group.rotation.y = g > 0.05
       ? Math.atan2(a.gatherTo.x - a.group.position.x, a.gatherTo.z - a.group.position.z) * g
       : Math.atan2(s.group.position.x - a.group.position.x, s.group.position.z - a.group.position.z) * 0.45
-    pose(a.char, now + a.slot, {
+    pose(a.char, idle + a.slot, {
       busy: n.status === 'active' && (running.has(a.id) || now - (a.lastAt ?? -9) < 1.5 || g > 0.05) ? 1 : 0,
-      hop: a.hopAt ? (now - a.hopAt) / 0.3 : 1,
+      hop: a.hopAt && !still ? (now - a.hopAt) / 0.3 : 1,
       alarm: n.status === 'active' && fill(n) >= WARN_AT,
     })
     // A teammate between turns waits, and yawns; an active one between
     // tools thinks.
     const agentThinks = n.status === 'active' && !running.has(a.id) && now - (a.lastAt ?? a.born) > 1.5 && !n.asks?.length
-    emote(a.char, now, feel(a, false, agentThinks, n.status === 'idle' ? (now - (a.lastAt ?? a.born)) : 0), lessMotion.matches)
-    waving(a, a.char, now)
+    emote(a.char, now, feel(a, false, agentThinks, n.status === 'idle' ? (now - (a.lastAt ?? a.born)) : 0), lessMotion.matches || still)
+    if (!still) waving(a, a.char, now)
     // Name tags show for the room you're in, or the thread you're on.
     const host = nodes.get(s.id)
     a.tag.el.classList.toggle('on', Boolean(shown || hovered === s.id || (host && focusedProject === `p:${host.project}`)))
@@ -1411,14 +1432,15 @@ export function animate() {
 
   for (let i = beads.length - 1; i >= 0; i--) {
     const b = beads[i], k = (now - b.born) / 1.6
-    if (k >= 1) { scene.remove(b.m); b.m.geometry.dispose(); b.m.material.dispose(); beads.splice(i, 1); continue }
-    b.m.position.copy(b.from).addScaledVector(b.drift, k).add(v.set(0, k * 16, 0))
+    if (k >= 1) { scene.remove(b.m); b.m.material.dispose(); beads.splice(i, 1); continue }
+    if (still) b.m.position.copy(b.from)
+    else b.m.position.copy(b.from).addScaledVector(b.drift, k).add(v.set(0, k * 16, 0))
     b.m.material.opacity = 1 - k * k
   }
   for (let i = ripples.length - 1; i >= 0; i--) {
     const r = ripples[i], k = (now - r.born) / 1.8
     if (k >= 1) { scene.remove(r.r); ripples.splice(i, 1); continue }
-    r.r.scale.setScalar(1 + k * 2.2)
+    r.r.scale.setScalar(still ? 1.6 : 1 + k * 2.2)
     r.r.material.opacity = 1 - k
   }
   for (let i = confetti.length - 1; i >= 0; i--) {
@@ -1445,7 +1467,7 @@ export function animate() {
   controls.update()
   if (!camGoal) keepInOffice()
   fitDepth()
-  if (tick % 2 === 0) renderer.shadowMap.needsUpdate = true
+  if (tick % budget().shadowEvery === 0) renderer.shadowMap.needsUpdate = true
   sharpness(now, dt)
   renderer.render(scene, camera)
   labels.render(scene, camera)
@@ -1487,9 +1509,39 @@ function askWords(ask) {
   return { text: 'Plan ready. Approve?', long: `Plan ready: ${(ask.plan ?? '').replace(/^#+\s*/, '').split('\n')[0]}. Approve?` }
 }
 
+// Once a frame rather than once per session: each thread's oldest open ask
+// (what openAsks(n)[0] gives), from one pass over the nodes, and each
+// thread's outputs, regrouped only when the list changes.
+const firstAsk = new Map()
+function gatherAsks() {
+  firstAsk.clear()
+  for (const x of nodes.values()) {
+    if (!x.asks?.length || (x.kind !== 'session' && x.kind !== 'agent')) continue
+    for (const a of x.asks) {
+      const had = firstAsk.get(x.session)
+      if (!had || a.t < had.t) firstAsk.set(x.session, { ...a, who: x })
+    }
+  }
+}
+let outKey = ''
+const outBy = new Map()
+const NONE = []
+function outputsBy(session) {
+  const key = `${outputs.length}|${outputs[0]?.session}|${outputs[0]?.id}|${outputs[0]?.t}`
+  if (key !== outKey) {
+    outKey = key
+    outBy.clear()
+    for (const o of outputs) {
+      if (!outBy.has(o.session)) outBy.set(o.session, [])
+      outBy.get(o.session).push(o)
+    }
+  }
+  return outBy.get(session) ?? NONE
+}
+
 function showWork(s, n, now, asleep) {
   // 💬 a question it's holding the turn for, and the monitor turns into it.
-  const ask = asleep ? null : openAsks(n)[0]
+  const ask = asleep ? null : firstAsk.get(n.session)
   // Its choices too, when the office can answer it: tap one on the bubble.
   const choices = ask && answering.canAnswer(ask) ? answering.bubbleOptions(ask) : undefined
   if (choices) answering.remember(ask)
@@ -1503,10 +1555,10 @@ function showWork(s, n, now, asleep) {
   // The easel.
   const todos = n.todos
   s.easel.group.visible = Boolean(todos?.length) && !asleep
-  if (s.easel.group.visible) s.easel.draw(todos, `#${palette[s.tint].getHexString()}`, now)
+  if (s.easel.group.visible) s.easel.draw(todos, `#${palette[s.tint].getHexString()}`, reduced() ? 0.5 : now)
 
   // 💬 "look": something new it made.
-  const mine = outputs.filter(o => o.session === n.session)
+  const mine = outputsBy(n.session)
   if (mine.length !== s.seen) {
     const fresh = mine.slice(0, Math.max(0, mine.length - (s.seen ?? 0)))
     s.seen = mine.length
@@ -1546,7 +1598,7 @@ function zoom(dt) {
   if (zoomTo === null) return
   v.subVectors(camera.position, controls.target)
   const d = v.length()
-  const next = Math.abs(zoomTo / d - 1) < 0.001 ? zoomTo : d * Math.pow(zoomTo / d, 1 - Math.pow(ZOOM_EASE, dt))
+  const next = Math.abs(zoomTo / d - 1) < 0.001 || reduced() ? zoomTo : d * Math.pow(zoomTo / d, 1 - Math.pow(ZOOM_EASE, dt))
   camera.position.copy(controls.target).add(v.setLength(next))
   if (next === zoomTo) zoomTo = null
 }
@@ -1616,6 +1668,18 @@ function declutter() {
   for (const t of [...rooms.values(), ...(coffee ? [coffee] : [])]) {
     t.label.el.classList.toggle('covered', Boolean(over && overlaps(t.label.el.getBoundingClientRect(), [over])))
   }
+}
+
+// Saving battery (or not): the sharpness cap and the shadow map's size.
+export function setPower({ pixelRatio, shadowSize }) {
+  if (!renderer) return
+  renderer.setPixelRatio(Math.min(pixelRatio, devicePixelRatio))
+  if (sun.shadow.mapSize.x !== shadowSize) {
+    sun.shadow.mapSize.set(shadowSize, shadowSize)
+    sun.shadow.map?.dispose()
+    sun.shadow.map = null
+  }
+  renderer.shadowMap.needsUpdate = true
 }
 
 export function setSelected(id) {
