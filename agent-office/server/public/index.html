@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="agent-office-token" content="">
 <title>Agent Office</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -567,6 +567,84 @@
   .set-row.off { cursor: default; }
   .set-row.off b { color: var(--muted); }
 
+  /* ===== Phone check-in (E3, phone.js): at phone width the page becomes
+     three views under a tab bar, chosen by <html data-phone="...">:
+     Inbox (letters as big cards, what was made today, a small live office),
+     Office (the office, full screen) and Projects (the directory and its
+     clipboard). Tap targets are at least 44px; the bars clear the notch and
+     the home indicator. ===== */
+  .today, .mini-office, .phone-tabs { display: none; }
+  @media (max-width: 600px) {
+    :root[data-phone] { --phone-top: calc(env(safe-area-inset-top) + 62px); --phone-bottom: calc(env(safe-area-inset-bottom) + 68px); }
+    :root[data-phone] .topbar { top: calc(env(safe-area-inset-top) + 8px); left: calc(env(safe-area-inset-left) + 10px); right: calc(env(safe-area-inset-right) + 10px); gap: 8px; }
+    :root[data-phone] .brand { flex: none; padding: 6px 12px 6px 9px; min-height: 44px; }
+    :root[data-phone] .word { white-space: nowrap; font-size: 15px; }
+    :root[data-phone] .controls { gap: 0; padding: 0 4px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+    :root[data-phone] .controls > button, :root[data-phone] .controls > .toggle { min-width: 44px; min-height: 44px; justify-content: center; }
+    :root[data-phone] .status { padding: 0 8px; }
+    :root[data-phone] .status > span { display: none; }
+    :root[data-phone] .hint, :root[data-phone] .tape { display: none; }
+
+    /* The tab bar. */
+    :root[data-phone] .phone-tabs { display: grid; grid-template-columns: repeat(3, 1fr); position: absolute; z-index: 14; left: 0; right: 0; bottom: 0; padding: 4px calc(env(safe-area-inset-right) + 8px) env(safe-area-inset-bottom) calc(env(safe-area-inset-left) + 8px); border-radius: 18px 18px 0 0; border-bottom: 0; }
+    .phone-tabs button { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 60px; border-radius: 12px; color: var(--muted); font-size: 11.5px; font-weight: 500; text-align: center; }
+    .phone-tabs svg { width: 24px; height: 24px; }
+    .phone-tabs button[aria-current="page"] { color: var(--accent-ink, var(--accent)); }
+    .phone-tabs button[aria-current="page"]::before { content: ""; position: absolute; top: 2px; width: 28px; height: 3px; border-radius: 2px; background: var(--accent); }
+    .phone-tabs .count { position: absolute; top: 6px; left: calc(50% + 6px); margin: 0; }
+
+    /* Inbox: one scrolling column. */
+    :root[data-phone="inbox"] .left { top: var(--phone-top); bottom: var(--phone-bottom); left: 0; right: 0; width: auto; padding: 0 calc(env(safe-area-inset-right) + 12px) 16px calc(env(safe-area-inset-left) + 12px); overflow-y: auto; gap: 14px; overscroll-behavior: contain; }
+    :root[data-phone="inbox"] .board { max-height: none; overflow: visible; padding: 16px 14px 14px; }
+    :root[data-phone="inbox"] #now p { font-size: 17px; }
+    :root[data-phone="inbox"] .board > .eyebrow { font-size: 11.5px; }
+    :root[data-phone="inbox"] #inbox { max-height: none; overflow: visible; gap: 12px; }
+    :root[data-phone="inbox"] .card { padding: 12px 14px 10px 16px; border-radius: 6px 16px 16px 16px; }
+    :root[data-phone="inbox"] .card-head { min-height: 44px; gap: 4px; }
+    :root[data-phone="inbox"] .card-where { font-size: 12px; }
+    :root[data-phone="inbox"] .card-head b { font-size: 18px; }
+    :root[data-phone="inbox"] .card-said { font-size: 14.5px; -webkit-line-clamp: 4; }
+    :root[data-phone="inbox"] .card-reply { margin-top: 10px; padding-top: 10px; gap: 8px; align-items: center; }
+    :root[data-phone="inbox"] .card-reply textarea { font-size: 16px; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
+    :root[data-phone="inbox"] .card-reply button { width: 44px; height: 44px; font-size: 18px; }
+    :root[data-phone="inbox"] .ask-opt { min-height: 44px; justify-content: center; font-size: 14px; }
+    :root[data-phone="inbox"] .ask-text { font-size: 15px; }
+    :root[data-phone="inbox"] #inbox-more button, :root[data-phone="inbox"] #full button { min-height: 44px; font-size: 14px; }
+    :root[data-phone="inbox"] #inbox .calm { font-size: 14.5px; padding: 14px; }
+    :root[data-phone="inbox"] .today { display: block; flex: none; padding: 14px; }
+    .today .gallery { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 8px; }
+    .today .out.pic { min-width: 0; }
+    .today .out.pic > * { max-width: 100%; min-width: 0; }
+    .today .out.pic small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .today .out { min-height: 52px; font-size: 14px; }
+    .today .out.pic { min-height: 0; }
+    .today .out-main small { font-size: 12px; }
+    .today-files { margin: 8px 2px 0; font-size: 13px; color: var(--muted); }
+    .today .muted { margin: 0; font-size: 14px; }
+    :root[data-phone="inbox"] .mini-office { display: block; flex: none; padding: 6px; }
+    .mini-slot { position: relative; height: 230px; border-radius: 10px; overflow: hidden; background: var(--scene); }
+    .mini-open { position: absolute; inset: 0; z-index: 6; display: flex; align-items: flex-end; justify-content: flex-end; padding: 10px; border-radius: 10px; }
+    .mini-open span { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 999px; background: color-mix(in srgb, var(--paper) 92%, transparent); box-shadow: 0 4px 14px rgba(40, 30, 20, 0.18); font-size: 14px; font-weight: 600; }
+    .mini-open span::after { content: "⤢"; margin-left: 8px; }
+    .mini-slot .bubbles, .mini-slot .labels, .mini-slot .bubble { display: none; }
+    :root[data-phone="inbox"] #side, :root[data-phone="inbox"] #library { display: none; }
+
+    /* Office: full screen between the bars. */
+    :root[data-phone="office"] .left, :root[data-phone="office"] #side { display: none; }
+    /* Projects: the directory (or a clipboard) fills the screen. */
+    :root[data-phone="projects"] .left { display: none; }
+    :root[data-phone="projects"] #stage { visibility: hidden; }
+    :root[data-phone="projects"] #side { top: var(--phone-top); bottom: var(--phone-bottom); left: calc(env(safe-area-inset-left) + 8px); right: calc(env(safe-area-inset-right) + 8px); width: auto; max-height: none; height: auto; }
+    :root[data-phone="projects"] #side.talking { height: auto; }
+    :root[data-phone="projects"] .entry, :root[data-phone="projects"] .agent-row, :root[data-phone="projects"] .member, :root[data-phone="projects"] .tab, :root[data-phone="projects"] .crumbs button { min-height: 44px; }
+    :root[data-phone="projects"] .tx-compose textarea { font-size: 16px; min-height: 44px; }
+    :root[data-phone="projects"] .tx-compose button { min-height: 44px; }
+    :root[data-phone] #library { top: var(--phone-top); bottom: var(--phone-bottom); }
+    :root[data-phone] .settings { top: calc(var(--phone-top) - 4px); right: 10px; left: 10px; width: auto; }
+    :root[data-phone] .set-row { min-height: 44px; }
+    :root[data-phone] .scene-list { bottom: calc(var(--phone-bottom) + 8px); }
+  }
+
   /* ===== Accessibility (E4): WCAG 2.1 AA. Text colors that hold 4.5:1 on
      the paper in light and dark (the bright tokens stay for marks and the
      scene), ink for text on the clay accent, a visible focus ring on
@@ -647,6 +725,17 @@
         <div id="inbox-more"></div>
         <ul id="full" aria-label="Context windows nearly full"></ul>
       </section>
+      <!-- Phone check-in (phone.js): what was made today, and a small live
+           office that opens full screen. Shown only on a phone's Inbox. -->
+      <section class="today paper" aria-labelledby="today-title">
+        <p class="eyebrow" id="today-title">Made today</p>
+        <div id="today-list"></div>
+      </section>
+      <section class="mini-office paper" aria-label="The office, live">
+        <div class="mini-slot" id="mini-slot">
+          <button type="button" id="mini-open" class="mini-open"><span>Open the office</span></button>
+        </div>
+      </section>
       <section class="tape paper" aria-label="Activity">
         <div class="tape-head">
           <p class="eyebrow">Activity</p>
@@ -666,6 +755,11 @@
       <p id="scene-list-empty">No threads are running right now.</p>
     </section>
     <p id="announce" class="sr-only" role="status" aria-live="polite"></p>
+    <nav class="phone-tabs paper" aria-label="Views">
+      <button type="button" data-phone-tab="inbox" aria-label="Inbox"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5h16v11H4z M4 7l8 6 8-6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg><span>Inbox</span><i class="count" id="phone-inbox-count"></i></button>
+      <button type="button" data-phone-tab="office"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 11 12 4.5l8.5 6.5M6 9.5V19h12V9.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="14.5" r="2.2" fill="currentColor"/></svg><span>Office</span></button>
+      <button type="button" data-phone-tab="projects"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h6l2 2h8v10H4z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg><span>Projects</span></button>
+    </nav>
     <span class="hint paper"><kbd>j</kbd> <kbd>k</kbd> move between threads and agents &middot; <kbd>r</kbd> reply &middot; <kbd>1</kbd>–<kbd>4</kbd> tabs &middot; <kbd>Esc</kbd> back &middot; drag to look around</span>
   </main>
 </div>

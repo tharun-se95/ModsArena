@@ -13,6 +13,7 @@ import * as transcript from './transcript.js'
 import * as settings from './settings.js'
 import * as a11y from './a11y.js'
 import * as motion from './motion.js'
+import * as phone from './phone.js'
 import * as power from './power.js'
 
 const HISTORY_REFRESH_MS = 60000
@@ -37,6 +38,8 @@ function pick(id) {
   selected = n && (n.kind === 'session' || n.kind === 'agent') ? id : null
   table.setSelected(selected)
   if (selected) table.focusOn(selected)
+  // On a phone, a thread you pick opens on the Projects view.
+  if (selected && phone.isPhone()) phone.show('projects')
   refreshPanels()
 }
 
@@ -47,7 +50,9 @@ const stageEl = document.getElementById('stage')
 function measureInsets() {
   const W = stageEl.clientWidth, H = stageEl.clientHeight
   const insets = { left: 0, right: 0, top: 0, bottom: 0 }
-  for (const el of document.querySelectorAll('.hud.left > *, #side, .topbar')) {
+  // The phone's little office in the Inbox has nothing over it.
+  if (phone.isMini()) return table.setInsets(insets)
+  for (const el of document.querySelectorAll('.hud.left > *, #side, .topbar, .phone-tabs')) {
     const r = el.getBoundingClientRect()
     if (!r.width || !r.height || getComputedStyle(el).display === 'none') continue
     if (r.height > H * 0.5 && r.width < W * 0.5) {
@@ -146,6 +151,7 @@ const answer = {
 function refreshPanels() {
   if (selected && !model.nodes.has(selected)) selected = null
   const now = running()
+  phone.render()
   panels.render({ running: now, selected, pick, hover: table.setHover, answer })
   a11y.render({ running: now, pick })
 }
@@ -161,6 +167,8 @@ let lastFrame = -Infinity
 function frame(t) {
   rafId = requestAnimationFrame(frame)
   if (!power.due(t, lastFrame, power.budget().fps)) return
+  // Nothing to draw while the phone shows Projects over the office.
+  if (!phone.sceneShown()) return
   lastFrame = t
   const t0 = frameCost && performance.now()
   model.sweep(Date.now())
@@ -247,6 +255,7 @@ if (!isDemo) {
   fetch('/healthz').then(r => r.json()).then(h => { if (h.demo) transcript.setDemo(true) }).catch(() => {})
 }
 
+phone.mount({ changed: () => { measureInsets(); refreshPanels() } })
 await loadHistory()
 setInterval(loadHistory, HISTORY_REFRESH_MS)
 if (isDemo) playDemo()
