@@ -65,7 +65,7 @@ export function askCard(ask, { answerable, compact = false } = {}) {
     }).join('')
     // Several questions, or several picks: say when you're done.
     const needsSend = qs.length > 1 || qs.some(q => q.multiSelect)
-    if (answerable) foot = `<div class="ask-own">${note(qs.length > 1 ? 'Or say it in your own words…' : 'Or type your own answer…')}${needsSend ? `<button type="button" class="ask-send" ${attrs('send', '')}>Send</button>` : ''}</div>`
+    if (answerable) foot = `<div class="ask-own">${note(needsSend ? 'Or your own words…' : 'Or type your own answer…')}${needsSend ? `<button type="button" class="ask-send" ${attrs('send', '')}>Send</button>` : ''}</div>`
   } else if (ask.type === 'permission') {
     body = `<p class="ask-text"><code>${escapeHtml(toolName(ask.tool))}</code> ${escapeHtml(ask.summary ?? '')}</p>
       <div class="ask-opts row">${say('Allow', 'rec')}${say('Deny', 'no')}</div>`
@@ -137,8 +137,10 @@ export function outputCard(o, { withThread = false } = {}) {
   const [kind, icon] = KIND[o.type] ?? ['Output', '•']
   const thread = withThread ? nodes.get(sid(o.session)) : null
   const where = [thread?.label, o.agent ? nodes.get(`a:${o.session}:${o.agent}`)?.label : ''].filter(Boolean).join(' · ')
+  // Every output can be handed to a critter: dragged there, or H.
+  const pass = `draggable="true" data-handoff="output|${escapeHtml(o.session)}|${escapeHtml(o.id)}"`
   if (o.type === 'image') {
-    return `<button type="button" class="out pic" data-zoom="${escapeHtml(o.session)}|${escapeHtml(o.id)}" title="${escapeHtml(o.title)}">
+    return `<button type="button" class="out pic" ${pass} data-zoom="${escapeHtml(o.session)}|${escapeHtml(o.id)}" title="${escapeHtml(o.title)}">
       <img alt="${escapeHtml(o.title)}" src="${escapeHtml(srcOf(o))}" loading="lazy">
       <span>${escapeHtml(o.title)}</span>${where ? `<small>${escapeHtml(where)}</small>` : ''}</button>`
   }
@@ -146,7 +148,7 @@ export function outputCard(o, { withThread = false } = {}) {
   const sub = [o.type === 'file' ? o.path : o.url ? hostOf(o.url) : '', where].filter(Boolean).join(' · ')
   const tag = o.url ? 'a' : o.type === 'plan' ? 'button' : 'div'
   const attrs = o.url ? `href="${escapeHtml(o.url)}" target="_blank" rel="noopener"` : o.type === 'plan' ? `type="button" data-zoom="${escapeHtml(o.session)}|${escapeHtml(o.id)}"` : ''
-  return `<${tag} class="out ${o.type}" ${attrs}>
+  return `<${tag} class="out ${o.type}" ${attrs} ${pass}${tag === 'div' ? ' tabindex="0"' : ''} title="${escapeHtml(o.title)}. Drag it onto a critter (or press H) to hand it over">
     <i class="out-icon">${icon}</i>
     <span class="out-main"><b>${escapeHtml(o.title)}</b><small>${escapeHtml(kind)}${o.meta?.state ? ` · ${escapeHtml(o.meta.state)}` : ''}${sub ? ` · ${escapeHtml(sub)}` : ''}</small></span>
     ${stats || `<time>${ago(o.t)}</time>`}

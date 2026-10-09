@@ -10,6 +10,7 @@
 import { nodes, sid, outputs } from './model.js'
 import { activity, escapeHtml, ago } from './words.js'
 import { outputCard } from './assets.js'
+import * as mentions from './mentions.js'
 
 const POLL_MS = 1500
 const KEEP = 600
@@ -173,6 +174,16 @@ async function send(text) {
   const pending = { text: text.trim(), status: 'Sending…' }
   view.pending.push(pending)
   draw()
+  // @name: to that agent of the thread instead (mentions.js). It answers in
+  // its own conversation, so the note here just says where it went.
+  const to = n.kind === 'session' ? mentions.resolve(n, text) : { node: n }
+  if (to.node !== n) {
+    const result = await sendTo(to.node, to.text)
+    pending.ok = result.ok
+    pending.status = result.ok ? `Sent to ${to.node.label}. Its answer shows in its own conversation.` : result.status
+    draw()
+    return
+  }
   if (demo) {
     // The demo has no bridge to announce it: tell the page ourselves.
     document.dispatchEvent(new CustomEvent('office:event', { detail: { kind: 'chat.sent', t: Date.now(), ...view.target, text: pending.text } }))
@@ -281,7 +292,7 @@ function composer(n) {
     return { placeholder: `Message ${n.label}…`, hint: 'It has finished: a message resumes it to answer, which uses tokens.' }
   }
   if (n.kind === 'agent') return { placeholder: `Message ${n.label}…`, hint: 'Goes straight to this subagent while it works.' }
-  return { placeholder: 'Message this session…', hint: 'Arrives as its next prompt, marked as from Agent Office. Tool approvals still happen in Claude Code.' }
+  return { placeholder: 'Message this session… (@ to pick an agent)', hint: 'Arrives as its next prompt, marked as from Agent Office. Tool approvals still happen in Claude Code.' }
 }
 
 // Put the transcript for node `n` into `root` (the tab's holder), or keep
@@ -310,6 +321,7 @@ export function attach(root, n) {
   })
   const form = root.querySelector('form')
   const field = form?.querySelector('textarea')
+  if (field && n.kind === 'session') mentions.attach(field, () => nodes.get(n.id))
   form?.addEventListener('submit', e => {
     e.preventDefault()
     const text = field.value

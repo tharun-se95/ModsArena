@@ -15,6 +15,7 @@ import { pct, level, tintOf, sessionTint, roomKey } from './table.js'
 import * as transcript from './transcript.js'
 import * as assets from './assets.js'
 import * as actions from './actions.js'
+import * as mentions from './mentions.js'
 
 const $ = sel => document.querySelector(sel)
 const k = n => (n === undefined ? '—' : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : `${Math.round(n / 1000)}k`)
@@ -108,8 +109,10 @@ function cardInfo(n, running) {
     ? (n.lastReason === 'aborted' ? 'You stopped its last turn.' : n.lastReason === 'refusal' ? 'Its last turn ended on a refusal.' : 'Its last turn ended on an error.')
     : state === 'working' ? 'Back at work.'
       : said ? quote(said) : n.turns ? 'Done with your last request.' : 'Ready for its first prompt.'
+  // A letter with an answer in it can be passed on: dragged onto a critter, or H.
+  const letter = said && state !== 'working' ? ` draggable="true" data-handoff="letter|${escapeHtml(n.id)}"` : ''
   return `
-    <button class="card-head" data-pick="${escapeHtml(n.id)}" data-hover="${escapeHtml(n.id)}" title="Open the conversation">
+    <button class="card-head" data-pick="${escapeHtml(n.id)}" data-hover="${escapeHtml(n.id)}"${letter} title="${letter ? 'Open the conversation. Drag it onto a critter (or press H) to pass it on' : 'Open the conversation'}">
       <span class="card-where"><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(n.projectName ?? 'Elsewhere')}${n.thread ? '<span class="badge">thread</span>' : ''}<time>${ago(n.answeredAt ?? n.startedAt)}</time></span>
       <b>${escapeHtml(title(n))}</b>
       ${assets.progress(n)}
@@ -127,13 +130,14 @@ function cardElement(n) {
   li.innerHTML = `
     <div class="card-info"></div>
     <form class="card-reply">
-      <textarea rows="1" aria-label="Reply to ${escapeHtml(title(n))}" placeholder="Reply…"></textarea>
+      <textarea rows="1" aria-label="Reply to ${escapeHtml(title(n))}" placeholder="Reply… (@ to pick an agent)"></textarea>
       <button type="submit" aria-label="Send">↵</button>
       <p class="card-status" hidden></p>
     </form>`
   const form = li.querySelector('form')
   const field = form.querySelector('textarea')
   field.value = drafts.get(n.id) ?? ''
+  mentions.attach(field, () => nodes.get(n.id))
   field.addEventListener('input', () => drafts.set(n.id, field.value))
   field.addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -150,7 +154,10 @@ function cardElement(n) {
     drafts.delete(n.id)
     sending.set(n.id, { status: 'Sending…' })
     showStatus(li, n.id)
-    const result = await transcript.sendTo(node, text)
+    // @name sends it to that agent of the thread instead.
+    const to = mentions.resolve(node, text)
+    const result = await transcript.sendTo(to.node, to.text)
+    if (result.ok && to.to) result.status = `Sent to ${to.node.label}`
     sending.set(n.id, result)
     showStatus(li, n.id)
     if (!result.ok) {

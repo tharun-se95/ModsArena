@@ -1375,5 +1375,14 @@ function bindPointer() {
   })
   renderer.domElement.addEventListener('pointerleave', () => { hoverPick = null; hovered = null })
 }
+// The critter under a point on the page (a drop, say), or null.
+const dropRay = new THREE.Raycaster()
+export function critterAt(clientX, clientY) {
+  if (!renderer) return null
+  const r = renderer.domElement.getBoundingClientRect()
+  dropRay.setFromCamera(new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1), camera)
+  return dropRay.intersectObjects(scene.children, true).find(h => h.object.userData.pick && h.object.visible)?.object.userData.pick?.id ?? null
+}
+
 // ?debug reaches these through window.cluster.table.debug.
 export const debug = { get renderer() { return renderer }, get size() { return size }, sessionViews, agentViews, rooms, get camera() { return camera }, get stage() { return stage }, get controls() { return controls }, get coffee() { return coffee }, greeted }

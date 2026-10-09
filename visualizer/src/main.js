@@ -12,6 +12,7 @@ import { unlock, isMuted, setMuted } from './sound.js'
 import * as transcript from './transcript.js'
 import * as answering from './answer.js'
 import * as actions from './actions.js'
+import * as handoff from './handoff.js'
 
 const HISTORY_REFRESH_MS = 60000
 const PANEL_REFRESH_MS = 700
@@ -160,6 +161,7 @@ actions.setStopper(async n => {
   return res.ok ? { ok: true } : { ok: false, status: got.error ?? `the bridge answered ${res.status}` }
 })
 actions.listen()
+handoff.listen({ stage: stageEl, critterAt: table.critterAt, setHover: table.setHover })
 const answer = { can: answering.canAnswer }
 
 function refreshPanels() {
