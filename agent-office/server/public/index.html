@@ -86,7 +86,7 @@
   .hud { position: absolute; z-index: 5; }
   .paper { background: color-mix(in srgb, var(--paper) 90%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid color-mix(in srgb, var(--line) 80%, transparent); border-radius: 14px; box-shadow: 0 10px 30px rgba(40, 30, 20, 0.12), 0 1px 2px rgba(40, 30, 20, 0.08); }
 
-  .topbar { top: 12px; left: 16px; right: 16px; display: flex; align-items: center; gap: 12px; pointer-events: none; }
+  .topbar { top: 12px; left: 16px; right: 16px; display: flex; align-items: center; gap: 12px; pointer-events: none; z-index: 8; }
   .topbar > * { pointer-events: auto; }
   .brand { display: inline-flex; align-items: center; gap: 10px; padding: 6px 14px 6px 10px; border-radius: 999px; }
   .mark { width: 20px; height: 20px; }
@@ -456,6 +456,14 @@
   .switch small { display: block; color: var(--muted); font-size: 11.5px; line-height: 1.4; }
   @media (prefers-reduced-motion: reduce) { .switch input, .switch input::after, .tx.steps > summary::after { transition: none; } }
   @media (max-width: 900px) { .gear span { display: none; } .settings-pop { right: -40px; } }
+  /* The secondary controls live in the Settings menu, one per row, so the
+     top bar stays one line down to tablet widths. */
+  .settings-pop .menu-row { display: flex; width: 100%; gap: 10px; padding: 7px 8px; border-radius: 8px; font-size: 13px; color: var(--ink); text-align: left; }
+  .settings-pop .menu-row:hover { background: color-mix(in srgb, var(--line) 50%, transparent); }
+  .settings-pop .menu-row svg { color: var(--muted); }
+  .controls .settings-pop .menu-row > span { display: inline; }
+  .settings-pop label.menu-row input { width: 16px; height: 16px; margin: 0; }
+  .menu-sep { border: 0; border-top: 1px solid var(--line); margin: 6px 0 10px; }
 
   /* Friendly names: a project's icon (click it to rename the project or
      pick another), and context as energy, draining as the window fills. */
@@ -1109,23 +1117,6 @@
           <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="3" height="14" rx="1" fill="currentColor"/><rect x="7.5" y="5" width="3" height="12" rx="1" fill="currentColor" opacity=".7"/><rect x="12" y="4" width="3" height="13" rx="1" transform="rotate(-12 13.5 10.5)" fill="currentColor" opacity=".85"/></svg>
           <span>Library</span><span class="count" id="library-count"></span>
         </button>
-        <button class="libbtn" id="snapshot" type="button" title="Save a picture of your office">
-          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.2 4.5h5.6l1.2 1.8h2a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5H4a1.5 1.5 0 0 1-1.5-1.5v-7A1.5 1.5 0 0 1 4 6.3h2z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="10" cy="11" r="2.8" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
-          <span aria-live="polite">Snapshot</span>
-        </button>
-        <button class="sound" id="sound" type="button" aria-pressed="true" title="Office sounds">
-          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8h3l4-3.5v11L6 12H3z" fill="currentColor"/><path class="waves" d="M13 7.5a3.5 3.5 0 0 1 0 5M15 5.5a6.4 6.4 0 0 1 0 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path class="cross" d="M13.5 8l4 4m0-4l-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-          <span>Sound on</span>
-        </button>
-        <button class="tourbtn" id="tour-open" type="button" title="Take the tour: a one-minute look around the office">
-          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7.9 8a2.2 2.2 0 1 1 3 2.05c-.6.25-.9.7-.9 1.3v.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="14.4" r=".95" fill="currentColor"/></svg>
-          <span>Tour</span>
-        </button>
-        <button class="alertbtn" id="alerts-open" type="button" aria-expanded="false" aria-controls="alerts" title="Alerts">
-          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.2a4.6 4.6 0 0 0-4.6 4.6v2.6L4 13.2h12l-1.4-2.8V7.8A4.6 4.6 0 0 0 10 3.2z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8.2 15.4a1.9 1.9 0 0 0 3.6 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle class="on-dot" cx="15" cy="4.6" r="2.4" fill="var(--ok)"/></svg>
-          <span>Alerts</span>
-        </button>
-        <label class="toggle" title="Show past sessions"><input type="checkbox" id="show-past" checked> <span>Past sessions</span></label>
         <button class="helpbtn" id="help-open" type="button" aria-expanded="false" aria-keyshortcuts="?" aria-label="What am I looking at?" title="What am I looking at? (?)"><span aria-hidden="true">?</span></button>
         <span class="settings">
           <button class="gear" id="settings-open" type="button" aria-expanded="false" aria-controls="settings" title="Settings">
@@ -1133,6 +1124,24 @@
             <span>Settings</span>
           </button>
           <div class="settings-pop paper" id="settings" role="group" aria-label="Settings" hidden>
+            <button class="libbtn menu-row" id="snapshot" type="button" title="Save a picture of your office">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.2 4.5h5.6l1.2 1.8h2a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5H4a1.5 1.5 0 0 1-1.5-1.5v-7A1.5 1.5 0 0 1 4 6.3h2z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="10" cy="11" r="2.8" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+              <span aria-live="polite">Snapshot</span>
+            </button>
+            <button class="alertbtn menu-row" id="alerts-open" type="button" aria-expanded="false" aria-controls="alerts" title="Alerts">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.2a4.6 4.6 0 0 0-4.6 4.6v2.6L4 13.2h12l-1.4-2.8V7.8A4.6 4.6 0 0 0 10 3.2z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8.2 15.4a1.9 1.9 0 0 0 3.6 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle class="on-dot" cx="15" cy="4.6" r="2.4" fill="var(--ok)"/></svg>
+              <span>Alerts</span>
+            </button>
+            <button class="sound menu-row" id="sound" type="button" aria-pressed="true" title="Office sounds">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8h3l4-3.5v11L6 12H3z" fill="currentColor"/><path class="waves" d="M13 7.5a3.5 3.5 0 0 1 0 5M15 5.5a6.4 6.4 0 0 1 0 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path class="cross" d="M13.5 8l4 4m0-4l-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+              <span>Sound on</span>
+            </button>
+            <label class="toggle menu-row" title="Show past sessions"><input type="checkbox" id="show-past" checked> <span>Past sessions</span></label>
+            <button class="tourbtn menu-row" id="tour-open" type="button" title="Take the tour: a one-minute look around the office">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7.9 8a2.2 2.2 0 1 1 3 2.05c-.6.25-.9.7-.9 1.3v.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="14.4" r=".95" fill="currentColor"/></svg>
+              <span>Tour</span>
+            </button>
+            <hr class="menu-sep">
             <label class="switch"><input type="checkbox" role="switch" id="dev-view"><span><b>Developer view</b><small>Show the raw commands, file paths and exact numbers instead of plain words.</small></span></label>
           </div>
         </span>

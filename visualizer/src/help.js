@@ -20,7 +20,7 @@ const NOTES = [
   { at: '.board', title: 'Waiting on you', text: 'Threads whose next move is yours. Answer or reply right here.' },
   { at: '.tape', title: 'Activity', text: 'What got finished, made and asked. Small bumps fold into one quiet line.' },
   { at: '#side', title: 'Your projects', text: 'Every thread and its helpers. Click one to read the conversation and see what it made.' },
-  { at: '#settings-open', title: 'Settings', text: 'Turn on Developer view to see the raw commands and numbers.' },
+  { at: '#settings-open', title: 'Settings', text: 'Sound, alerts, past sessions, a snapshot to share, the tour, and Developer view for the raw commands and numbers.' },
 ]
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])

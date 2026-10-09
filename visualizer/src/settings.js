@@ -1,5 +1,7 @@
-// The top bar's settings: a small menu under the gear. For now it holds
-// Developer view, which brings back the raw tool lines everywhere.
+// The top bar's settings: a small menu under the gear with the office's
+// secondary controls (snapshot, alerts, sound, past sessions, the tour; each
+// wired up by its own module) and Developer view, which brings back the raw
+// tool lines everywhere.
 
 import { devView, setDevView } from './prefs.js'
 
@@ -18,6 +20,11 @@ export function mountSettings(onChange) {
   }
   mark()
   open.addEventListener('click', () => show(pop.hidden))
+  // What opens something of its own (the alerts panel, the tour) puts the
+  // menu away; the toggles and Snapshot (it says "Saved") leave it open.
+  pop.addEventListener('click', e => {
+    if (e.target.closest('#alerts-open, #tour-open')) show(false)
+  })
   dev.addEventListener('change', () => {
     setDevView(dev.checked)
     mark()
