@@ -13,6 +13,7 @@ import * as transcript from './transcript.js'
 import * as welcome from './welcome.js'
 import * as tour from './tour.js'
 import * as notify from './notify.js'
+import * as spend from './spend.js'
 
 const HISTORY_REFRESH_MS = 60000
 const PANEL_REFRESH_MS = 700
@@ -138,6 +139,8 @@ const answer = {
 
 function refreshPanels() {
   if (selected && !model.nodes.has(selected)) selected = null
+  // Spend first: the directory shows each project's.
+  spend.update(history)
   panels.render({ running: running(), selected, pick, hover: table.setHover, answer })
   notify.update(running())
   welcome.showEmpty(heard && ![...model.nodes.values()].some(n => n.kind === 'session'), { hasPast: history.length > 0 })
@@ -220,6 +223,8 @@ if (!isDemo) {
 
 // Alerts: the tab's count and, if you turn them on, desktop alerts.
 notify.mount({ pick })
+// Spend today, in plain words, with an optional daily limit.
+spend.mount()
 // The guided tour: on its own the first time, and from the top bar.
 tour.mount({ pick, ingest, table })
 

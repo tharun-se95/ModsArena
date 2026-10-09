@@ -14,6 +14,7 @@ import { moments, activity, escapeHtml, quote, ago } from './words.js'
 import { pct, level, tintOf, sessionTint, roomKey } from './table.js'
 import * as transcript from './transcript.js'
 import * as assets from './assets.js'
+import { projectNote } from './spend.js'
 
 const $ = sel => document.querySelector(sel)
 const k = n => (n === undefined ? '—' : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : `${Math.round(n / 1000)}k`)
@@ -295,7 +296,7 @@ function directory(running, selected) {
     <h2 class="sideh">Projects <small>${live.length ? `${working} working · ${live.length - working} with you` : 'none live'}</small></h2>
     ${projects.map(p => `
       <section class="project">
-        <p class="room"><i class="room-${roomKey(p.name)}"></i>${escapeHtml(p.name)}<small>${p.live.length ? plural(p.live.length, 'thread') : 'earlier'}</small></p>
+        <p class="room"><i class="room-${roomKey(p.name)}"></i>${escapeHtml(p.name)}<small>${p.live.length ? plural(p.live.length, 'thread') : 'earlier'}</small></p>${projectNote(p.name)}
         ${p.live.map(n => threadRow(n, running, selected)).join('')}
         ${p.past.length ? `${p.live.length ? '<p class="earlier">Earlier</p>' : ''}${p.past.map(n => threadRow(n, running, selected)).join('')}` : ''}
       </section>`).join('') || '<p class="muted">No sessions yet. Start Claude Code anywhere and it appears here.</p>'}`

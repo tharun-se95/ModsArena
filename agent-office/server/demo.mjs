@@ -120,19 +120,21 @@ export function startDemo(publish) {
     const emit = ev => publish([{ t: Date.now(), session, ...ev }])
     let messages = rand(8000, 40000)
     let turns = 0
-    let cost = 0
+    let cost = rand(40, 180) / 100 // it has been at work a while today
 
     const fixedTokens = FIXED.reduce((n, [, t]) => n + t, 0)
     const used = () => fixedTokens + messages
 
     function measure() {
       const tokens = used()
-      cost += tokens / 1e6 * 3 * 0.15 + 0.01
+      // About what a busy session costs: a few dollars an hour, so the
+      // office's "About $1.20 today" reads like a real day.
+      cost += tokens / 1e6 * 0.05 + 0.001
       emit({
         kind: 'context.measure',
         context: { tokens, window: WINDOW, percent: Math.round((tokens / WINDOW) * 100) },
         costUsd: Number(cost.toFixed(4)),
-        rateLimits: [{ kind: 'five_hour', percentUsed: Math.min(99, Math.round(cost * 4)) }],
+        rateLimits: [{ kind: 'five_hour', percentUsed: Math.min(99, Math.round(cost * 40)) }],
       })
       emit({ kind: 'agent.context', tokens })
     }
