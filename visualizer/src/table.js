@@ -27,6 +27,7 @@ import { sound } from './sound.js'
 import { who } from './names.js'
 import * as milestones from './milestones.js'
 import { toast } from './toast.js'
+import { cropOf } from './snapshot.js'
 
 const ROW_DEPTH = 160 // one row: helpers, desk, the session, its label
 const BACK_SPACE = 44 // along the back wall, for the shelf, window and plants
@@ -1627,5 +1628,38 @@ function bindPointer() {
   })
   renderer.domElement.addEventListener('pointerleave', () => { hoverPick = null; hovered = null })
 }
+// ---------------------------------------------------------------------------
+// A snapshot: the office as drawn right now, cropped to what the panels
+// leave free, with the room signs and names where the page shows them. The
+// canvas doesn't keep its picture once it's on screen (keeping it,
+// preserveDrawingBuffer, would slow every frame), so this draws a frame and
+// copies it in the same task, before the browser clears it.
+
+export function capture() {
+  renderer.render(scene, camera)
+  const src = renderer.domElement
+  const ratio = renderer.getPixelRatio()
+  const crop = cropOf(src.width, src.height, insets, ratio)
+  const shot = document.createElement('canvas')
+  shot.width = crop.w
+  shot.height = crop.h
+  shot.getContext('2d').drawImage(src, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h)
+  const tags = []
+  const place = (obj, text, kind) => {
+    if (!text || !obj.visible) return
+    const p = obj.getWorldPosition(new THREE.Vector3()).project(camera)
+    const x = ((p.x + 1) / 2) * src.width - crop.x
+    const y = ((1 - p.y) / 2) * src.height - crop.y
+    if (p.z > 1 || x < 0 || y < 0 || x > crop.w || y > crop.h) return
+    tags.push({ x, y, text, kind })
+  }
+  for (const [id, t] of rooms) place(t.label.obj, nodes.get(id)?.label, 'room')
+  for (const s of sessionViews.values()) {
+    const n = nodes.get(s.id)
+    if (n) place(s.label.obj, `${who(n).name}${s.away ? ' · home' : ''}`, 'name')
+  }
+  return { shot, tags, ratio }
+}
+
 // ?debug reaches these through window.cluster.table.debug.
 export const debug = { setHour(h) { hourOverride = h; daylightAt = -1 }, get renderer() { return renderer }, get size() { return size }, sessionViews, agentViews, rooms, get camera() { return camera }, get stage() { return stage }, get controls() { return controls }, get coffee() { return coffee }, greeted }

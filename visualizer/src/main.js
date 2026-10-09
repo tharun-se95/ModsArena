@@ -10,6 +10,7 @@ import * as table from './table.js'
 import * as panels from './panels.js'
 import { unlock, isMuted, setMuted } from './sound.js'
 import * as transcript from './transcript.js'
+import * as snapshot from './snapshot.js'
 
 const HISTORY_REFRESH_MS = 60000
 const PANEL_REFRESH_MS = 700
@@ -100,6 +101,20 @@ function showSound() {
 soundButton.addEventListener('click', () => { setMuted(!isMuted()); showSound() })
 showSound()
 for (const type of ['pointerdown', 'keydown']) addEventListener(type, unlock, { once: true })
+
+// Snapshot: a framed picture of the office, saved to your computer.
+const snapButton = document.getElementById('snapshot')
+snapButton?.addEventListener('click', async () => {
+  const css = getComputedStyle(document.documentElement)
+  const colors = Object.fromEntries(['paper', 'scene', 'ink', 'muted', 'accent', 'line'].map(k => [k, css.getPropertyValue(`--${k}`).trim()]))
+  const live = [...model.nodes.values()].filter(n => n.kind === 'session' && !n.past && n.status !== 'done').length
+  const agents = [...model.nodes.values()].filter(n => n.kind === 'agent' && n.status !== 'done').length
+  const detail = [live && `${live} thread${live === 1 ? '' : 's'}`, agents && `${agents} agent${agents === 1 ? '' : 's'} at work`].filter(Boolean).join(' · ')
+  const saved = await snapshot.save(snapshot.frame({ ...table.capture(), colors, detail }))
+  const label = snapButton.querySelector('span')
+  label.textContent = saved ? 'Saved' : 'Couldn’t save'
+  setTimeout(() => { label.textContent = 'Snapshot' }, 2200)
+})
 
 const pastToggle = document.getElementById('show-past')
 pastToggle.addEventListener('change', () => {
