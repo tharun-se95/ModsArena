@@ -8,11 +8,12 @@ import * as model from './model.js'
 import * as words from './words.js'
 import * as table from './table.js'
 import * as panels from './panels.js'
-import { unlock, isMuted, setMuted } from './sound.js'
+import { unlock, isMuted, setMuted, mountControls as mountSound } from './sound.js'
 import * as transcript from './transcript.js'
 import * as recap from './recap.js'
 import * as desk from './desk.js'
 import * as settings from './settings.js'
+import { mountClipSize } from './clipsize.js'
 import { mountHelp } from './help.js'
 import * as answering from './answer.js'
 import * as actions from './actions.js'
@@ -27,6 +28,8 @@ import * as motion from './motion.js'
 import * as phone from './phone.js'
 import * as power from './power.js'
 import * as updates from './updates.js'
+import * as themes from './themes.js'
+import './critter-color.js'
 
 const HISTORY_REFRESH_MS = 60000
 const PANEL_REFRESH_MS = 700
@@ -129,14 +132,16 @@ function showSound() {
 }
 soundButton.addEventListener('click', () => { setMuted(!isMuted()); showSound() })
 showSound()
+mountSound()
 for (const type of ['pointerdown', 'keydown']) addEventListener(type, unlock, { once: true })
 
 // Developer view: plain words everywhere, or the raw tool lines.
 settings.mountSettings(() => { transcript.redraw(); refreshPanels() })
 // "What am I looking at?": the ? button and the ? key.
 mountHelp()
-// A project renamed or given a new icon.
+// A project renamed or given a new icon; a room or critter restyled.
 document.addEventListener('office:names', () => refreshPanels())
+document.addEventListener('office:looks', () => refreshPanels())
 
 // Snapshot: a framed picture of the office, saved to your computer.
 const snapButton = document.getElementById('snapshot')
@@ -155,11 +160,22 @@ snapButton?.addEventListener('click', async () => {
 // The clipboard's tabs answer the arrow keys.
 addEventListener('keydown', a11y.tabKeys, true)
 
+// Make it yours: the office's look (themes.js); the scene repaints itself.
+settings.add({
+  id: 'office-theme', type: 'choice', label: 'Office theme',
+  hint: () => themes.THEMES[themes.theme()].hint,
+  options: themes.IDS.map(id => ({ value: id, label: themes.THEMES[id].name, swatch: themes.THEMES[id].look.swatch })),
+  get: themes.theme, set: themes.setTheme,
+})
+
 settings.add({
   id: 'reduce-motion', type: 'toggle', label: 'Reduce motion',
   hint: () => (motion.bySystem() ? 'On because your system asks for less motion' : 'No camera glides, hops, confetti or bobbing'),
   get: motion.reduced, set: motion.setReduced, disabled: motion.bySystem,
 })
+
+// The clipboard: bigger, and resizable (a sheet on narrow screens).
+mountClipSize()
 
 const pastToggle = document.getElementById('show-past')
 pastToggle.addEventListener('change', () => {

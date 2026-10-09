@@ -7,6 +7,20 @@ git tag (`v0.2.1`) with a GitHub Release, and the same version is in
 modsarena (`/plugin` → Marketplaces), a new one arrives on its own;
 otherwise `claude plugin update agent-office@modsarena` fetches it.
 
+## 0.10.0
+
+- **Make it yours.** Pick an office theme in Settings: Cozy (today's look),
+  Studio or Space station. Give each room a wall colour and decor (plants,
+  books, art or lamps) from its sign, and give any critter its own colour
+  from the dot by its thread's name.
+- **A bigger clipboard.** It opens larger, you can drag its edge to resize
+  it (it remembers the size), and on narrow screens it becomes a sheet
+  along the bottom.
+- **Quieter scrollbars** that follow the theme.
+- **Sound you can live with.** A volume slider and quiet hours.
+- **One-line summaries.** Each thread gets a short summary of what it's
+  doing, built from its events, with no extra tokens.
+
 ## 0.9.0
 
 The v1.0 candidate, for review before 1.0.

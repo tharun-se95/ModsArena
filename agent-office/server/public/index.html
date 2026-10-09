@@ -129,6 +129,10 @@
   .entry .dot { margin: 0; }
   .entry .ename { font: 500 13px/1.3 var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .entry .estate { grid-column: 2 / 4; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* One-line summaries (summary.js): what a thread is doing and why. */
+  .entry .esum { grid-column: 2 / 4; font-size: 12px; line-height: 1.35; color: var(--ink); opacity: 0.86; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-wrap: pretty; }
+  .dsum { margin: 6px 0 2px; font-size: 13.5px; line-height: 1.4; color: var(--ink); text-wrap: pretty; }
+  .bubble p.sum { color: var(--ink); margin-top: 3px; }
   .entry.past { opacity: 0.62; }
   .entry .meter { grid-column: 2 / 4; height: 3px; }
   .pct { font: 500 12px var(--mono); }
@@ -464,6 +468,22 @@
   #settings .menu-row > span { display: inline; }
   .settings-pop label.menu-row input { width: 16px; height: 16px; margin: 0; }
   .menu-sep { border: 0; border-top: 1px solid var(--line); margin: 6px 0 10px; }
+  /* Sound settings (sound.js): volume, quiet hours and the one chime they
+     keep, tucked under the Sound button. */
+  .sound-set { margin: 0 0 4px 26px; min-width: 0; padding: 2px 0 6px; font-size: 12.5px; }
+  .sound-set.off { opacity: 0.6; }
+  .sound-set .alerts-times { margin: 2px 0 4px 20px; gap: 4px 10px; flex-wrap: wrap; font-size: 12px; }
+  .sound-set .alerts-times > span { white-space: nowrap; }
+  .sound-set .alerts-times input { padding: 2px 4px; font-size: 11.5px; }
+  .sound-set .alerts-row { font-size: 12.5px; flex-wrap: nowrap; align-items: flex-start; }
+  .sound-set .alerts-row input { margin-top: 2px; }
+  .sound-set [hidden] { display: none; }
+  .sound-sub { padding-left: 22px !important; }
+  .sound-vol { display: flex; align-items: center; gap: 8px; padding: 2px 0 4px; color: var(--muted); }
+  .sound-vol input { flex: 1; min-width: 0; accent-color: var(--accent); margin: 0; }
+  .sound-vol input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+  .sound-vol output { width: 2.4em; text-align: right; font: 12px var(--mono); color: var(--ink); }
+  :root[data-phone] .sound-set .alerts-row, :root[data-phone] .sound-vol { min-height: 40px; }
 
   /* Friendly names: a project's icon (click it to rename the project or
      pick another), and context as energy, draining as the window fills. */
@@ -619,6 +639,44 @@
   .aname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .astate { display: inline-flex; align-items: center; }
   .folded { margin: 0; padding: 2px 8px 4px calc(8px + var(--depth) * 14px + 13px); font-size: 11px; color: var(--muted); }
+
+  /* The clipboard, crab-colored (clipsize.js sizes it): a shell-orange
+     board and clip, sandy paper, dark claw-tip accents. Bigger by default;
+     drag its left edge or corner to resize it. Up to 900px wide it's a
+     sheet along the bottom with a handle on top instead. */
+  :root { --crab-shell: #e0683e; --crab-shell-deep: #b44a27; --crab-sand: #fcf2e1; --crab-sand-line: #ecd8b8; --crab-claw: #2b211c; --crab-claw-ink: #2b211c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --crab-shell: #c85d36; --crab-shell-deep: #8f3c20; --crab-sand: #2a231d; --crab-sand-line: #463a2f; --crab-claw: #1a1310; --crab-claw-ink: #f2d6b6; }
+  }
+  :root[data-theme="dark"] { --crab-shell: #c85d36; --crab-shell-deep: #8f3c20; --crab-sand: #2a231d; --crab-sand-line: #463a2f; --crab-claw: #1a1310; --crab-claw-ink: #f2d6b6; }
+  #side.clipboard { background: var(--crab-sand); border: 6px solid var(--crab-shell); border-top-width: 6px; box-shadow: 0 0 0 1px var(--crab-shell-deep), 0 14px 34px rgba(70, 35, 15, 0.22); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  #side.clipboard::before { background: radial-gradient(circle at 50% 45%, var(--crab-claw) 0 3px, transparent 3.5px), linear-gradient(var(--crab-shell), var(--crab-shell-deep)); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.25); }
+  #side.clipboard .tabs { border-bottom-color: var(--crab-sand-line); }
+  #side.clipboard .tab.on { color: var(--crab-claw-ink); border-bottom-color: var(--crab-claw-ink); }
+  #side.clipboard h3 { color: var(--crab-claw-ink); opacity: 0.78; }
+  @media (min-width: 901px) {
+    #side.clipboard, #side.clipboard.talking { width: var(--clip-w, 416px); height: min(var(--clip-h, 720px), calc(100% - 80px)); }
+  }
+  .clip-grip { position: absolute; z-index: 6; touch-action: none; border-radius: 8px; }
+  .clip-grip[hidden] { display: none; }
+  .clip-grip::after { content: ""; position: absolute; border-radius: 3px; background: var(--crab-claw); opacity: 0.35; transition: opacity 0.15s; }
+  .clip-grip:hover::after, .clip-grip.dragging::after, .clip-grip:focus-visible::after { opacity: 0.8; }
+  .clip-grip:focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: 1px; }
+  .clip-grip.edge { top: 104px; right: calc(16px + var(--clip-w, 416px) - 8px); width: 14px; height: calc(min(var(--clip-h, 720px), 100% - 80px) - 70px); cursor: ew-resize; }
+  .clip-grip.edge::after { left: 5px; top: 50%; width: 4px; height: 44px; margin-top: -22px; }
+  .clip-grip.corner { top: calc(74px + min(var(--clip-h, 720px), 100% - 80px) - 24px); right: calc(16px + var(--clip-w, 416px) - 24px); width: 30px; height: 30px; cursor: nesw-resize; }
+  .clip-grip.corner::after { left: 7px; bottom: 7px; width: 12px; height: 12px; border-radius: 0 0 0 4px; background: none; border-left: 3px solid var(--crab-claw); border-bottom: 3px solid var(--crab-claw); }
+  :root.clip-resizing, :root.clip-resizing * { user-select: none; }
+  :root.clip-resizing .clip-grip.edge, :root.clip-resizing #side { cursor: ew-resize; }
+  @media (max-width: 900px) {
+    :root { --sheet-base: 12px; }
+    #side.clipboard, #side.clipboard.talking { max-height: none; height: var(--sheet-h, 60%); padding-top: 18px; }
+    #side.clipboard::before { display: none; }
+    .clip-grip.sheet { left: 50%; width: 120px; margin-left: -60px; height: 44px; bottom: calc(var(--sheet-base) + var(--sheet-h, 60%) - 26px); cursor: ns-resize; }
+    .clip-grip.sheet::after { left: 50%; top: 50%; width: 64px; height: 8px; margin: -4px 0 0 -32px; border-radius: 4px; opacity: 1; background: linear-gradient(var(--crab-shell), var(--crab-shell-deep)); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); }
+    .clip-grip.sheet:hover::after, .clip-grip.sheet.dragging::after { opacity: 1; filter: brightness(1.1); }
+  }
+  @media (prefers-reduced-motion: reduce) { .clip-grip::after { transition: none; } }
 
   /* The clipboard: where you are, then the conversation, the team, the details. */
   .crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
@@ -1165,6 +1223,10 @@
     :root[data-phone="projects"] #stage { visibility: hidden; }
     :root[data-phone="projects"] #side { top: var(--phone-top); bottom: var(--phone-bottom); left: calc(env(safe-area-inset-left) + 8px); right: calc(env(safe-area-inset-right) + 8px); width: auto; max-height: none; height: auto; }
     :root[data-phone="projects"] #side.talking { height: auto; }
+    /* A clipboard is a sheet over the office, which shows above it. */
+    :root[data-phone] { --sheet-base: var(--phone-bottom); }
+    :root[data-phone="projects"][data-sheet] #stage { visibility: visible; }
+    :root[data-phone="projects"][data-sheet] #side.clipboard { top: auto; height: var(--sheet-h, 60%); }
     :root[data-phone="projects"] .entry, :root[data-phone="projects"] .agent-row, :root[data-phone="projects"] .member, :root[data-phone="projects"] .tab, :root[data-phone="projects"] .crumbs button { min-height: 44px; }
     :root[data-phone="projects"] .tx-compose textarea { font-size: 16px; min-height: 44px; }
     :root[data-phone="projects"] .tx-compose button { min-height: 44px; }
@@ -1224,6 +1286,64 @@
      data-motion="reduce" (motion.js); nothing on the page animates. */
   :root[data-motion="reduce"] *, :root[data-motion="reduce"] *::before, :root[data-motion="reduce"] *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   :root[data-motion="reduce"] .card:hover, :root[data-motion="reduce"] .out.pic:hover { transform: none; }
+  /* ===== Make it yours (D4): three more critter colors (themes.js lists
+     all ten), the office theme picker in Settings, and the swatches in the
+     room editor and the critter color card. The themes themselves set
+     their tokens on <html> from themes.js. ===== */
+  :root { --tangerine: #f0913a; --berry: #c0569a; --slate: #6f849c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --tangerine: #f5a55c; --berry: #d878b4; --slate: #93a7bf; }
+  }
+  :root[data-theme="dark"] { --tangerine: #f5a55c; --berry: #d878b4; --slate: #93a7bf; }
+  .dot.tangerine { background: var(--tangerine); } .dot.berry { background: var(--berry); } .dot.slate { background: var(--slate); }
+  .set-choice { border: 0; margin: 0; padding: 0; min-width: 0; }
+  .set-choice legend { padding: 0; margin-bottom: 6px; }
+  .set-choice legend b { display: block; font-weight: 600; font-size: 13px; }
+  .set-choice legend small { display: block; color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+  .set-opts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .set-opt { position: relative; display: grid; gap: 4px; padding: 5px 5px 4px; border-radius: 9px; border: 1px solid var(--line); cursor: pointer; font-size: 11.5px; line-height: 1.25; text-align: center; }
+  .set-opt input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .set-opt:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+  .set-opt:has(input:checked) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); font-weight: 600; }
+  .set-opt:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .set-opt .swatch { display: flex; height: 22px; border-radius: 6px; overflow: hidden; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 12%, transparent); }
+  .set-opt .swatch i { flex: 1; }
+  .set-opt .swatch i:last-child { flex: 0 0 26%; }
+  :root[data-phone] .set-opt { min-height: 44px; }
+  .pe-label { margin: 10px 0 4px; font-size: 11.5px; color: var(--muted); }
+  .pe-swatches { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pe-swatches button { width: 26px; height: 26px; border-radius: 50%; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 18%, transparent); }
+  .pe-swatches button[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px var(--accent); }
+  .pe-swatches button:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
+  .pe-decor { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
+  .pe-decor button { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 8px; font-size: 12.5px; border: 1px solid var(--line); }
+  .pe-decor button:hover { background: color-mix(in srgb, var(--line) 50%, transparent); }
+  .pe-decor button[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); font-weight: 500; }
+  .pe-decor button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .dot-pick { display: inline-grid; place-items: center; width: 22px; height: 22px; margin: 0 4px 0 -6px; border-radius: 50%; vertical-align: middle; }
+  .dot-pick .dot { margin: 0; }
+  .dot-pick:hover { background: color-mix(in srgb, var(--line) 70%, transparent); }
+  .dot-pick:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+  .critter-edit .pe-swatches { margin-bottom: 10px; }
+  /* Text on the accent follows the theme (a bright accent takes dark ink). */
+  .pe-actions .primary, .tag.frontdesk small { color: var(--on-accent); }
+  /* ===== Subtle scrollbars: thin, no track, a soft rounded thumb that
+     firms up while you're over the panel. The colors are tokens, so every
+     office theme (themes.js) and dark mode set their own. ===== */
+  :root { --scroll-thumb: #d6cdbf; --scroll-thumb-hover: #a39a8c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --scroll-thumb: #48433c; --scroll-thumb-hover: #7a7268; }
+  }
+  :root[data-theme="dark"] { --scroll-thumb: #48433c; --scroll-thumb-hover: #7a7268; }
+  * { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
+  *:hover { scrollbar-color: var(--scroll-thumb-hover) transparent; }
+  /* Safari (and Chromium without scrollbar-color) take the older rules. */
+  @supports not (scrollbar-color: auto) {
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 999px; }
+    :hover::-webkit-scrollbar-thumb { background: var(--scroll-thumb-hover); }
+  }
 </style>
 </head>
 <body>
@@ -1305,6 +1425,7 @@
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8h3l4-3.5v11L6 12H3z" fill="currentColor"/><path class="waves" d="M13 7.5a3.5 3.5 0 0 1 0 5M15 5.5a6.4 6.4 0 0 1 0 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path class="cross" d="M13.5 8l4 4m0-4l-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
         <span>Sound on</span>
       </button>
+      <div class="sound-set" id="sound-set" role="group" aria-label="Sound settings"></div>
       <label class="toggle menu-row" title="Show past sessions"><input type="checkbox" id="show-past" checked aria-label="Past sessions"> <span>Past sessions</span></label>
       <button class="tourbtn menu-row" id="tour-open" type="button" title="Take the tour: a one-minute look around the office">
         <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7.9 8a2.2 2.2 0 1 1 3 2.05c-.6.25-.9.7-.9 1.3v.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="14.4" r=".95" fill="currentColor"/></svg>

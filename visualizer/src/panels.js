@@ -15,6 +15,7 @@ import { pct, level, tintOf, sessionTint, roomKey } from './table.js'
 import * as transcript from './transcript.js'
 import * as assets from './assets.js'
 import { progressHtml } from './progress.js'
+import { summaryOf } from './summary.js'
 import * as deliverables from './deliverables.js'
 import { goalTitle, projectName, projectIcon, energy, energyMeter } from './names.js'
 import { who } from './critters.js'
@@ -309,11 +310,8 @@ function threadRow(n, running, selected) {
   const live = isLive(n)
   const state = threadState(n, running)
   const f = fill(n)
-  const doing = !live ? `ended ${ago(n.endedAt ?? n.lastAt)}`
-    : state === 'asking' ? `asks: ${assets.asksFor(n)[0]?.questions?.[0]?.question ?? assets.asksFor(n)[0]?.summary ?? 'a plan to approve'}`
-    : state === 'working' ? (n.todos?.find(i => i.status === 'in_progress')?.text ?? doingNow(n.id) ?? (activity.get(n.id)?.actions[0] ? say(activity.get(n.id).actions[0]) : 'working'))
-      : state === 'stuck' ? 'its last turn didn’t finish'
-        : n.answer?.text ? `said ${quote(n.answer.text)}` : 'ready for you'
+  // A live thread's line is its summary (summary.js); a past one says when it ended.
+  const ended = `ended ${ago(n.endedAt ?? n.lastAt)}`
   return `
     <div class="thread ${live ? '' : 'past'} ${selected === n.id ? 'on' : ''}">
       <button class="entry" data-pick="${escapeHtml(n.id)}" data-hover="${escapeHtml(n.id)}">
@@ -321,7 +319,8 @@ function threadRow(n, running, selected) {
         <span class="ename">${escapeHtml(title(n))}${n.thread ? '<span class="badge" title="A claude.ai project’s coordinator handed this session its work">thread</span>' : ''}</span>
         ${live ? pill(state) : n.context?.tokens ? ctxBadge(f, { bare: true }) : '<span></span>'}
         ${live ? assets.progress(n) : ''}
-        <span class="estate">${escapeHtml(who(n).name)} · ${live && n.context?.tokens ? `${ctxBadge(f)} · ` : ''}${escapeHtml(doing)}</span>
+        ${live ? `<span class="esum">${escapeHtml(summaryOf(n, running))}</span>` : ''}
+        <span class="estate">${escapeHtml(who(n).name)}${live && n.context?.tokens ? ` · ${ctxBadge(f)}` : ''}${live ? '' : ` · ${escapeHtml(ended)}`}</span>
       </button>
       ${live ? teamRows(n) : ''}
     </div>`
@@ -335,7 +334,7 @@ function directory(running, selected) {
     <h2 class="sideh">Projects <small>${live.length ? `${working} working · ${live.length - working} with you` : 'none live'}</small></h2>
     ${projects.map(p => `
       <section class="project">
-        <p class="room"><button type="button" class="picon room-${roomKey(p.raw)}" data-edit-project="${escapeHtml(p.id)}" data-raw="${escapeHtml(p.raw)}" title="Rename or change the icon" aria-label="Rename ${escapeHtml(p.name)} or change its icon">${projectIcon(p.id, p.raw)}</button>${escapeHtml(p.name)}<small>${p.live.length ? plural(p.live.length, 'thread') : 'earlier'}</small></p>${projectNote(p.raw)}
+        <p class="room"><button type="button" class="picon room-${roomKey(p.raw, p.id)}" data-edit-project="${escapeHtml(p.id)}" data-raw="${escapeHtml(p.raw)}" title="Rename it, or change its icon, walls and decor" aria-label="Rename ${escapeHtml(p.name)} or change its icon, walls and decor">${projectIcon(p.id, p.raw)}</button>${escapeHtml(p.name)}<small>${p.live.length ? plural(p.live.length, 'thread') : 'earlier'}</small></p>${projectNote(p.raw)}
         ${p.live.map(n => threadRow(n, running, selected)).join('')}
         ${p.past.length ? `${p.live.length ? '<p class="earlier">Earlier</p>' : ''}${p.past.map(n => threadRow(n, running, selected)).join('')}` : ''}
       </section>`).join('') || '<p class="muted">No sessions yet. Start Claude Code anywhere and it appears here.</p>'}`
@@ -487,8 +486,9 @@ function head(n, running) {
     : [who(n).title, n.thread ? 'Thread of a claude.ai project' : '', n.gitBranch, isLive(n) ? '' : `ended ${ago(n.endedAt ?? n.lastAt)}`].filter(Boolean).join(' · ')
   return `
     ${crumbs(n)}
-    <h2 class="dtitle"><i class="dot ${isAgent ? tintOf(n.type) : sessionTint(n.session)}"></i>${escapeHtml(isAgent ? who(n).title : title(n))}</h2>
+    <h2 class="dtitle">${isAgent ? `<i class="dot ${tintOf(n.type)}"></i>` : `<button type="button" class="dot-pick" data-critter-color="${escapeHtml(n.session)}" data-name="${escapeHtml(who(n).name)}" title="Change ${escapeHtml(who(n).name)}’s color" aria-label="Change ${escapeHtml(who(n).name)}’s color"><i class="dot ${sessionTint(n.session)}"></i></button>`}${escapeHtml(isAgent ? who(n).title : title(n))}</h2>
     <p class="dmeta">${pill(state)} ${escapeHtml(sub)}</p>
+    ${isAgent ? '' : `<p class="dsum">${escapeHtml(summaryOf(n, running))}</p>`}
     ${progressHtml(n.todos, { big: true })}
     ${actions.bar(n, state)}`
 }

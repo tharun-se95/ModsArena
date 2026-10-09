@@ -13,6 +13,7 @@
 
 import { nodes, threadState } from './model.js'
 import { goalTitle, projectName } from './names.js'
+import { sound } from './sound.js'
 
 const KEY = 'agent-office-alerts'
 const YOURS = new Set(['asking', 'waiting', 'stuck'])
@@ -148,7 +149,11 @@ export function update(running) {
   const threads = [...nodes.values()]
     .filter(n => n.kind === 'session' && !n.past && n.status !== 'done')
     .map(n => ({ id: n.id, n, state: threadState(n, running) }))
-  for (const t of arrivals(before, threads)) alert(t.n, t.state)
+  for (const t of arrivals(before, threads)) {
+    alert(t.n, t.state)
+    // In sound quiet hours, the one soft chime they keep (sound.js).
+    if (!isMuted(t.n)) sound.nudge()
+  }
   before = new Map(threads.map(t => [t.id, t.state]))
   const count = threads.filter(t => YOURS.has(t.state) && !isMuted(t.n)).length
   const title = titleFor(count, baseTitle)
