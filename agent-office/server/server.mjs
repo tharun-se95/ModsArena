@@ -23,6 +23,8 @@
 //   POST /stop     stop the turn a session is running (the office page only; its mod does it)
 //   POST /answer   an answer to a question or plan a session is holding (the office page only)
 //   GET  /answer/wait?session=&id=   that session's mod waiting for one (asks.mjs)
+//   POST /auto-update   turn the plugin's auto-update on or off (the office
+//                  page only; see autoupdate.mjs). /healthz says where it stands.
 //   GET  /         the office
 //
 // Every request must be addressed to the bridge itself, and chat needs the
@@ -42,6 +44,7 @@ import * as chat from './chat.mjs'
 import { createJobs } from './jobs.mjs'
 import * as asks from './asks.mjs'
 import { findTranscript, readTranscript } from './transcript.mjs'
+import * as autoUpdate from './autoupdate.mjs'
 
 const args = process.argv.slice(2)
 const flag = name => args.includes(`--${name}`)
@@ -113,6 +116,11 @@ async function isKnown(dir) {
   } catch {}
   return knownDirs.has(dir)
 }
+// Demo-only: the sample office keeps its auto-update switch in memory, so
+// trying the toggle never writes to your Claude Code settings.
+let demoAutoUpdate = { state: 'off', pending: false }
+const updates = () => (flag('demo') ? demoAutoUpdate : autoUpdate.brief(autoUpdate.read()))
+
 const jobs = createJobs({ publish: events => publish(events), isKnown, demo: flag('demo') ? demoJob() : undefined })
 
 function publish(events) {
@@ -256,6 +264,24 @@ const server = createServer(async (req, res) => {
     return
   }
 
+  // Auto-update: guarded like chat, since it writes to your settings.
+  if (req.method === 'POST' && pathname === '/auto-update') {
+    if (!tokenMatches(req.headers[TOKEN_HEADER], TOKEN)) return json(res, 403, { error: 'missing or wrong token' })
+    try {
+      const body = JSON.parse(await readBody(req))
+      if (typeof body?.on !== 'boolean') return json(res, 400, { error: 'say on: true or false' })
+      if (flag('demo')) {
+        demoAutoUpdate = { state: body.on ? 'on' : 'off', pending: true }
+        return json(res, 200, { ok: true, autoUpdate: demoAutoUpdate })
+      }
+      const result = autoUpdate.set(body.on)
+      json(res, result.state === 'missing' ? 409 : 200, { ok: result.state !== 'missing', autoUpdate: autoUpdate.brief(result), text: autoUpdate.describe(result) })
+    } catch (err) {
+      json(res, 400, { error: String(err.message ?? err) })
+    }
+    return
+  }
+
   if (req.method === 'GET' && pathname === '/answer/wait') {
     if (req.headers[INBOX_HEADER] !== '1') return json(res, 403, { error: 'missing inbox header' })
     json(res, 200, await asks.wait(searchParams.get('session') ?? '', searchParams.get('id') ?? ''))
@@ -335,7 +361,7 @@ const server = createServer(async (req, res) => {
   }
 
   if (pathname === '/healthz') {
-    json(res, 200, { ok: true, name: 'agent-office', version: VERSION, managed: MANAGED, demo: flag('demo'), chat: true, jobs: true, answers: true, events: log.length, viewers: clients.size })
+    json(res, 200, { ok: true, name: 'agent-office', version: VERSION, managed: MANAGED, demo: flag('demo'), chat: true, jobs: true, answers: true, autoUpdate: updates(), events: log.length, viewers: clients.size })
     return
   }
 

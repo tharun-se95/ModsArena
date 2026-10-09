@@ -7,6 +7,18 @@ git tag (`v0.2.1`) with a GitHub Release, and the same version is in
 modsarena (`/plugin` → Marketplaces), a new one arrives on its own;
 otherwise `claude plugin update agent-office@modsarena` fetches it.
 
+## Unreleased
+
+- **Setup in one step.** Install, then type `/office`. The first time,
+  Agent Office offers `/office auto-update`, one command that turns on
+  auto-update so new versions arrive on their own (no hunting through
+  `/plugin` menus). The same switch is **Updates: automatic** in the
+  office's Settings menu and `npx github:tharun-se95/ModsArena auto-update`
+  in a terminal. It backs up your Claude Code settings first and changes
+  only that one switch. `/office status` and the bridge's `/healthz` say
+  whether updates are automatic, and a missing or old Node is explained in
+  plain words.
+
 ## 0.5.0
 
 - **The office follows how Claude organizes work.** Projects hold threads

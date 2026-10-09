@@ -3,7 +3,7 @@
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises'
 import { request } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,6 +11,7 @@ import { join } from 'node:path'
 const PORT = 7400 + Math.floor(Math.random() * 400)
 const base = `http://127.0.0.1:${PORT}`
 let bridge
+let config
 
 // node:http, so the test can set Host and Origin the way a browser would.
 function call(method, path, { headers = {}, body } = {}) {
@@ -27,7 +28,8 @@ function call(method, path, { headers = {}, body } = {}) {
 }
 
 before(async () => {
-  const config = await mkdtemp(join(tmpdir(), 'office-config-'))
+  config = await mkdtemp(join(tmpdir(), 'office-config-'))
+  await writeFile(join(config, 'settings.json'), JSON.stringify({ theme: 'dark', extraKnownMarketplaces: { modsarena: { source: { source: 'github', repo: 'tharun-se95/ModsArena' } } } }))
   await mkdir(join(config, 'projects', '-w-app'), { recursive: true })
   await writeFile(join(config, 'projects', '-w-app', 'sess-1.jsonl'),
     JSON.stringify({ type: 'user', origin: { kind: 'human' }, timestamp: '2026-10-05T10:00:00Z', message: { content: 'hello office' } }) + '\n')
@@ -98,4 +100,20 @@ test('Stop is guarded like chat and reaches the session’s mod through its inbo
   assert.equal(sent.status, 200)
   const inbox = (await call('GET', '/inbox?session=sess-stop', { headers: { 'x-agent-office-inbox': '1' } })).json()
   assert.deepEqual(inbox.messages, [{ id: sent.json().id, action: 'stop', text: '' }])
+})
+
+test('auto-update: /healthz says where it stands, and only the office page can switch it', async () => {
+  assert.deepEqual((await call('GET', '/healthz')).json().autoUpdate, { state: 'off', pending: false })
+  const token = /name="agent-office-token" content="([0-9a-f]{48})"/.exec((await call('GET', '/')).text)?.[1]
+  const body = { on: true }
+  assert.equal((await call('POST', '/auto-update', { body })).status, 403, 'no token')
+  assert.equal((await call('POST', '/auto-update', { body, headers: { 'x-agent-office-token': token, origin: 'https://evil.example' } })).status, 403, 'foreign origin')
+  assert.equal((await call('POST', '/auto-update', { body: { on: 'yes' }, headers: { 'x-agent-office-token': token, origin: base } })).status, 400)
+  const sent = await call('POST', '/auto-update', { body, headers: { 'x-agent-office-token': token, origin: base } })
+  assert.equal(sent.status, 200)
+  assert.deepEqual(sent.json().autoUpdate, { state: 'on', pending: true })
+  const settings = JSON.parse(await readFile(join(config, 'settings.json'), 'utf8'))
+  assert.equal(settings.theme, 'dark')
+  assert.equal(settings.extraKnownMarketplaces.modsarena.autoUpdate, true)
+  assert.deepEqual((await call('GET', '/healthz')).json().autoUpdate, { state: 'on', pending: true })
 })

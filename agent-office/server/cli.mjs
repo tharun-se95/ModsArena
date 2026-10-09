@@ -8,6 +8,7 @@
 //   npx github:tharun-se95/ModsArena status     is a bridge running, and what has it seen
 //   npx github:tharun-se95/ModsArena install-hooks [--project]
 //   npx github:tharun-se95/ModsArena uninstall-hooks [--project]
+//   npx github:tharun-se95/ModsArena auto-update [on|off]   new versions arrive on their own
 //
 //   --port N    the bridge's port (7337; the demo uses 7338 so it never mixes
 //               with your real sessions)
@@ -19,6 +20,13 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { addHooks, removeHooks, hasHooks } from './settings-hooks.mjs'
+import * as autoUpdate from './autoupdate.mjs'
+
+// Node 18 or newer, said plainly (older ones fail with a cryptic error).
+if (Number(process.versions.node.split('.')[0]) < 18) {
+  console.error(`Agent Office needs Node 18 or newer, a free program it runs on; this computer has an older one (v${process.versions.node}). Install the LTS version from https://nodejs.org, then try again.`)
+  process.exit(1)
+}
 
 const args = process.argv.slice(2)
 const command = args.find(a => !a.startsWith('-')) ?? 'open'
@@ -81,6 +89,21 @@ async function status() {
     const settings = readSettings(file)
     if (hasHooks(settings)) console.log(`Settings hooks: installed in your ${where} settings (${file}).`)
   }
+  console.log(autoUpdate.summary(autoUpdate.read()))
+}
+
+// Auto-update for the plugin's marketplace (autoupdate.mjs): on unless you
+// say off.
+function setAutoUpdate() {
+  const word = args.filter(a => !a.startsWith('-'))[1] ?? 'on'
+  if (word !== 'on' && word !== 'off') {
+    console.error('Usage: agent-office auto-update [on | off]')
+    process.exit(1)
+  }
+  const result = autoUpdate.set(word === 'on')
+  if (result.backup) console.log(`Backed up ${result.file} to ${result.backup}`)
+  console.log(autoUpdate.describe(result))
+  if (result.state === 'missing') process.exit(1)
 }
 
 // ---------------------------------------------------------------------------
@@ -142,11 +165,15 @@ function uninstallHooks() {
 }
 
 function usage() {
-  console.log(`Usage: agent-office [open | demo | status | install-hooks | uninstall-hooks] [--port N] [--project] [--no-open]
+  console.log(`Usage: agent-office [open | demo | status | auto-update | install-hooks | uninstall-hooks] [--port N] [--project] [--no-open]
 
   open             start the bridge (if it isn't running) and open the office
   demo             the same with sample activity, no Claude Code needed (port 7338)
-  status           is a bridge running, and are the settings hooks installed
+  status           is a bridge running, are the settings hooks installed, and
+                   does the plugin update on its own
+  auto-update [on | off]
+                   let new versions of the plugin arrive on their own (on
+                   unless you say off; takes effect next time Claude Code starts)
   install-hooks    send Claude Code's settings hooks to the bridge (for builds
                    without mods; with mods, install the plugin instead)
   uninstall-hooks  remove exactly the hooks install-hooks added
@@ -155,7 +182,7 @@ function usage() {
                    instead of your user settings`)
 }
 
-const commands = { open: serve, demo: serve, status, 'install-hooks': installHooks, 'uninstall-hooks': uninstallHooks, help: usage }
+const commands = { open: serve, demo: serve, status, 'auto-update': setAutoUpdate, 'install-hooks': installHooks, 'uninstall-hooks': uninstallHooks, help: usage }
 if (flag('help') || flag('h')) usage()
 else if (commands[command]) await commands[command]()
 else { usage(); process.exit(1) }

@@ -2,11 +2,12 @@ import type { EngineInterface, Register } from 'claude-code'
 
 // Streams this session's projects, agents, tool calls and context to the
 // Agent Office bridge (server/server.mjs), which fans it out to the office
-// page. `/office` opens the page (starting the bridge first if need be) and
-// `/office status` says what's running. Messages you send from the office
-// come back through the bridge's inbox: to the session as its next prompt,
-// to a subagent as a message, or Stop, which ends the running turn (see
-// deliver()).
+// page. `/office` opens the page (starting the bridge first if need be),
+// `/office status` says what's running, and `/office auto-update` lets new
+// versions arrive on their own (server/autoupdate.mjs does the writing).
+// Messages you send from the office come back through the bridge's inbox:
+// to the session as its next prompt, to a subagent as a message, or Stop,
+// which ends the running turn (see deliver()).
 //
 // Hooks run in a sandbox with no Node, so events are queued here and flushed
 // over `$.http.fetch` on a timer: a tool call never waits on the bridge.
@@ -21,6 +22,10 @@ const RESPAWN_MS = 15000
 const BRIDGE_WAIT_MS = 8000
 const MIN_NODE = 18
 const WELCOMED = 'welcomed'
+// When the toast last offered auto-update, and whether you said no to it.
+const UPDATES_OFFERED = 'updatesOfferedAt'
+const UPDATES_DECLINED = 'updatesDeclined'
+const OFFER_EVERY_MS = 7 * 24 * 60 * 60 * 1000
 // Gauges: only the newest reading per loop matters, so a queued one is replaced.
 const GAUGES = new Set(['context.measure', 'agent.context'])
 
@@ -156,9 +161,10 @@ export function isStale(found: Health | undefined, mine: string | undefined) {
 
 // The bridge runs on Node; say plainly when it's missing or too old.
 export function nodeProblem(version: string | undefined): string | undefined {
-  if (!version) return `Agent Office needs Node ${MIN_NODE} or newer to run its bridge, and \`node\` wasn't found. Install it from https://nodejs.org, then run /office again.`
+  const fix = 'Install the LTS version from https://nodejs.org, then restart Claude Code and run /office again.'
+  if (!version) return `Agent Office needs Node ${MIN_NODE} or newer, a free program it runs on, and this computer doesn't have it. ${fix}`
   const major = Number(/^v?(\d+)/.exec(version.trim())?.[1] ?? 0)
-  if (major < MIN_NODE) return `Agent Office needs Node ${MIN_NODE} or newer to run its bridge; this machine has ${version.trim()}. Update it from https://nodejs.org, then run /office again.`
+  if (major < MIN_NODE) return `Agent Office needs Node ${MIN_NODE} or newer, a free program it runs on; this computer has an older one (${version.trim()}). ${fix}`
   return undefined
 }
 
@@ -206,6 +212,53 @@ async function flush($: EngineInterface) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Auto-update. Claude Code keeps the switch in your user settings; the
+// bridge's server/autoupdate.mjs reads and writes it (backing the file up
+// first and changing that one key), run here with Node like the bridge.
+
+export type Updates = { state: 'on' | 'off' | 'missing'; pending?: boolean; text: string; summary: string; error?: string }
+
+async function updates($: EngineInterface, verb: 'status' | 'on' | 'off'): Promise<Updates | undefined> {
+  const ran = await $.process.run(['node', `${$.plugin.root}/server/autoupdate.mjs`, verb, '--json'], { timeoutMs: 10000 }).catch(() => undefined)
+  try {
+    return ran ? (JSON.parse(ran.stdout) as Updates) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+// `/office <words>`: what to do, or undefined for words it doesn't know.
+export function parseOffice(args: string | undefined): { verb: 'open' | 'status' | 'auto-update'; on?: boolean } | undefined {
+  const [verb = 'open', value, ...rest] = (args ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean)
+  if ((verb === 'open' || verb === 'status') && value === undefined) return { verb }
+  if (verb !== 'auto-update' && verb !== 'autoupdate') return undefined
+  if (rest.length || (value !== undefined && value !== 'on' && value !== 'off')) return undefined
+  return { verb: 'auto-update', on: value !== 'off' }
+}
+
+export const OFFICE_USAGE = 'Usage: /office (open the office), /office status, or /office auto-update [on | off]'
+
+// The once-per-machine welcome, offering auto-update while it's off.
+export function welcomeText(state: Updates['state'] | undefined) {
+  return `Agent Office is on. Type /office to watch your sessions at work.${state === 'off' ? ' To get new versions on their own, type /office auto-update.' : ''}`
+}
+export const OFFER_TEXT = 'Agent Office: new versions don\'t arrive on their own yet. Type /office auto-update to turn that on (or /office auto-update off to stop this reminder).'
+
+// The welcome, once per machine; after that the offer at most once a week,
+// while auto-update is off and you haven't said no to it.
+async function offerUpdates($: EngineInterface, isWelcome: boolean) {
+  const now = await $.clock.now()
+  const isDeclined = Boolean(await $.store.get(UPDATES_DECLINED).catch(() => true))
+  const offeredAt = Number((await $.store.get(UPDATES_OFFERED).catch(() => now)) ?? 0)
+  const isDue = !isDeclined && now - offeredAt >= OFFER_EVERY_MS
+  const found = isWelcome || isDue ? await updates($, 'status') : undefined
+  const isOffered = found?.state === 'off' && (isWelcome ? !isDeclined : isDue)
+  if (isWelcome) $.ui.toast(welcomeText(isOffered ? 'off' : undefined), { timeoutMs: 12000 })
+  else if (isOffered) $.ui.toast(OFFER_TEXT, { timeoutMs: 12000 })
+  if (isOffered) await $.store.set(UPDATES_OFFERED, now).catch(() => undefined)
+}
+
 // What `/office status` reports: the bridge, what it has seen, this session.
 async function status($: EngineInterface) {
   const url = bridgeUrl()
@@ -220,6 +273,8 @@ async function status($: EngineInterface) {
     const problem = nodeProblem(await nodeVersion($))
     lines.push(`Bridge: not running on ${url}.${problem ? ` ${problem}` : link.autoStart ? ' /office starts it.' : ` Start one with: node ${$.plugin.root}/server/server.mjs --port ${link.port}`}`)
   }
+  const now = await updates($, 'status')
+  if (now) lines.push(now.summary)
   lines.push(`This session: ${link.queue.length} event${link.queue.length === 1 ? '' : 's'} waiting to send, ${link.activeAgents.size} subagent${link.activeAgents.size === 1 ? '' : 's'} and ${link.activeTools} tool call${link.activeTools === 1 ? '' : 's'} in flight.`)
   return lines.join('\n')
 }
@@ -503,24 +558,33 @@ export const register: Register = (on, options) => {
 
     await $.command.register({
       name: 'office',
-      description: 'Open Agent Office, the live view of your sessions and subagents (`/office status` to check on it).',
+      description: 'Open Agent Office, the live view of your sessions and subagents (`/office status` to check on it, `/office auto-update` for new versions on their own).',
     })
     $.clock.every(FLUSH_MS, () => void flush($))
     $.clock.every(INBOX_MS, () => void checkInbox($))
 
-    // Once per machine: say how to open it.
-    if (!(await $.store.get(WELCOMED).catch(() => true))) {
-      await $.store.set(WELCOMED, true).catch(() => undefined)
-      $.ui.toast('Agent Office is on. Type /office to watch your sessions at work. For updates, turn on auto-update for modsarena under /plugin → Marketplaces.', { timeoutMs: 12000 })
-    }
+    // Once per machine: say how to open it, and offer auto-update while
+    // it's off (then now and again, until it's on or you say no).
+    const isWelcome = !(await $.store.get(WELCOMED).catch(() => true))
+    if (isWelcome) await $.store.set(WELCOMED, true).catch(() => undefined)
+    void offerUpdates($, isWelcome)
     return started
   })
 
   on('command.run', { command: 'office' }, async ($, e) => {
     const url = bridgeUrl()
-    const arg = (e.args ?? '').trim().toLowerCase()
-    if (arg === 'status') return { text: await status($) }
-    if (arg && arg !== 'open') return { text: 'Usage: /office (open the office) or /office status' }
+    const asked = parseOffice(e.args)
+    if (!asked) return { text: OFFICE_USAGE }
+    if (asked.verb === 'status') return { text: await status($) }
+    if (asked.verb === 'auto-update') {
+      const problem = nodeProblem(await nodeVersion($))
+      if (problem) return { text: problem }
+      const result = await updates($, asked.on ? 'on' : 'off')
+      if (!result) return { text: `Couldn't change auto-update. Try it from /plugin → Marketplaces → modsarena.` }
+      // Saying off on purpose stops the reminder; on makes it moot.
+      if (result.state !== 'missing') await $.store.set(UPDATES_DECLINED, !asked.on).catch(() => undefined)
+      return { text: result.text }
+    }
 
     const found = await health($)
     const mine = await ownVersion($)

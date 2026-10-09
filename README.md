@@ -15,23 +15,19 @@ A live office of everything Claude Code is doing on your machine. Each project g
 
 ### Quick start
 
-You need Claude Code and [Node](https://nodejs.org) 18 or newer. In Claude Code:
+You need Claude Code and [Node](https://nodejs.org) 18 or newer. Two steps, in Claude Code:
 
-```
-/plugin marketplace add tharun-se95/ModsArena
-/plugin install agent-office@modsarena
-```
+1. **Install:** `/plugin install agent-office --marketplace tharun-se95/ModsArena`
+2. **Open it:** type **`/office`**. It starts the office's bridge if it isn't running and opens the office in your browser. Every Claude Code session on your machine, in any project, joins the same office.
 
-On Claude Code 2.1.275 or newer, one command does both: `/plugin install agent-office --marketplace tharun-se95/ModsArena`.
+That's all. The first time, Agent Office offers to keep itself up to date: type **`/office auto-update`** and new versions arrive on their own from the next time Claude Code starts (`/office auto-update off` turns that off again). You can also flip **Updates: automatic** in the office's Settings menu.
 
-**Turn on updates.** Claude Code doesn't update plugins from a marketplace like this one unless you ask it to. Type `/plugin`, open **Marketplaces**, pick **modsarena** and choose **Enable auto-update**, and new versions arrive on their own after a session starts.
-
-Then type **`/office`**. It starts the office's bridge if it isn't running and opens the office in your browser. Every Claude Code session on your machine, in any project, joins the same office. That's all.
+On Claude Code older than 2.1.275, install in two commands instead: `/plugin marketplace add tharun-se95/ModsArena`, then `/plugin install agent-office@modsarena`. To turn on updates by hand: type `/plugin`, open **Marketplaces**, pick **modsarena** and choose **Enable auto-update**.
 
 - Click a critter, then **Transcript**, to follow its conversation and message it. See [Talk to your agents](#talk-to-your-agents).
-- `/office status` says whether the bridge is running, what it has seen, and what this session is doing.
+- `/office status` says whether the bridge is running, what it has seen, what this session is doing, and whether updates are automatic.
 - `/office` appears once a session has started and the plugin's hooks are running. Where it isn't listed (before the first message in the desktop app, or anywhere the hooks don't run), the `agent-office:office` skill opens the office instead.
-- Without auto-update, `claude plugin update agent-office@modsarena` fetches a new version. After an update, the next session (or `/office`) swaps the running bridge for the new one, unless the office is open in a browser; then `/office` does it.
+- Without auto-update, `claude plugin update agent-office@modsarena` fetches a new version. Outside Claude Code, `npx github:tharun-se95/ModsArena auto-update` turns auto-update on too (it backs up your settings first and changes only that one switch). After an update, the next session (or `/office`) swaps the running bridge for the new one, unless the office is open in a browser; then `/office` does it.
 - The status line shows `◉ office N agents · M tools` while work is in flight.
 
 <details>
@@ -60,6 +56,7 @@ npx github:tharun-se95/ModsArena demo            # sample activity on http://127
 | You see | Do this |
 | --- | --- |
 | `/office` says Node is missing or too old | Install Node 18 or newer from [nodejs.org](https://nodejs.org), then run `/office` again. |
+| `/office auto-update` says the marketplace isn't in your settings | Agent Office was installed some other way (for one project only, or from a copy). Turn updates on from `/plugin` → **Marketplaces** → **modsarena** instead. |
 | "The bridge didn't answer" | Something else may be using port 7337. Run `/office status`, or pick another port with `/plugin configure agent-office@modsarena` (option `port`). |
 | The page opens but the office is empty | It fills in as sessions work. Sessions that started before the bridge appear from their next event; past sessions from the last 14 days show as sleeping critters (tick **Past sessions**). |
 | The browser didn't open | Open the address `/office` printed, normally http://127.0.0.1:7337. |
