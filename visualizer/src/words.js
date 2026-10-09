@@ -3,8 +3,11 @@
 // Pure bookkeeping over model.js; it knows nothing about Three.js.
 
 import { nodes, sid, aid, mail } from './model.js'
+import { describe } from './plain.js'
+import { devView } from './prefs.js'
+import { projectName } from './names.js'
 
-const ACTION_KEEP = 12
+const ACTION_KEEP = 30
 const MOMENT_KEEP = 40
 
 export const moments = [] // newest first: { t, text, tone, target }
@@ -13,6 +16,7 @@ export let lastAction = null // { session, text }
 
 export function reset() {
   moments.length = 0
+  turnOf.clear()
   activity.clear()
   lastAction = null
 }
@@ -59,9 +63,48 @@ function phrase(tool, summary, ok) {
 const sessionName = session => nodes.get(sid(session))?.label ?? 'A session'
 const who = ev => (ev.agent ? (nodes.get(aid(ev.session, ev.agent))?.label ?? 'A subagent') : 'The session')
 
-function moment(ev, text, tone = '', target = sid(ev.session)) {
-  moments.unshift({ t: ev.t, text, tone, target })
+// `raw` is how Developer view says the same moment, when it differs.
+//
+// Tones keep the feed calm: outcomes lead (`done` finished, `made`
+// something, `ask` asked you), `bumps` folds the errors Claude worked past
+// into one quiet line per turn, `quiet` is the comings and goings, and
+// only real blockers (`block`: a turn that ended on an error, a question
+// waiting on you) turn red, until they're dealt with.
+function moment(ev, text, tone = '', target = sid(ev.session), raw, extra) {
+  const m = { t: ev.t, text, tone, target, ...(raw && { raw }), ...extra }
+  moments.unshift(m)
   if (moments.length > MOMENT_KEEP) moments.pop()
+  return m
+}
+
+const byKey = key => moments.find(m => m.key === key)
+
+// Move a moment back to the top, as of now.
+function bump(m, t) {
+  moments.splice(moments.indexOf(m), 1)
+  moments.unshift(m)
+  m.t = t
+}
+
+const turnOf = new Map() // session -> its current turn's number
+const clipText = (text, n) => {
+  const line = String(text).replace(/\s+/g, ' ').trim()
+  return line.length > n ? `${line.slice(0, n - 1).replace(/\s+\S*$/, '')}…` : line
+}
+
+// What the work makes, as the feed says it.
+const MADE = { image: 'a picture', artifact: 'a page', pr: 'a pull request', link: 'a link' }
+
+// A failed call: one more bump on this turn's quiet line.
+function bumped(ev, action, raw) {
+  const key = `bumps:${ev.session}:${turnOf.get(ev.session) ?? 0}`
+  let m = byKey(key)
+  if (!m) m = moment(ev, '', 'bumps', sid(ev.session), undefined, { key, bumps: [] })
+  else bump(m, ev.t)
+  m.bumps.unshift({ t: ev.t, text: action.plain, raw })
+  if (m.bumps.length > 12) m.bumps.pop()
+  const n = m.bumps.length
+  m.text = `${n === 1 ? 'A bump' : `${n} bumps`} along the way in ${quote(sessionName(ev.session))}`
 }
 
 function record(ev) {
@@ -72,6 +115,30 @@ function record(ev) {
 }
 
 const pending = new Map() // tool id -> { summary, tool }
+
+const lower = s => s.charAt(0).toLowerCase() + s.slice(1)
+
+// What a finished call says in plain words: "Checked the tests" for the
+// session itself, "Explore read the sign-in code" for one of its agents.
+function plainDone(ev, tool, summary) {
+  const d = describe(tool, summary)
+  const said = ev.ok ? d.done : d.fail
+  return ev.agent ? `${who(ev)} ${lower(said)}` : said
+}
+
+// An action as the page shows it: plain words, or the raw line in
+// Developer view.
+export const say = action => (devView() ? action.text : action.plain ?? action.text)
+
+// What a session or agent is doing this moment, from its running tool:
+// "Checking the tests" (or "Bash npm test" in Developer view), or null.
+export function doingNow(id) {
+  for (const n of nodes.values()) {
+    if (n.kind !== 'tool' || n.status !== 'active' || n.owner !== id) continue
+    return devView() ? `${n.tool}${n.summary ? ` ${n.summary}` : ''}` : describe(n.tool, n.summary).now
+  }
+  return null
+}
 
 // Read one event after model.apply() has seen it.
 export function ingest(ev) {
@@ -85,9 +152,10 @@ export function ingest(ev) {
       const key = `${ev.session}:${ev.id}`
       const start = pending.get(key) ?? { tool: ev.tool }
       pending.delete(key)
-      const text = `${who(ev)} ${phrase(start.tool ?? ev.tool, start.summary, ev.ok)}`
+      const tool = start.tool ?? ev.tool
+      const text = `${who(ev)} ${phrase(tool, start.summary, ev.ok)}`
       const a = record(ev)
-      a.actions.unshift({ t: ev.t, text, ok: ev.ok })
+      a.actions.unshift({ t: ev.t, text, plain: plainDone(ev, tool, start.summary), ok: ev.ok, tool, summary: start.summary, agent: ev.agent })
       if (a.actions.length > ACTION_KEEP) a.actions.pop()
       const fam = family(start.tool ?? ev.tool)
       if (fam.file && start.summary) {
@@ -97,18 +165,19 @@ export function ingest(ev) {
         f.t = ev.t
         a.files.set(start.summary, f)
       }
-      lastAction = { session: sid(ev.session), text }
-      if (!ev.ok) moment(ev, `${text} in ${quote(sessionName(ev.session))}.`, 'bad')
+      lastAction = { session: sid(ev.session), text, plain: a.actions[0].plain }
+      if (!ev.ok) bumped(ev, a.actions[0], text)
       break
     }
     case 'agent.spawn':
-      moment(ev, `${quote(sessionName(ev.session))} started ${/^[aeiou]/i.test(ev.type ?? '') ? 'an' : 'a'} ${ev.name || ev.type} subagent${ev.description ? `: ${ev.description}` : ''}.`, '', aid(ev.session, ev.agent))
+      moment(ev, `${quote(sessionName(ev.session))} brought in ${ev.name || ev.type}${ev.description ? ` to ${lower(ev.description)}` : ''}.`, 'quiet', aid(ev.session, ev.agent),
+        `${quote(sessionName(ev.session))} started ${/^[aeiou]/i.test(ev.type ?? '') ? 'an' : 'a'} ${ev.name || ev.type} subagent${ev.description ? `: ${ev.description}` : ''}.`)
       break
     case 'agent.end': {
       const n = nodes.get(aid(ev.session, ev.agent))
       if (n) moment(ev, n.endStatus === 'failed' || n.endStatus === 'killed'
         ? `${n.label} stopped before finishing its work for ${quote(sessionName(ev.session))}.`
-        : `${n.label} finished its work for ${quote(sessionName(ev.session))}.`, n.endStatus === 'failed' ? 'bad' : '')
+        : `${n.label} finished its work for ${quote(sessionName(ev.session))}.`, 'quiet')
       break
     }
     case 'agent.message': {
@@ -128,22 +197,69 @@ export function ingest(ev) {
       break
     }
     case 'context.compact':
-      moment(ev, `${ev.agent ? who(ev) : quote(sessionName(ev.session))} compacted its context and has room again.`, 'note')
+      moment(ev, `${ev.agent ? who(ev) : quote(sessionName(ev.session))} tidied up its memory and has room again.`, 'quiet', undefined,
+        `${ev.agent ? who(ev) : quote(sessionName(ev.session))} compacted its context and has room again.`)
       break
     case 'session.start':
-      moment(ev, `A session started in ${ev.project?.name ?? 'a new folder'}.`)
+      moment(ev, `A session started in ${ev.project ? projectName(ev.project.id, ev.project.name) : 'a new folder'}.`, 'quiet')
       break
     case 'session.end':
-      moment(ev, `${quote(sessionName(ev.session))} ended.`)
+      moment(ev, `${quote(sessionName(ev.session))} ended.`, 'quiet')
       break
+    case 'turn.start': {
+      if (ev.agent) break
+      turnOf.set(ev.session, (turnOf.get(ev.session) ?? 0) + 1)
+      // Back at work: a blocker from its last turn is dealt with.
+      const stuck = byKey(`stuck:${ev.session}`)
+      if (stuck) { stuck.tone = 'cleared'; stuck.key = undefined }
+      break
+    }
+    case 'turn.complete': {
+      if (ev.agent) break
+      const name = quote(sessionName(ev.session))
+      if (ev.reason === 'answer' || !ev.reason) {
+        moment(ev, `${name} finished${ev.answer ? `: ${clipText(ev.answer, 110)}` : '.'}`, 'done')
+      } else if (ev.reason === 'aborted') {
+        moment(ev, `You stopped ${name}.`, 'quiet')
+      } else {
+        moment(ev, `${name} stopped on ${ev.reason === 'refusal' ? 'a refusal' : 'an error'} and needs a look.`, 'block', undefined, undefined, { key: `stuck:${ev.session}` })
+      }
+      break
+    }
+    case 'asset.add': {
+      if (!MADE[ev.type]) break
+      const key = `made:${ev.session}:${ev.id}`
+      if (byKey(key)) break
+      moment(ev, `${ev.agent ? who(ev) : quote(sessionName(ev.session))} made ${MADE[ev.type]}${ev.title ? `: ${clipText(ev.title, 70)}` : '.'}`, 'made', ev.agent ? aid(ev.session, ev.agent) : sid(ev.session), undefined, { key })
+      break
+    }
+    case 'ask.open': {
+      const name = ev.agent ? who(ev) : quote(sessionName(ev.session))
+      const text = ev.type === 'permission' ? `${name} is waiting for your OK to go on.`
+        : ev.type === 'plan' ? `${name} has a plan for you to approve.`
+          : `${name} asked you: ${clipText(ev.questions?.[0]?.question ?? 'a question', 90)}`
+      moment(ev, text, 'block', ev.agent ? aid(ev.session, ev.agent) : sid(ev.session), undefined, { key: `ask:${ev.session}:${ev.id}`, ask: true })
+      break
+    }
+    case 'ask.close': {
+      const m = byKey(`ask:${ev.session}:${ev.id}`)
+      if (!m) break
+      m.tone = 'ask'
+      m.key = undefined
+      if (ev.answer) m.answer = String(ev.answer)
+      break
+    }
     case 'chat.sent':
-      moment(ev, `You messaged ${ev.agent ? (nodes.get(aid(ev.session, ev.agent))?.label ?? 'a subagent') : quote(sessionName(ev.session))}.`, 'note', ev.agent ? aid(ev.session, ev.agent) : sid(ev.session))
+      moment(ev, `You messaged ${ev.agent ? (nodes.get(aid(ev.session, ev.agent))?.label ?? 'a subagent') : quote(sessionName(ev.session))}.`, 'quiet', ev.agent ? aid(ev.session, ev.agent) : sid(ev.session))
       break
     case 'chat.delivered':
       if (ev.ok === false) moment(ev, `Your message to ${ev.agent ? (nodes.get(aid(ev.session, ev.agent))?.label ?? 'a subagent') : quote(sessionName(ev.session))} couldn't be delivered${ev.how ? `: ${ev.how}` : ''}.`, 'bad', ev.agent ? aid(ev.session, ev.agent) : sid(ev.session))
       break
   }
 }
+
+// A moment as the page shows it.
+export const momentText = m => (devView() && m.raw ? m.raw : m.text)
 
 export function ago(t, now = Date.now()) {
   if (!t) return ''

@@ -3,6 +3,7 @@
 // knows nothing about Three.js.
 
 import { unwrapPrompt, isEngineNote } from '../../agent-office/server/prompts.mjs'
+import { goalTitle } from './names.js'
 
 export const TOOL_LINGER_MS = 6000 // a finished tool stays visible this long
 const FINISHED_AGENT_LIMIT = 12
@@ -92,7 +93,8 @@ function sessionWindow(n) {
   return nodes.get(sid(n.session))?.context?.window
 }
 
-export const promptLabel = text => (text.length > 26 ? `${text.slice(0, 25)}…` : text)
+// A thread's short name is its goal, tidied up (names.js).
+export const promptLabel = text => goalTitle(text, 26) || (text.length > 26 ? `${text.slice(0, 25)}…` : text)
 
 export const shortId = s => (s.length > 14 ? `${s.slice(0, 8)}…` : s)
 

@@ -231,7 +231,9 @@ export function startDemo(publish) {
         const hue = rand(0, 360)
         for (let step = 0; step < items.length; step++) {
           checklist(items, step, true)
-          await runTool(undefined)
+          // A few calls per item, so the conversation has runs of work to
+          // gather into one plain step.
+          for (let call = rand(1, 4); call > 0; call--) await runTool(undefined)
           messages += rand(3000, 12000)
           measure()
           if (Math.random() < 0.45) {

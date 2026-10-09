@@ -15,6 +15,7 @@ export { toolName }
 import { escapeHtml, ago } from './words.js'
 import { progressHtml } from './progress.js'
 import * as deliverables from './deliverables.js'
+import { projectName } from './names.js'
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 
@@ -158,7 +159,7 @@ export function library() {
     const cards = items.filter(deliverables.isDeliverable)
     const rest = items.filter(o => o.type !== 'image' && !deliverables.isDeliverable(o))
     return `<section class="lib-group folder">
-      <p class="lib-thread"><span>${escapeHtml(n?.projectName ?? '')}</span><button type="button" data-pick="${escapeHtml(sid(session))}">${escapeHtml(n?.label ?? session)}</button><small>${plural(items.length, 'thing')}</small></p>
+      <p class="lib-thread"><span>${escapeHtml(n?.project ? projectName(n.project, n.projectName) : n?.projectName ?? '')}</span><button type="button" data-pick="${escapeHtml(sid(session))}">${escapeHtml(n?.label ?? session)}</button><small>${plural(items.length, 'thing')}</small></p>
       ${cards.length ? `<div class="dvs">${cards.slice(0, 8).map(o => deliverables.card(o, { where: o.agent ? nodes.get(`a:${o.session}:${o.agent}`)?.label : '', copied: deliverables.copiedKey() })).join('')}</div>` : ''}
       ${pics.length ? `<div class="gallery">${pics.slice(0, 6).map(o => outputCard(o)).join('')}</div>` : ''}
       ${rest.length ? `<div class="outs files">${rest.slice(0, 8).map(o => outputCard(o)).join('')}</div>` : ''}

@@ -252,6 +252,119 @@
   .tx-hint { grid-column: 1 / -1; margin: 0; font-size: 10.5px; color: var(--muted); }
   @media (prefers-reduced-motion: reduce) { .tx-dot.running { animation: none; } }
 
+  /* Speak human: a run of tool calls as one plain step that opens to the
+     raw lines, and the settings menu with Developer view. */
+  .tx.steps { align-self: stretch; font-size: 12px; line-height: 1.45; color: var(--muted); }
+  .tx.steps > summary { cursor: pointer; list-style: none; display: flex; align-items: baseline; gap: 0; padding: 2px 0; border-radius: 6px; }
+  .tx.steps > summary::-webkit-details-marker { display: none; }
+  .tx.steps > summary:hover .step-text { color: var(--ink); }
+  .tx.steps > summary::after { content: "›"; margin-left: 6px; color: var(--muted); transition: transform .15s; }
+  .tx.steps[open] > summary::after { transform: rotate(90deg); }
+  .tx.steps .step-text { flex: 0 1 auto; }
+  .tx.steps small { margin-left: 8px; font: 10.5px var(--mono); color: var(--muted); white-space: nowrap; }
+  .tx.steps.bad .step-text { color: var(--crit); }
+  .step-lines { margin: 3px 0 4px 3px; padding-left: 10px; border-left: 2px solid var(--line); display: flex; flex-direction: column; gap: 2px; }
+  .step-lines .tx.tool { font-size: 11px; }
+  .bubble dd.words { font-family: var(--sans); font-size: 11.5px; white-space: normal; max-width: 170px; }
+  body.dev .bubble dd.words { font-family: var(--mono); font-size: 10.5px; white-space: nowrap; }
+  .settings { position: relative; display: inline-flex; }
+  .gear { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; padding: 3px 8px; border-radius: 999px; }
+  .gear:hover, .gear[aria-expanded="true"] { color: var(--ink); background: color-mix(in srgb, var(--line) 50%, transparent); }
+  .gear svg { width: 16px; height: 16px; }
+  .settings-pop { position: absolute; top: calc(100% + 10px); right: 0; z-index: 20; width: 260px; padding: 10px 12px; border-radius: 12px; background: var(--paper); }
+  .switch { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
+  .switch input { appearance: none; -webkit-appearance: none; flex: none; width: 30px; height: 18px; margin: 2px 0 0; border-radius: 999px; background: var(--line); position: relative; cursor: pointer; transition: background .15s; }
+  .switch input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--paper); box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .15s; }
+  .switch input:checked { background: var(--accent); }
+  .switch input:checked::after { transform: translateX(12px); }
+  .switch input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .switch b { display: block; font-weight: 600; font-size: 13px; }
+  .switch small { display: block; color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+  @media (prefers-reduced-motion: reduce) { .switch input, .switch input::after, .tx.steps > summary::after { transition: none; } }
+  @media (max-width: 900px) { .gear span { display: none; } .settings-pop { right: -40px; } }
+
+  /* Friendly names: a project's icon (click it to rename the project or
+     pick another), and context as energy, draining as the window fills. */
+  .picon { display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; border-radius: 6px; font-size: 12.5px; line-height: 1; border: 1px solid color-mix(in srgb, var(--ink) 12%, transparent); cursor: pointer; flex: none; }
+  .picon:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
+  .tag.project .picon { width: 18px; height: 18px; margin: 0 6px 0 -4px; font-size: 11.5px; border: 0; background: transparent; vertical-align: -3px; }
+  .tag.project .picon:hover { background: color-mix(in srgb, var(--line) 70%, transparent); box-shadow: none; }
+  .energy { display: inline-flex; align-items: center; gap: 5px; font: 500 11px var(--sans); white-space: nowrap; vertical-align: -1px; }
+  .energy i { position: relative; display: inline-block; width: 16px; height: 8px; border-radius: 2.5px; border: 1.2px solid currentColor; opacity: .9; }
+  .energy i::after { content: ""; position: absolute; right: -3.5px; top: 1.5px; width: 2px; height: 3px; border-radius: 0 1px 1px 0; background: currentColor; }
+  .energy b { position: absolute; left: 1px; top: 1px; bottom: 1px; max-width: calc(100% - 2px); border-radius: 1px; background: currentColor; }
+  .energy.fresh { color: var(--ok); } .energy.busy { color: var(--teal); } .energy.full { color: var(--warn); } .energy.tired { color: var(--crit); }
+  .tag .energy { margin-left: 5px; vertical-align: 0; }
+  .tag .energy i { width: 12px; height: 7px; }
+  .energy-word.fresh { color: var(--ok); } .energy-word.busy { color: var(--teal); } .energy-word.full { color: var(--warn); } .energy-word.tired { color: var(--crit); }
+  .dgauge .energy-word { font-size: 22px; white-space: nowrap; }
+  .energy-bar .fresh { background: var(--ok); } .energy-bar .busy { background: var(--teal); } .energy-bar .full { background: var(--warn); } .energy-bar .tired { background: var(--crit); }
+  .proj-edit { position: fixed; z-index: 40; width: 264px; padding: 12px 14px; background: var(--paper); }
+  .proj-edit[hidden] { display: none; }
+  .pe-name { display: grid; gap: 3px; font-size: 11.5px; color: var(--muted); }
+  .pe-name input { font: 14px var(--sans); color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  .pe-name input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); border-color: var(--accent); }
+  .pe-icons { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; margin: 10px 0 6px; }
+  .pe-icons button { font-size: 16px; line-height: 1; padding: 4px 0; border-radius: 7px; }
+  .pe-icons button:hover { background: color-mix(in srgb, var(--line) 60%, transparent); }
+  .pe-icons button[aria-pressed="true"] { background: color-mix(in srgb, var(--accent) 18%, transparent); box-shadow: inset 0 0 0 1.5px var(--accent); }
+  .pe-from { margin: 2px 0 8px; font-size: 11px; color: var(--muted); }
+  .pe-from code { font: 10.5px var(--mono); }
+  .pe-actions { display: flex; justify-content: space-between; }
+  .pe-actions button { font-size: 12.5px; padding: 5px 12px; border-radius: 8px; color: var(--muted); }
+  .pe-actions button:disabled { opacity: .4; cursor: default; }
+  .pe-actions .primary { background: var(--accent); color: #fff; font-weight: 500; }
+
+  /* A calm activity feed: outcomes lead with a mark, comings and goings
+     are quiet, bumps Claude worked past fold into one line, and only real
+     blockers are red. */
+  #moments .mark { display: inline-grid; place-items: center; width: 15px; height: 15px; margin-right: 6px; border-radius: 50%; font: 700 9.5px/1 var(--sans); color: #fff; vertical-align: 1px; background: var(--muted); }
+  #moments li.done .mark { background: var(--ok); }
+  #moments li.made .mark { background: var(--lilac); }
+  #moments li.ask .mark { background: var(--teal); }
+  #moments li.block .mark { background: var(--crit); }
+  #moments li.cleared .mark { background: color-mix(in srgb, var(--muted) 60%, transparent); }
+  #moments li.block span { color: var(--crit); font-weight: 500; }
+  #moments li.quiet span, #moments li.cleared span { color: var(--muted); }
+  #moments li.quiet { font-size: 11.5px; }
+  #moments li em { font-style: normal; color: var(--muted); }
+  #moments li.bumps summary { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; cursor: pointer; list-style: none; color: var(--muted); }
+  #moments li.bumps summary::-webkit-details-marker { display: none; }
+  #moments li.bumps summary span::before { content: "⤳"; margin-right: 6px; color: var(--warn); }
+  #moments li.bumps summary:hover span { color: var(--ink); }
+  #moments li.bumps summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+  #moments li.bumps ul { margin: 0 0 4px 6px; padding: 0 0 0 10px; list-style: none; border-left: 2px solid var(--line); }
+  #moments li.bumps ul li { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; border: 0; opacity: 1; font-size: 11.5px; color: var(--muted); }
+  #moments li.bumps details > button { margin: 0 0 6px 18px; font-size: 11.5px; color: var(--accent); }
+
+  /* What am I looking at? Labels laid over the office, each with a pin on
+     what it explains; on a phone the labels are a list under the pins. */
+  .helpbtn { display: inline-grid; place-items: center; width: 24px; height: 24px; margin: 0 2px; border-radius: 50%; border: 1.5px solid currentColor; color: var(--muted); font: 700 12.5px/1 var(--sans); }
+  .helpbtn:hover, .helpbtn[aria-expanded="true"] { color: var(--accent); }
+  .help { position: fixed; inset: 0; z-index: 60; background: color-mix(in srgb, #14100c 34%, transparent); cursor: pointer; }
+  .help[hidden] { display: none; }
+  .help-head { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); width: min(440px, calc(100% - 32px)); padding: 12px 16px; text-align: center; background: var(--paper); cursor: default; }
+  .help-head h2 { margin: 0; font: 600 18px var(--serif); }
+  .help-head p { margin: 4px 0 9px; font-size: 12.5px; color: var(--muted); }
+  .help-head kbd { font: 11px var(--mono); padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; }
+  .help-close { padding: 5px 16px; border-radius: 999px; background: var(--accent); color: #fff; font-weight: 500; font-size: 12.5px; }
+  .help-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .help-lines line { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 3 3; }
+  .help-notes { list-style: none; margin: 0; padding: 0; }
+  .help-note { position: absolute; width: 210px; box-sizing: border-box; padding: 8px 11px; font-size: 12px; line-height: 1.42; background: var(--paper); color: var(--ink); animation: help-fade .22s ease-out both; }
+  .help-note b { font: 600 13px var(--serif); }
+  .help-num, .help-pin { display: inline-grid; place-items: center; border-radius: 50%; background: var(--accent); color: #fff; font: 700 10px/1 var(--sans); }
+  .help-num { width: 16px; height: 16px; margin-right: 5px; vertical-align: 1px; }
+  .help-pin { position: absolute; width: 22px; height: 22px; font-size: 11px; transform: translate(-50%, -50%); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent), 0 2px 6px rgba(0, 0, 0, .3); animation: help-pop .28s ease-out both; }
+  @keyframes help-fade { from { opacity: 0; transform: translateY(4px); } }
+  @keyframes help-pop { from { opacity: 0; transform: translate(-50%, -50%) scale(.4); } }
+  .help.narrow .help-notes { position: absolute; left: 12px; right: 12px; bottom: 12px; max-height: 38%; overflow-y: auto; display: grid; gap: 6px; border-radius: 14px; }
+  .help.narrow .help-head p { font-size: 12px; margin: 2px 0 6px; }
+  .help-pin[hidden] { display: none; }
+  .help.narrow .help-note { position: static; width: auto; }
+  .help.narrow .help-head { padding: 10px 14px; }
+  @media (prefers-reduced-motion: reduce) { .help-note, .help-pin { animation: none; } }
+
 
 
   /* Waiting on you: a letter for each thread whose next move is yours,
@@ -769,6 +882,16 @@
           <span>Sound on</span>
         </button>
         <label class="toggle" title="Show past sessions"><input type="checkbox" id="show-past" checked> <span>Past sessions</span></label>
+        <button class="helpbtn" id="help-open" type="button" aria-expanded="false" aria-keyshortcuts="?" aria-label="What am I looking at?" title="What am I looking at? (?)"><span aria-hidden="true">?</span></button>
+        <span class="settings">
+          <button class="gear" id="settings-open" type="button" aria-expanded="false" aria-controls="settings" title="Settings">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 6.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8Z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            <span>Settings</span>
+          </button>
+          <div class="settings-pop paper" id="settings" role="group" aria-label="Settings" hidden>
+            <label class="switch"><input type="checkbox" role="switch" id="dev-view"><span><b>Developer view</b><small>Show the raw commands, file paths and exact numbers instead of plain words.</small></span></label>
+          </div>
+        </span>
         <span class="status" id="conn"><i></i><span>Connecting…</span></span>
       </span>
     </header>
@@ -802,7 +925,7 @@
     </div>
     <dialog id="desk" class="paper" closedby="any" aria-labelledby="desk-title"></dialog>
     <div id="toasts" aria-live="polite"></div>
-    <span class="hint paper"><kbd>j</kbd> <kbd>k</kbd> move between threads and agents &middot; <kbd>r</kbd> reply &middot; <kbd>1</kbd>–<kbd>4</kbd> tabs &middot; <kbd>Esc</kbd> back &middot; drag to look around</span>
+    <span class="hint paper"><kbd>j</kbd> <kbd>k</kbd> move between threads and agents &middot; <kbd>r</kbd> reply &middot; <kbd>1</kbd>–<kbd>4</kbd> tabs &middot; <kbd>Esc</kbd> back &middot; <kbd>?</kbd> what’s what &middot; drag to look around</span>
   </main>
 </div>
 

@@ -10,12 +10,15 @@
 //                          agent you pick: Conversation, Team, Details
 
 import { nodes, outputs, fill, warnings, sid, WARN_AT, threadState, agentState, teamOf, lineage, mailOf } from './model.js'
-import { moments, activity, escapeHtml, quote, ago } from './words.js'
+import { moments, activity, escapeHtml, quote, ago, say, doingNow, momentText } from './words.js'
 import { pct, level, tintOf, sessionTint, roomKey } from './table.js'
 import * as transcript from './transcript.js'
 import * as assets from './assets.js'
 import { progressHtml } from './progress.js'
 import * as deliverables from './deliverables.js'
+import { goalTitle, projectName, projectIcon, energy, energyMeter } from './names.js'
+import { devView } from './prefs.js'
+import { openProjectEditor } from './project-editor.js'
 
 const $ = sel => document.querySelector(sel)
 const k = n => (n === undefined ? '—' : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : `${Math.round(n / 1000)}k`)
@@ -24,8 +27,14 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 const INBOX_KEEP = 4
 const PAST_PER_PROJECT = 3
 
-// Cards and details use the whole first prompt; the table keeps it short.
-const title = n => n.prompts?.[0]?.text ?? n.label
+// Cards and details title a thread by its goal (the first prompt, tidied
+// up); the table keeps it short.
+const title = n => goalTitle(n.prompts?.[0]?.text) || n.label
+// A project as you named it, or prettified: acme/payments-api is "Payments API".
+const where = n => (n.project ? projectName(n.project, n.projectName) : n.projectName ?? 'Elsewhere')
+// How full a window is: an energy meter in plain words, the exact
+// percentage in Developer view.
+const ctxBadge = (f, opts) => (devView() ? `<span class="pct ${level(f)}">${pct(f)}</span>` : energyMeter(f, opts))
 const isLive = n => n.kind === 'session' && !n.past && n.status !== 'done'
 
 const STATE_WORDS = {
@@ -43,14 +52,16 @@ function projectsList() {
   const byProject = new Map()
   for (const n of nodes.values()) {
     if (n.kind !== 'session') continue
-    const key = n.projectName ?? 'Elsewhere'
+    const key = n.project ?? 'Elsewhere'
     if (!byProject.has(key)) byProject.set(key, [])
     byProject.get(key).push(n)
   }
-  return [...byProject].map(([name, list]) => {
+  return [...byProject].map(([id, list]) => {
+    const raw = list[0].projectName ?? 'Elsewhere'
+    const name = where(list[0])
     const live = list.filter(isLive).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0))
     const past = list.filter(n => !isLive(n)).sort((a, b) => (b.endedAt ?? b.lastAt ?? 0) - (a.endedAt ?? a.lastAt ?? 0)).slice(0, PAST_PER_PROJECT)
-    return { name, live, past }
+    return { id, raw, name, live, past }
   }).sort((a, b) => (b.live.length > 0) - (a.live.length > 0) || a.name.localeCompare(b.name))
 }
 
@@ -98,7 +109,7 @@ function cardInfo(n, running) {
     const [first, ...more] = assets.asksFor(n)
     return `
     <button class="card-head" data-pick="${escapeHtml(n.id)}" data-hover="${escapeHtml(n.id)}" title="Open the conversation">
-      <span class="card-where"><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(n.projectName ?? 'Elsewhere')}${n.thread ? '<span class="badge">thread</span>' : ''}<time>${ago(first.t)}</time></span>
+      <span class="card-where"><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(where(n))}${n.thread ? '<span class="badge">thread</span>' : ''}<time>${ago(first.t)}</time></span>
       <b>${escapeHtml(title(n))}</b>
     </button>
     ${assets.askCard(first, { answerable: answerable(), compact: true })}
@@ -111,7 +122,7 @@ function cardInfo(n, running) {
       : said ? quote(said) : n.turns ? 'Done with your last request.' : 'Ready for its first prompt.'
   return `
     <button class="card-head" data-pick="${escapeHtml(n.id)}" data-hover="${escapeHtml(n.id)}" title="Open the conversation">
-      <span class="card-where"><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(n.projectName ?? 'Elsewhere')}${n.thread ? '<span class="badge">thread</span>' : ''}<time>${ago(n.answeredAt ?? n.startedAt)}</time></span>
+      <span class="card-where"><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(where(n))}${n.thread ? '<span class="badge">thread</span>' : ''}<time>${ago(n.answeredAt ?? n.startedAt)}</time></span>
       <b>${escapeHtml(title(n))}</b>
       ${assets.progress(n)}
       <span class="card-said">${escapeHtml(blurb)}</span>
@@ -215,7 +226,9 @@ function fullWindows() {
   return warnings().slice(0, 3).map(n => {
     const host = n.kind === 'agent' ? nodes.get(sid(n.session)) : null
     const name = n.kind === 'agent' ? `${n.label} in ${quote(host?.label ?? '')}` : quote(n.label)
-    return `<li><button data-pick="${escapeHtml(n.id)}"><span class="pct ${level(fill(n))}">${pct(fill(n))}</span> ${escapeHtml(name)} will compact soon</button></li>`
+    return devView()
+      ? `<li><button data-pick="${escapeHtml(n.id)}"><span class="pct ${level(fill(n))}">${pct(fill(n))}</span> ${escapeHtml(name)} will compact soon</button></li>`
+      : `<li><button data-pick="${escapeHtml(n.id)}">${energyMeter(fill(n))} ${escapeHtml(name)} will tidy up its memory soon</button></li>`
   }).join('')
 }
 
@@ -223,13 +236,27 @@ function fullWindows() {
 // Activity: every moment, or only messages, or only problems.
 
 let feed = 'all'
-const FEEDS = { all: () => true, mail: m => m.tone === 'mail', bad: m => m.tone === 'bad' }
+const FEEDS = { all: () => true, mail: m => m.tone === 'mail', bad: m => ['bad', 'block', 'bumps'].includes(m.tone) }
+// What leads each outcome: finished, made something, asked you.
+const MARKS = { done: '✓', made: '✦', ask: '?', block: '!', cleared: '✓' }
+const openBumps = new Set() // the bump lines you've opened, by when they started
+
+function momentRow(m) {
+  const mark = MARKS[m.tone] ? `<i class="mark" aria-hidden="true">${MARKS[m.tone]}</i>` : ''
+  const answered = m.answer ? ` <em>You picked ${escapeHtml(quote(m.answer))}.</em>` : ''
+  if (m.tone === 'bumps') {
+    const key = `${m.target}|${m.bumps.at(-1)?.t}`
+    return `<li class="bumps"><details data-bumps="${escapeHtml(key)}" ${openBumps.has(key) ? 'open' : ''}><summary><span>${escapeHtml(m.text)}</span><time>${ago(m.t)}</time></summary>
+      <ul>${m.bumps.map(b => `<li>${escapeHtml(devView() ? b.raw : b.text)}<time>${ago(b.t)}</time></li>`).join('')}</ul>
+      <button data-pick="${escapeHtml(m.target ?? '')}">Open the thread</button></details></li>`
+  }
+  return `<li class="${m.tone}"><button data-pick="${escapeHtml(m.target ?? '')}"><span>${mark}${escapeHtml(momentText(m))}${answered}</span><time>${ago(m.t)}</time></button></li>`
+}
 
 function activityList() {
   const list = moments.filter(FEEDS[feed]).slice(0, 14)
   const empty = { all: 'Quiet so far.', mail: 'No messages between agents yet.', bad: 'Nothing has gone wrong.' }[feed]
-  return list.map(m => `<li class="${m.tone}"><button data-pick="${escapeHtml(m.target ?? '')}"><span>${escapeHtml(m.text)}</span><time>${ago(m.t)}</time></button></li>`).join('') ||
-    `<li class="muted"><span>${empty}</span></li>`
+  return list.map(momentRow).join('') || `<li class="muted"><span>${empty}</span></li>`
 }
 
 // ---------------------------------------------------------------------------
@@ -242,7 +269,7 @@ function agentRow(a, depth) {
     <button class="agent-row ${state}" style="--depth:${depth}" data-pick="${escapeHtml(a.id)}" data-hover="${escapeHtml(a.id)}">
       <i class="dot ${tintOf(a.type)}"></i>
       <span class="aname">${escapeHtml(a.label)}${a.description && a.description !== a.label ? `<span class="muted"> · ${escapeHtml(a.description)}</span>` : ''}</span>
-      <span class="astate">${a.mailAt && Date.now() - a.mailAt < 8000 ? '<i class="env" title="Just got a message">✉</i>' : ''}${state === 'working' && a.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span>` : `<i class="sdot ${state}" title="${STATE_WORDS[state]}"></i>`}</span>
+      <span class="astate">${a.mailAt && Date.now() - a.mailAt < 8000 ? '<i class="env" title="Just got a message">✉</i>' : ''}${state === 'working' && a.context?.tokens ? ctxBadge(f, { bare: true }) : `<i class="sdot ${state}" title="${STATE_WORDS[state]}"></i>`}</span>
     </button>`
 }
 
@@ -273,7 +300,7 @@ function threadRow(n, running, selected) {
   const f = fill(n)
   const doing = !live ? `ended ${ago(n.endedAt ?? n.lastAt)}`
     : state === 'asking' ? `asks: ${assets.asksFor(n)[0]?.questions?.[0]?.question ?? assets.asksFor(n)[0]?.summary ?? 'a plan to approve'}`
-    : state === 'working' ? (n.todos?.find(i => i.status === 'in_progress')?.text ?? activity.get(n.id)?.actions[0]?.text ?? 'working')
+    : state === 'working' ? (n.todos?.find(i => i.status === 'in_progress')?.text ?? doingNow(n.id) ?? (activity.get(n.id)?.actions[0] ? say(activity.get(n.id).actions[0]) : 'working'))
       : state === 'stuck' ? 'its last turn didn’t finish'
         : n.answer?.text ? `said ${quote(n.answer.text)}` : 'ready for you'
   return `
@@ -281,9 +308,9 @@ function threadRow(n, running, selected) {
       <button class="entry" data-pick="${escapeHtml(n.id)}" data-hover="${escapeHtml(n.id)}">
         <i class="dot ${sessionTint(n.session)}"></i>
         <span class="ename">${escapeHtml(title(n))}${n.thread ? '<span class="badge" title="A claude.ai project’s coordinator handed this session its work">thread</span>' : ''}</span>
-        ${live ? pill(state) : n.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span>` : '<span></span>'}
+        ${live ? pill(state) : n.context?.tokens ? ctxBadge(f, { bare: true }) : '<span></span>'}
         ${live ? assets.progress(n) : ''}
-        <span class="estate">${live && n.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span> · ` : ''}${escapeHtml(doing)}</span>
+        <span class="estate">${live && n.context?.tokens ? `${ctxBadge(f)} · ` : ''}${escapeHtml(doing)}</span>
       </button>
       ${live ? teamRows(n) : ''}
     </div>`
@@ -297,7 +324,7 @@ function directory(running, selected) {
     <h2 class="sideh">Projects <small>${live.length ? `${working} working · ${live.length - working} with you` : 'none live'}</small></h2>
     ${projects.map(p => `
       <section class="project">
-        <p class="room"><i class="room-${roomKey(p.name)}"></i>${escapeHtml(p.name)}<small>${p.live.length ? plural(p.live.length, 'thread') : 'earlier'}</small></p>
+        <p class="room"><button type="button" class="picon room-${roomKey(p.raw)}" data-edit-project="${escapeHtml(p.id)}" data-raw="${escapeHtml(p.raw)}" title="Rename or change the icon" aria-label="Rename ${escapeHtml(p.name)} or change its icon">${projectIcon(p.id, p.raw)}</button>${escapeHtml(p.name)}<small>${p.live.length ? plural(p.live.length, 'thread') : 'earlier'}</small></p>
         ${p.live.map(n => threadRow(n, running, selected)).join('')}
         ${p.past.length ? `${p.live.length ? '<p class="earlier">Earlier</p>' : ''}${p.past.map(n => threadRow(n, running, selected)).join('')}` : ''}
       </section>`).join('') || '<p class="muted">No sessions yet. Start Claude Code anywhere and it appears here.</p>'}`
@@ -328,9 +355,23 @@ function limits(n) {
   return n.rateLimits.map(r => line(`${escapeHtml(r.kind.replace('_', ' '))} limit`, `${Math.round(r.percentUsed)}% used`)).join('')
 }
 
+// In plain words: how much energy it has left, and what that means.
+const ENERGY_SAYS = {
+  fresh: 'Plenty of room to think.', busy: 'Has a fair bit on its mind.',
+  full: 'Its memory of this conversation is filling up.', tired: 'Nearly out of room. It will tidy up its memory soon, and keep going.',
+}
+
 function gauge(n, live, whose) {
   if (!n.context?.tokens) return ''
   const f = fill(n)
+  if (!devView()) {
+    const e = energy(f)
+    const tip = `${pct(f)} of ${whose} context window ${live ? 'is' : 'was'} in use: ${k(n.context.tokens)} of ${k(n.context.window)} tokens`
+    return `
+    <div class="dgauge" title="${escapeHtml(tip)}"><span class="big energy-word ${e.key}">${e.word}</span><span>${live ? ENERGY_SAYS[e.key] : 'When it ended.'}</span></div>
+    <span class="meter energy-bar" title="${escapeHtml(tip)}"><span class="${e.key}" style="width:${(Math.max(0.04, 1 - f) * 100).toFixed(1)}%"></span></span>
+    ${n.compactions?.length ? `<p class="dmeta">Tidied up its memory ${plural(n.compactions.length, 'time')}</p>` : ''}`
+  }
   return `
     <div class="dgauge"><span class="big ${level(f)}">${pct(f)}</span><span>of ${whose} context window ${live ? 'is' : 'was'} in use${live && f >= WARN_AT ? '. It will compact soon.' : '.'}</span></div>
     <span class="meter"><span class="${level(f)}" style="width:${(f * 100).toFixed(1)}%"></span></span>
@@ -340,7 +381,7 @@ function gauge(n, live, whose) {
 // Project › thread › agent › agent, each a way back up.
 function crumbs(n) {
   const chain = lineage(n)
-  const parts = [`<button data-back>${escapeHtml(chain[0]?.projectName ?? 'Projects')}</button>`]
+  const parts = [`<button data-back>${escapeHtml(chain[0] ? where(chain[0]) : 'Projects')}</button>`]
   chain.slice(0, -1).forEach(x => parts.push(`<button data-pick="${escapeHtml(x.id)}">${escapeHtml(x.label)}</button>`))
   return `<nav class="crumbs" aria-label="Where this is">${parts.join('<span aria-hidden="true">›</span>')}</nav>`
 }
@@ -350,7 +391,7 @@ function messagesFor(n) {
   const list = mailOf(host).filter(m => n.kind === 'session' || m.from === n.id || m.to === n.id).slice(0, 5)
   if (!list.length) return ''
   return `<h3>Messages</h3>${list.map(m => `
-    <p class="mail"><b>${escapeHtml(m.fromName ?? 'Someone')} → ${escapeHtml(m.toName ?? 'someone')}</b>${m.text ? `<span>${escapeHtml(m.text)}</span>` : ''}<time>${ago(m.t)}</time></p>`).join('')}`
+    <p class="mail"><b>${escapeHtml(m.fromName ?? 'Someone')} → ${escapeHtml(m.toName ?? 'someone')}</b>${m.text ? `<span>${escapeHtml(momentText(m))}</span>` : ''}<time>${ago(m.t)}</time></p>`).join('')}`
 }
 
 // The Team tab: the lead, then everyone it spawned, nested.
@@ -370,7 +411,7 @@ function teamTab(n, running) {
         <i class="dot ${tintOf(node.type)}"></i>
         <span class="mname">${escapeHtml(node.label)}${kind ? `<small>${escapeHtml(kind)}</small>` : ''}</span>
         ${pill(state)}
-        <span class="mdesc">${escapeHtml(node.description ?? '')}${node.context?.tokens ? ` · ${pct(fill(node))} of its window` : ''}</span>
+        <span class="mdesc">${escapeHtml(node.description ?? '')}${node.context?.tokens ? (devView() ? ` · ${pct(fill(node))} of its window` : ` · ${energy(fill(node)).word}`) : ''}</span>
       </button>`)
     walk(children, d + 1)
   })
@@ -402,7 +443,7 @@ function sessionDetails(n) {
     ${facts ? `<p class="dmeta">${escapeHtml(facts)}</p>` : ''}
     ${live ? breakdown(n) + limits(n) : ''}
     ${files.length ? `<h3>Files it has worked on</h3>${files.map(fileLine).join('')}` : ''}
-    ${act?.actions.length ? `<h3>Recently</h3>${act.actions.slice(0, 8).map(x => line(escapeHtml(x.text), ago(x.t), x.ok ? '' : 'bad')).join('')}` : ''}
+    ${act?.actions.length ? `<h3>Recently</h3>${act.actions.slice(0, 8).map(x => line(escapeHtml(say(x)), ago(x.t), x.ok ? '' : 'bad')).join('')}` : ''}
     ${n.prompts?.length ? `<h3>What you asked</h3>${[...n.prompts].reverse().slice(0, 6).map(p => line(asked(p), ago(p.t))).join('')}` : ''}`
 }
 
@@ -521,8 +562,10 @@ export function render(args) {
   if (zoomed) patch($('#lightbox'), assets.lightbox(zoomed))
   for (const b of document.querySelectorAll('[data-tab]')) b.onclick = () => setTab(b.dataset.tab)
   for (const b of document.querySelectorAll('[data-feed]')) b.onclick = () => { feed = b.dataset.feed; render(lastArgs) }
+  for (const d of document.querySelectorAll('[data-bumps]')) d.ontoggle = () => { if (d.open) openBumps.add(d.dataset.bumps); else openBumps.delete(d.dataset.bumps) }
   for (const b of document.querySelectorAll('[data-pick]')) b.onclick = () => b.dataset.pick && pick(b.dataset.pick)
   for (const b of document.querySelectorAll('[data-back]')) b.onclick = () => pick(null)
+  for (const b of document.querySelectorAll('[data-edit-project]')) b.onclick = e => { e.stopPropagation(); openProjectEditor(b.dataset.editProject, b.dataset.raw, b) }
   $('#library-open').onclick = () => { libraryOpen = !libraryOpen; render(lastArgs) }
   $('#lightbox').onclick = () => { zoomed = null; render(lastArgs) }
   for (const b of document.querySelectorAll('[data-library]')) b.onclick = () => { libraryOpen = false; render(lastArgs) }

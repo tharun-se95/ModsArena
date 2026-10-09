@@ -10,6 +10,8 @@
 import { nodes, sid, outputs } from './model.js'
 import { activity, escapeHtml, ago } from './words.js'
 import { outputCard } from './assets.js'
+import { describe, stepSummary } from './plain.js'
+import { devView } from './prefs.js'
 
 const POLL_MS = 1500
 const KEEP = 600
@@ -67,6 +69,48 @@ function bubble(entry, results) {
   }
 }
 
+// A run of tool calls between two things said, as one readable step
+// ("Looked through 6 files and ran the tests") that opens to the raw lines.
+// Developer view shows the raw lines on their own, as before.
+// A call with no result yet is still running only at the end of the
+// conversation; earlier, its result is just out of view.
+function stepBubble(tools, results, last) {
+  const calls = tools.map(e => ({ tool: e.name, summary: e.summary, ok: results.get(e.id)?.ok ?? (last ? undefined : true) }))
+  const running = calls.some(c => c.ok === undefined)
+  const bumps = calls.filter(c => c.ok === false).length
+  const state = running ? 'running' : calls.at(-1).ok === false ? 'bad' : 'ok'
+  // While it works: what it has done so far, then what it's doing now.
+  const finished = calls.filter(c => c.ok !== undefined)
+  const current = calls.find(c => c.ok === undefined)
+  const now = current && describe(current.tool, current.summary).now
+  const text = !running ? stepSummary(calls)
+    : finished.length ? `${stepSummary(finished)}, now ${now.charAt(0).toLowerCase()}${now.slice(1)}` : now
+  const meta = [calls.length > 1 ? `${calls.length} steps` : '', bumps && state !== 'bad' ? `${bumps} ${bumps === 1 ? 'bump' : 'bumps'}` : ''].filter(Boolean).join(' · ')
+  return `<details class="tx steps ${state}" data-id="steps-${escapeHtml(tools[0].id)}"><summary><i class="tx-dot ${state}"></i><span class="step-text">${escapeHtml(text)}</span>${meta ? `<small>${meta}</small>` : ''}</summary><div class="step-lines">${tools.map(e => bubble(e, results)).join('')}</div></details>`
+}
+
+// Entries in order, with each run of tool calls gathered into one step.
+function drawEntries(shown, results) {
+  if (devView()) return shown.map(e => bubble(e, results)).join('')
+  const out = []
+  let run = []
+  const flush = last => { if (run.length) out.push(stepBubble(run, results, last)); run = [] }
+  for (const e of shown) {
+    if (e.kind === 'tool') { run.push(e); continue }
+    flush(false)
+    out.push(bubble(e, results))
+  }
+  flush(true)
+  return out.join('')
+}
+
+// Developer view changed: draw again in the other voice.
+export function redraw() {
+  if (!view) return
+  view.html = null
+  draw()
+}
+
 function pendingBubble(p) {
   return `<div class="tx you chat pending ${p.ok === false ? 'failed' : ''}"><span class="tx-from">From the office</span><p>${escapeHtml(p.text)}</p><span class="tx-status">${escapeHtml(p.status)}</span></div>`
 }
@@ -77,7 +121,7 @@ function draw() {
   const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60
   const results = new Map(view.entries.filter(e => e.kind === 'result').map(e => [e.id, e]))
   const shown = view.entries.filter(e => e.kind !== 'result')
-  const html = (shown.map(e => bubble(e, results)).join('') + view.pending.map(pendingBubble).join('')) ||
+  const html = (drawEntries(shown, results) + view.pending.map(pendingBubble).join('')) ||
     `<p class="tx-empty">${escapeHtml(view.empty)}</p>`
   if (html === view.html) return
   view.html = html
@@ -138,17 +182,14 @@ function demoEntries(n) {
   if (!n) return []
   const host = nodes.get(sid(n.session))
   const actions = [...(activity.get(sid(n.session))?.actions ?? [])].reverse()
-  const mine = n.kind === 'agent'
-    ? actions.filter(a => a.text.startsWith(n.label))
-    : actions
+  const mine = actions.filter(a => (n.kind === 'agent' ? a.agent === n.agent : !a.agent))
   const entries = n.kind === 'agent'
     ? [{ kind: 'you', text: n.description ?? `Help with ${host?.label ?? 'the session'}`, t: n.startedAt }]
     : (n.prompts ?? []).map(p => ({ kind: 'you', text: p.text, t: p.t }))
-  mine.forEach((a, i) => {
-    const id = `demo-${n.id}-${a.t}-${i}`
-    // "Explore searched for X": who did it in bold, then what.
-    const [who, what] = a.text.startsWith('The session ') ? ['session', a.text.slice(12)] : [a.text.split(' ')[0], a.text.split(' ').slice(1).join(' ')]
-    entries.push({ kind: 'tool', id, name: who, summary: what, t: a.t })
+  mine.forEach(a => {
+    // Keyed by when it happened, so an opened step stays open as more arrive.
+    const id = `demo-${n.id}-${a.t}-${a.tool}`
+    entries.push({ kind: 'tool', id, name: a.tool, summary: a.summary ?? '', t: a.t })
     entries.push({ kind: 'result', id, ok: a.ok, text: a.ok ? '' : 'Something went wrong (sample activity).' })
   })
   // What it made, and what it asked you, where they happened.
