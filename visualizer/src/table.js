@@ -234,9 +234,9 @@ function readPalette() {
   floor.material.color.copy(palette.scene)
   // Rooms, the coffee corner and the office are rebuilt in the new colors
   // on the next sync.
-  for (const t of rooms.values()) { if (t.mesh) scene.remove(t.mesh); t.w = null }
-  if (coffee) { scene.remove(coffee.group); coffee = null }
-  if (shell) { scene.remove(shell.group); shell = null }
+  for (const t of rooms.values()) { if (t.mesh) unmount(t.mesh); t.w = null }
+  if (coffee) { unmount(coffee.group); coffee = null }
+  if (shell) { unmount(shell.group); shell = null }
   layoutKey = ''
   for (const s of sessionViews.values()) {
     s.track.material.color.copy(palette.line)
@@ -270,6 +270,16 @@ function placeDesk(s) {
   s.desk.group.position.set(0, FLOOR_TOP, DESK_Z)
   s.desk.group.traverse(o => { if (o.isMesh) o.userData.pick = { kind: 'session', id: s.id } })
   s.group.add(s.desk.group)
+}
+
+// Takes a group out of the scene with its labels. three drops a label's
+// element from the page only when that label itself is removed, so a
+// rebuilt room, coffee corner or office would otherwise show its sign twice.
+// A label that is reused (a room's sign, the front desk's) comes back on
+// the next frame once its new group is in the scene.
+function unmount(group) {
+  group.removeFromParent()
+  group.traverse(o => { if (o.isCSS2DObject) o.element.remove() })
 }
 
 function label(html, cls) {
@@ -319,7 +329,7 @@ function ensureCoffee() {
 function ensureShell(W, D) {
   const key = `${Math.round(W)}x${Math.round(D)}`
   if (shell && key === shellKey) return
-  if (shell) scene.remove(shell.group)
+  if (shell) unmount(shell.group)
   shell = officeShell({ W, D, colors: roomColors('a') })
   shellKey = key
   scene.add(shell.group)
@@ -422,7 +432,7 @@ function ensureRoom(p) {
   const d = BACK_SPACE + BEHIND + (Math.ceil(p.sessions.length / cols) - 1) * ROW_DEPTH + IN_FRONT
   t.cols = cols
   if (t.w !== w || t.d !== d) {
-    if (t.mesh) scene.remove(t.mesh)
+    if (t.mesh) unmount(t.mesh)
     const built = buildRoom({ w, d, name: p.name, colors: roomColors(roomOf(p.name)) })
     t.mesh = built.group
     t.plants = built.plants
@@ -492,8 +502,7 @@ function ensureSession(n) {
 function dropSession(id) {
   const s = sessionViews.get(id)
   if (!s) return
-  scene.remove(s.group)
-  for (const el of [s.label.el, s.zzz.el, s.oops.el, s.bell.el]) el.remove()
+  unmount(s.group)
   sessionViews.delete(id)
   for (const [key, a] of agentViews) if (a.session === id) dropAgent(key)
 }
@@ -531,9 +540,7 @@ function ensureAgent(n, s) {
 function dropAgent(id) {
   const a = agentViews.get(id)
   if (!a) return
-  scene.remove(a.group)
-  a.oops.el.remove()
-  a.tag.el.remove()
+  unmount(a.group)
   if (a.spot !== undefined) coffee?.taken.delete(a.spot)
   agentViews.delete(id)
 }
@@ -794,7 +801,7 @@ export function sync(showPast) {
     p.sessions.forEach(n => { shownSessions.add(n.id); ensureSession(n) })
   }
   for (const id of [...rooms.keys()]) {
-    if (!list.some(p => p.id === id)) { scene.remove(rooms.get(id).mesh); rooms.get(id).label.el.remove(); rooms.delete(id) }
+    if (!list.some(p => p.id === id)) { unmount(rooms.get(id).mesh); rooms.get(id).label.el.remove(); rooms.delete(id) }
   }
   if (focusedProject && !rooms.has(focusedProject)) focusedProject = null
   for (const id of [...sessionViews.keys()]) if (!shownSessions.has(id)) dropSession(id)
