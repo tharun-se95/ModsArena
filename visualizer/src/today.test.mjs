@@ -25,6 +25,23 @@ const outputs = [
 const helpers = [{ t: day + 1, type: 'Explore' }, { t: day + 2, type: 'Explore' }, { t: day + 3, type: 'Plan' }, { t: yesterday, type: 'Old' }]
 const stateOf = n => (n.askAt ? 'asking' : 'waiting')
 
+test('a thread with its checklist done that waits on you is listed only once, under Waiting on you', () => {
+  const done = [{ text: 'x', status: 'completed' }]
+  const threads = [
+    { kind: 'session', id: 's:w', session: 'w', prompts: [{ t: day + 1, text: 'Waits on a reply' }], todos: done },
+    { kind: 'session', id: 's:q', session: 'q', prompts: [{ t: day + 2, text: 'Has a question' }], todos: done },
+    { kind: 'session', id: 's:x', session: 'x', prompts: [{ t: day + 3, text: 'Stopped' }], todos: done },
+    { kind: 'session', id: 's:k', session: 'k', prompts: [{ t: day + 4, text: 'Still going' }], todos: done },
+    { kind: 'session', id: 's:e', session: 'e', status: 'done', endedAt: day + 5, prompts: [{ t: day + 5, text: 'Ended' }], todos: done },
+  ]
+  const states = { w: 'waiting', q: 'asking', x: 'stuck', k: 'working' }
+  const r = todayRecap({ nodes: threads, outputs: [], now, stateOf: n => states[n.session] })
+  assert.deepEqual(r.finished.map(f => f.title), ['Ended'])
+  assert.deepEqual(r.waiting.map(w => w.title), ['Waits on a reply', 'Has a question', 'Stopped'])
+  const both = r.finished.filter(f => r.waiting.some(w => w.id === f.id))
+  assert.deepEqual(both, [])
+})
+
 test('the recap counts only what happened since local midnight', () => {
   // The model hands over its nodes as an iterator.
   const r = todayRecap({ nodes: nodes.values(), outputs, helpers, now, stateOf })
@@ -32,7 +49,8 @@ test('the recap counts only what happened since local midnight', () => {
   assert.deepEqual(r.shipped.map(o => o.title), ['Fix the stale cache key', 'Dark chart', 'Flaky build report'])
   assert.equal(r.shipped[0].thread, 'Fix the build')
   assert.deepEqual([r.prs, r.docs, r.pictures, r.files, r.added, r.removed], [1, 1, 1, 1, 4, 1])
-  assert.deepEqual(r.finished.map(f => f.title), ['Fix the build', 'Upgrade React'])
+  // Its checklist is done, but it waits on your reply: only under Waiting.
+  assert.deepEqual(r.finished.map(f => f.title), ['Upgrade React'])
   assert.deepEqual(r.waiting.map(w => [w.title, w.state]), [['Fix the build', 'waiting'], ['Dark mode', 'asking']])
   assert.deepEqual(r.helpers, [{ type: 'Explore', count: 2 }, { type: 'Plan', count: 1 }])
   assert.deepEqual([r.threads, r.asked, r.turns, r.toolCalls, r.errors], [3, 3, 6, 55, 2])
@@ -40,7 +58,7 @@ test('the recap counts only what happened since local midnight', () => {
 
 test('it says the day in plain words', () => {
   const r = todayRecap({ nodes, outputs, helpers, now, stateOf })
-  assert.equal(headline(r), '3 things shipped and 2 threads wrapped up.')
+  assert.equal(headline(r), '3 things shipped and 1 thread wrapped up.')
   assert.equal(shippedWords(r), '1 pull request, 1 doc and 1 picture; 1 file changed (+4 −1 lines)')
   assert.equal(helperWords(r), '3 helpers: Explore ×2, Plan.')
   assert.equal(effortWords(r), 'You asked for 3 things across 3 threads, in 6 back-and-forths. Claude took 55 steps to do it: reading, editing, searching and running things; 2 hit a snag along the way.')

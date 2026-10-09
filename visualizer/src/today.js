@@ -28,12 +28,14 @@ export function todayRecap({ nodes, outputs, helpers = [], now = Date.now(), sta
   const shipped = made.filter(o => o.type !== 'file')
   const files = new Map()
   for (const o of made) if (o.type === 'file') files.set(o.path ?? o.id, o)
-  const finished = today.filter(n => !live(n) ||
-    (n.todos?.length && n.todos.every(i => i.status === 'completed') && stateOf?.(n) !== 'working'))
   const waiting = today.filter(live)
     .map(n => ({ n, state: stateOf?.(n) }))
     .filter(x => x.state in WAITING)
     .map(({ n, state }) => ({ id: n.id, title: title(n), project: n.projectName, state, words: WAITING[state] }))
+  // A thread waiting on you isn't wrapped up yet, whatever its checklist says.
+  const yours = new Set(waiting.map(w => w.id))
+  const finished = today.filter(n => !yours.has(n.id) && (!live(n) ||
+    (n.todos?.length && n.todos.every(i => i.status === 'completed') && stateOf?.(n) !== 'working')))
   const byType = new Map()
   for (const h of helpers) if (h.t >= day) byType.set(h.type, (byType.get(h.type) ?? 0) + 1)
   const sum = key => today.reduce((s, n) => s + (n[key] ?? 0), 0)
