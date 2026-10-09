@@ -551,12 +551,74 @@
     .controls .toggle span, .controls .sound span { display: none; }
   }
   @media (prefers-reduced-motion: reduce) { .flag.zzz i { animation: none; } .card { transition: none; } }
+
+  /* ===== Settings menu (settings.js): a gear in the top bar opens a small
+     popover of toggles that any module can add to. ===== */
+  .gear { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; color: var(--muted); }
+  .gear svg { width: 17px; height: 17px; }
+  .gear:hover, .gear[aria-expanded="true"] { color: var(--ink); background: color-mix(in srgb, var(--line) 60%, transparent); }
+  .settings { top: 58px; right: 16px; z-index: 12; width: 280px; padding: 12px 12px 8px; display: flex; flex-direction: column; gap: 2px; }
+  .settings .eyebrow { margin: 0 4px 4px; }
+  .set-row { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; padding: 8px 6px; border-radius: 10px; cursor: pointer; }
+  .set-row:hover { background: color-mix(in srgb, var(--line) 45%, transparent); }
+  .set-row input { margin: 3px 0 0; width: 16px; height: 16px; accent-color: var(--accent); }
+  .set-row b { display: block; font-weight: 500; font-size: 13px; }
+  .set-row small { display: block; font-size: 11.5px; line-height: 1.35; color: var(--muted); }
+  .set-row.off { cursor: default; }
+  .set-row.off b { color: var(--muted); }
+
+  /* ===== Accessibility (E4): WCAG 2.1 AA. Text colors that hold 4.5:1 on
+     the paper in light and dark (the bright tokens stay for marks and the
+     scene), ink for text on the clay accent, a visible focus ring on
+     everything you can reach with Tab, the office in words for screen
+     readers, and less motion when asked (motion.js). contrast.test.mjs
+     checks these tokens. ===== */
+  :root { --accent-ink: #9c4a2e; --ok-ink: #47704f; --warn-ink: #875c14; --crit-ink: #b4483a; --teal-ink: #1a7870; --lilac-ink: #7050be; --on-accent: #ffffff; --focus: #b85c3c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --accent-ink: #d98463; --ok-ink: #8bb592; --warn-ink: #d6a454; --crit-ink: #e07a6a; --teal-ink: #4cc0b4; --lilac-ink: #ac90ea; --on-accent: #1c1b19; --focus: #e89a7c; }
+  }
+  :root[data-theme="dark"] { --accent-ink: #d98463; --ok-ink: #8bb592; --warn-ink: #d6a454; --crit-ink: #e07a6a; --teal-ink: #4cc0b4; --lilac-ink: #ac90ea; --on-accent: #1c1b19; --focus: #e89a7c; }
+  .pct.ok, .dgauge .big.ok, ins { color: var(--ok-ink); }
+  .pct.warn, .dgauge .big.warn { color: var(--warn-ink); }
+  .pct.crit, .dgauge .big.crit, .line.bad, #moments li.bad span, del, .card-status.bad { color: var(--crit-ink); }
+  #moments li.note span, .tx-from, .ask-eyebrow, .chip, .ask-opt.rec b::after, #inbox-more button, .card-reply button,
+  .back:hover, .crumbs button:hover, .card-head:hover b, .lib-thread button:hover, #moments li > button:hover span { color: var(--accent-ink); }
+  #moments li.mail span::before, .card-status { color: var(--teal-ink); }
+  .pill.working { color: var(--teal-ink); }
+  .pill.waiting { color: var(--accent-ink); }
+  .pill.stuck, .pill.failed { color: var(--crit-ink); }
+  .badge { color: var(--lilac-ink); }
+  .ask.permission .ask-eyebrow { color: var(--warn-ink); }
+  .ask.plan .ask-eyebrow { color: color-mix(in srgb, var(--sky) 55%, var(--ink)); }
+  .count, .tx-compose button, .pill.asking, .tx-answer, .bub .badge, .card-reply button:hover,
+  button.ask-opt.picked, .ask-opts.row .ask-opt.rec { color: var(--on-accent); }
+  .pill.asking::before { background: var(--on-accent); }
+  /* A ring you can see on whatever has keyboard focus. */
+  :where(a, button, input, textarea, select, summary, [tabindex]):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  button:focus-visible { outline-color: var(--focus); }
+  .card-reply:has(textarea:focus-visible) { outline: 2px solid var(--focus); outline-offset: 4px; border-radius: 6px; }
+  .tx-compose textarea:focus-visible { outline: 2px solid var(--focus); }
+  .tab:focus-visible { border-radius: 6px 6px 0 0; }
+  .tabpanel { display: contents; }
+  .sr-only { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  /* The office in words (a11y.js): hidden until you Tab into it, then a
+     card over the bottom of the office. */
+  .scene-list { position: absolute; z-index: 15; left: 50%; bottom: 16px; transform: translateX(-50%); width: min(560px, calc(100% - 32px)); max-height: 45%; overflow-y: auto; padding: 12px 14px; }
+  .scene-list:not(:focus-within) { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  .scene-list h2 { margin: 0 0 2px; font: 600 15px var(--serif); }
+  .scene-list p { margin: 0 0 6px; font-size: 12px; color: var(--muted); }
+  .scene-list li button { width: 100%; padding: 6px 8px; border-radius: 8px; font-size: 13px; }
+  .scene-list li button:hover { background: color-mix(in srgb, var(--line) 55%, transparent); }
+  /* Less motion: the system's setting or the toggle in Settings sets
+     data-motion="reduce" (motion.js); nothing on the page animates. */
+  :root[data-motion="reduce"] *, :root[data-motion="reduce"] *::before, :root[data-motion="reduce"] *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  :root[data-motion="reduce"] .card:hover, :root[data-motion="reduce"] .out.pic:hover { transform: none; }
 </style>
 </head>
 <body>
 <div class="app">
   <main class="stage-wrap">
-    <div id="stage" aria-label="Your sessions in an office: each project is a room, each thread a colorful critter at its own desk, the agents it spawned stand behind it, and small beads rise with each tool call"></div>
+    <div id="stage" role="img" aria-describedby="scene-list-about" aria-label="Your sessions in an office: each project is a room, each thread a colorful critter at its own desk, the agents it spawned stand behind it, and small beads rise with each tool call"></div>
 
     <header class="hud topbar">
       <span class="brand paper">
@@ -564,15 +626,15 @@
         <span class="word">Agent Office</span>
       </span>
       <span class="controls paper">
-        <button class="libbtn" id="library-open" type="button" title="Everything the office has made">
+        <button class="libbtn" id="library-open" type="button" title="Everything the office has made" aria-label="Library">
           <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="3" height="14" rx="1" fill="currentColor"/><rect x="7.5" y="5" width="3" height="12" rx="1" fill="currentColor" opacity=".7"/><rect x="12" y="4" width="3" height="13" rx="1" transform="rotate(-12 13.5 10.5)" fill="currentColor" opacity=".85"/></svg>
           <span>Library</span><span class="count" id="library-count"></span>
         </button>
-        <button class="sound" id="sound" type="button" aria-pressed="true" title="Office sounds">
+        <button class="sound" id="sound" type="button" aria-pressed="true" title="Office sounds" aria-label="Office sounds">
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8h3l4-3.5v11L6 12H3z" fill="currentColor"/><path class="waves" d="M13 7.5a3.5 3.5 0 0 1 0 5M15 5.5a6.4 6.4 0 0 1 0 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path class="cross" d="M13.5 8l4 4m0-4l-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           <span>Sound on</span>
         </button>
-        <label class="toggle" title="Show past sessions"><input type="checkbox" id="show-past" checked> <span>Past sessions</span></label>
+        <label class="toggle" title="Show past sessions"><input type="checkbox" id="show-past" checked aria-label="Past sessions"> <span>Past sessions</span></label>
         <span class="status" id="conn"><i></i><span>Connecting…</span></span>
       </span>
     </header>
@@ -594,9 +656,16 @@
       </section>
     </div>
 
-    <aside class="hud paper" id="side" aria-live="polite"></aside>
+    <aside class="hud paper" id="side" aria-label="Projects"></aside>
     <aside class="hud paper" id="library" aria-label="Library" hidden></aside>
     <div id="lightbox" role="dialog" aria-label="Full size" hidden></div>
+    <section class="scene-list paper" aria-labelledby="scene-list-title">
+      <h2 id="scene-list-title">The office in words</h2>
+      <p id="scene-list-about">Every live thread, its state and its helpers. Pick one to open its conversation.</p>
+      <ul id="scene-list-items"></ul>
+      <p id="scene-list-empty">No threads are running right now.</p>
+    </section>
+    <p id="announce" class="sr-only" role="status" aria-live="polite"></p>
     <span class="hint paper"><kbd>j</kbd> <kbd>k</kbd> move between threads and agents &middot; <kbd>r</kbd> reply &middot; <kbd>1</kbd>–<kbd>4</kbd> tabs &middot; <kbd>Esc</kbd> back &middot; drag to look around</span>
   </main>
 </div>

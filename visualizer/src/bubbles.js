@@ -23,6 +23,7 @@
 // you've selected always speaks in full.
 
 import { escapeHtml } from './words.js'
+import { reduced } from './motion.js'
 
 const RANK = { ask: 0, you: 1, relay: 2, mail: 3, made: 4, answer: 5, think: 6 }
 const TTL = { answer: 6, mail: 4, relay: 5, you: 4, made: 5 }
@@ -88,6 +89,8 @@ export function createBubbles({ stage, headAt, onPick }) {
 
   // An envelope flying from one critter to another.
   function fly(from, to, tint, now) {
+    // With less motion, the bubble says who it's to; no envelope flies.
+    if (reduced()) return
     const el = document.createElement('div')
     el.className = 'bub-fly'
     el.style.setProperty('--tint', `var(--${tint})`)

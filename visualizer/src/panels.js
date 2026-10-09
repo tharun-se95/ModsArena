@@ -127,7 +127,7 @@ function cardElement(n) {
     <div class="card-info"></div>
     <form class="card-reply">
       <textarea rows="1" aria-label="Reply to ${escapeHtml(title(n))}" placeholder="Reply…"></textarea>
-      <button type="submit" aria-label="Send">↵</button>
+      <button type="submit" aria-label="Send reply">↵</button>
       <p class="card-status" hidden></p>
     </form>`
   const form = li.querySelector('form')
@@ -474,7 +474,9 @@ function clipboard(n, running) {
   const teamSize = host && isLive(host) ? countAll(teamOf(host)) : (host?.pastAgents?.length ?? 0)
   const made = assets.outputCount(n)
   const count = name => (name === 'team' && teamSize ? `<small>${teamSize}</small>` : name === 'outputs' && made ? `<small>${made}</small>` : '')
-  const button = ([name, label], i) => `<button type="button" role="tab" class="tab ${tab === name ? 'on' : ''}" aria-selected="${tab === name}" data-tab="${name}" title="${label} (${i + 1})">${label}${count(name)}</button>`
+  // The ARIA tabs pattern: only the open tab is in the Tab order, the
+  // arrow keys move between them (a11y.js), and the body is its panel.
+  const button = ([name, label], i) => `<button type="button" role="tab" id="tab-${name}" aria-controls="tabpanel" tabindex="${tab === name ? 0 : -1}" class="tab ${tab === name ? 'on' : ''}" aria-selected="${tab === name}" data-tab="${name}" title="${label} (${i + 1})">${label}${count(name)}</button>`
   // Above the conversation: what it's holding for you, then where it is in
   // its checklist.
   const asks = assets.asksFor(host ?? n).filter(a => n.kind === 'session' || a.who?.id === n.id)
@@ -483,7 +485,7 @@ function clipboard(n, running) {
     : tab === 'outputs' ? assets.outputsTab(n)
       : tab === 'team' ? teamTab(n, running)
       : n.kind === 'agent' ? agentDetails(n) : sessionDetails(n)
-  return `${head(n, running)}<div class="tabs" role="tablist">${TABS.map(button).join('')}</div>${body}`
+  return `${head(n, running)}<div class="tabs" role="tablist" aria-label="About this ${n.kind === 'agent' ? 'agent' : 'thread'}">${TABS.map(button).join('')}</div><div class="tabpanel" role="tabpanel" id="tabpanel" aria-labelledby="tab-${tab}">${body}</div>`
 }
 
 // Re-render what changed. `selected` is a node id or null; `hover` shows
@@ -500,7 +502,10 @@ export function render(args) {
   patch($('#now'), `<p>${escapeHtml(headline(running))}</p>`)
   renderInbox(running)
   patch($('#full'), fullWindows())
-  for (const b of document.querySelectorAll('[data-feed]')) b.classList.toggle('on', b.dataset.feed === feed)
+  for (const b of document.querySelectorAll('[data-feed]')) {
+    b.classList.toggle('on', b.dataset.feed === feed)
+    b.setAttribute('aria-pressed', String(b.dataset.feed === feed))
+  }
   patch($('#moments'), activityList())
   const n = selected && nodes.get(selected)
   const detail = n && (n.kind === 'agent' || n.kind === 'session')

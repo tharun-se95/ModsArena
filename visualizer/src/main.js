@@ -10,6 +10,9 @@ import * as table from './table.js'
 import * as panels from './panels.js'
 import { unlock, isMuted, setMuted } from './sound.js'
 import * as transcript from './transcript.js'
+import * as settings from './settings.js'
+import * as a11y from './a11y.js'
+import * as motion from './motion.js'
 
 const HISTORY_REFRESH_MS = 60000
 const PANEL_REFRESH_MS = 700
@@ -101,6 +104,15 @@ soundButton.addEventListener('click', () => { setMuted(!isMuted()); showSound() 
 showSound()
 for (const type of ['pointerdown', 'keydown']) addEventListener(type, unlock, { once: true })
 
+// The clipboard's tabs answer the arrow keys.
+addEventListener('keydown', a11y.tabKeys, true)
+
+settings.add({
+  id: 'reduce-motion', type: 'toggle', label: 'Reduce motion',
+  hint: () => (motion.bySystem() ? 'On because your system asks for less motion' : 'No camera glides, hops, confetti or bobbing'),
+  get: motion.reduced, set: motion.setReduced, disabled: motion.bySystem,
+})
+
 const pastToggle = document.getElementById('show-past')
 pastToggle.addEventListener('change', () => {
   showPast = pastToggle.checked
@@ -129,7 +141,9 @@ const answer = {
 
 function refreshPanels() {
   if (selected && !model.nodes.has(selected)) selected = null
-  panels.render({ running: running(), selected, pick, hover: table.setHover, answer })
+  const now = running()
+  panels.render({ running: now, selected, pick, hover: table.setHover, answer })
+  a11y.render({ running: now, pick })
 }
 
 function frame() {
