@@ -70,6 +70,18 @@ test('every critter color is a page token and stands out on every theme', () => 
   }
 })
 
+test('scrollbars are subtle but findable on every theme', () => {
+  for (const id of IDS) {
+    for (const mode of ['light', 'dark']) {
+      const t = { ...page[mode], ...tokensFor(id, mode) }
+      // Resting: soft against the panel; under the pointer: plain to see.
+      assert.ok(ratio(t['scroll-thumb'], t.paper) < ratio(t['scroll-thumb-hover'], t.paper), `${id} ${mode}: hover is stronger`)
+      assert.ok(ratio(t['scroll-thumb-hover'], t.paper) >= 2, `${id} ${mode}: hover thumb on paper`)
+      assert.ok(ratio(t['scroll-thumb'], t.paper) >= 1.2, `${id} ${mode}: resting thumb on paper`)
+    }
+  }
+})
+
 test('walls and decor have names', () => {
   assert.deepEqual(WALLS.map(w => w.id), ['a', 'b', 'c', 'd', 'e', 'f'])
   assert.deepEqual(DECOR.map(d => d.id), ['plants', 'books', 'art', 'lamps'])

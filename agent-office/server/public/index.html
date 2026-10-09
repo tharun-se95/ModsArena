@@ -1265,6 +1265,23 @@
   .critter-edit .pe-swatches { margin-bottom: 10px; }
   /* Text on the accent follows the theme (a bright accent takes dark ink). */
   .pe-actions .primary, .tag.frontdesk small { color: var(--on-accent); }
+  /* ===== Subtle scrollbars: thin, no track, a soft rounded thumb that
+     firms up while you're over the panel. The colors are tokens, so every
+     office theme (themes.js) and dark mode set their own. ===== */
+  :root { --scroll-thumb: #d6cdbf; --scroll-thumb-hover: #a39a8c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --scroll-thumb: #48433c; --scroll-thumb-hover: #7a7268; }
+  }
+  :root[data-theme="dark"] { --scroll-thumb: #48433c; --scroll-thumb-hover: #7a7268; }
+  * { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
+  *:hover { scrollbar-color: var(--scroll-thumb-hover) transparent; }
+  /* Safari (and Chromium without scrollbar-color) take the older rules. */
+  @supports not (scrollbar-color: auto) {
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 999px; }
+    :hover::-webkit-scrollbar-thumb { background: var(--scroll-thumb-hover); }
+  }
 </style>
 </head>
 <body>

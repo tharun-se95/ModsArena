@@ -21,7 +21,7 @@ import { load, save } from './prefs.js'
 
 // Every token a theme sets, in light and in dark. contrast.test.mjs holds
 // the UI ones to WCAG AA; themes.test.mjs checks every theme against it.
-export const UI_KEYS = ['bg', 'paper', 'ink', 'muted', 'line', 'accent', 'accent-ink', 'on-accent', 'focus']
+export const UI_KEYS = ['bg', 'paper', 'ink', 'muted', 'line', 'accent', 'accent-ink', 'on-accent', 'focus', 'scroll-thumb', 'scroll-thumb-hover']
 export const SCENE_KEYS = [
   'scene', 'floor', 'thread', 'clay', 'wood', 'wood-dark', 'trim', 'glow', 'window', 'gem',
   'room-a', 'room-b', 'room-c', 'room-d', 'room-e', 'room-f',
@@ -52,6 +52,7 @@ export const THEMES = {
     light: {
       bg: '#f2f2ef', paper: '#ffffff', ink: '#1b1b1a', muted: '#5c5c58', line: '#e2e2dd',
       accent: '#2d5bd1', 'accent-ink': '#2a54c2', 'on-accent': '#ffffff', focus: '#2d5bd1',
+      'scroll-thumb': '#d4d4cf', 'scroll-thumb-hover': '#9a9a95',
       scene: '#eceae5', floor: '#e3e1db', thread: '#85837d', clay: '#2d5bd1',
       wood: '#e8dbc4', 'wood-dark': '#4a453e', trim: '#fafaf8', glow: '#fff2dc', window: '#cde4f4', gem: '#f2c14e',
       'room-a': '#f3ebe4', 'room-b': '#e6efea', 'room-c': '#e8e9f3', 'room-d': '#f2eddb', 'room-e': '#f2e6ea', 'room-f': '#e4edf3',
@@ -61,6 +62,7 @@ export const THEMES = {
     dark: {
       bg: '#161718', paper: '#202123', ink: '#ededeb', muted: '#a4a4a0', line: '#36373a',
       accent: '#7ea2ff', 'accent-ink': '#8eaeff', 'on-accent': '#121314', focus: '#8eaeff',
+      'scroll-thumb': '#3e3f42', 'scroll-thumb-hover': '#75767a',
       scene: '#18191b', floor: '#212225', thread: '#8b8b88', clay: '#7ea2ff',
       wood: '#8c7f6c', 'wood-dark': '#2e2c29', trim: '#5c5d60', glow: '#ffe6c0', window: '#3a5f80', gem: '#f5c95a',
       'room-a': '#433e3a', 'room-b': '#363f3b', 'room-c': '#3a3b47', 'room-d': '#423e31', 'room-e': '#43383b', 'room-f': '#353e46',
@@ -83,6 +85,7 @@ export const THEMES = {
     light: {
       bg: '#e9edf3', paper: '#f8fafd', ink: '#121925', muted: '#525d6f', line: '#d6dce6',
       accent: '#0d7891', 'accent-ink': '#0b6a80', 'on-accent': '#ffffff', focus: '#0d7891',
+      'scroll-thumb': '#c6cfdb', 'scroll-thumb-hover': '#8392a7',
       scene: '#0d1220', floor: '#121a2a', thread: '#7c8696', clay: '#18a8c8',
       wood: '#aab4c2', 'wood-dark': '#3d4757', trim: '#d9e0e9', glow: '#78e6ff', window: '#0b1020', gem: '#7ef0ff',
       'room-a': '#c9d1dc', 'room-b': '#c3d3d2', 'room-c': '#cccbdc', 'room-d': '#d3cfc2', 'room-e': '#d5c8d0', 'room-f': '#c2cfdd',
@@ -92,6 +95,7 @@ export const THEMES = {
     dark: {
       bg: '#0c1018', paper: '#141a24', ink: '#e6edf7', muted: '#94a1b5', line: '#263041',
       accent: '#3fd0ea', 'accent-ink': '#5fd8ee', 'on-accent': '#071016', focus: '#5fd8ee',
+      'scroll-thumb': '#2a374b', 'scroll-thumb-hover': '#4f6a8c',
       scene: '#070a12', floor: '#0d121c', thread: '#7d8aa0', clay: '#3fd0ea',
       wood: '#323c4b', 'wood-dark': '#1b212b', trim: '#3d4a5d', glow: '#59e1ff', window: '#0b1020', gem: '#7ef0ff',
       'room-a': '#283243', 'room-b': '#22373b', 'room-c': '#2d2b45', 'room-d': '#38352c', 'room-e': '#382a3e', 'room-f': '#223146',
