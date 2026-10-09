@@ -14,6 +14,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
 import { makeCharacter, pose, emote } from './character.js'
 import { moodOf } from './moods.js'
+import { homeTime, lateness, swell } from './hours.js'
 import {
   buildRoom, rug, desk, easel, coffeeCorner, officeShell, glassMat, lampMat, roomDecor,
   FLOOR_TOP, WALL_H, COFFEE_W, COFFEE_D,
@@ -424,7 +425,9 @@ function ensureSession(n) {
   s.zzz.obj.position.set(10, FLOOR_TOP + SS * s.char.height + 4, 0)
   s.oops = flag('oops', '!')
   s.oops.obj.position.set(0, FLOOR_TOP + SS * s.char.height + 10, 0)
-  s.body.add(s.zzz.obj, s.oops.obj)
+  s.bell = flag('bell', BELL_SVG)
+  s.bell.obj.position.set(-14, FLOOR_TOP + SS * s.char.height + 6, 0)
+  s.body.add(s.zzz.obj, s.oops.obj, s.bell.obj)
   s.group.add(s.rug, s.track, s.body, s.label.obj)
   placeDesk(s)
   s.easel = easel(roomColors(s.room))
@@ -436,6 +439,7 @@ function ensureSession(n) {
   s.seen = outputs.filter(o => o.session === n.session).length
   // A session that starts while you watch walks in through the office.
   s.walkIn = !resting(n) && clock() - mountedAt > 3
+  s.bornAt = clock()
   scene.add(s.group)
   sessionViews.set(n.id, s)
   return s
@@ -445,7 +449,7 @@ function dropSession(id) {
   const s = sessionViews.get(id)
   if (!s) return
   scene.remove(s.group)
-  for (const el of [s.label.el, s.zzz.el, s.oops.el]) el.remove()
+  for (const el of [s.label.el, s.zzz.el, s.oops.el, s.bell.el]) el.remove()
   sessionViews.delete(id)
   for (const [key, a] of agentViews) if (a.session === id) dropAgent(key)
 }
@@ -664,6 +668,25 @@ function stepWalk(view, dt) {
   return true
 }
 
+// In from the front of the office, up the right-hand aisle, and along the
+// aisle in front of its room to its desk.
+function walkIn(s, t = roomOfSession(s)) {
+  const x = aisleX()
+  const lane = aisleZ(t)
+  const local = p => p.sub(s.home)
+  s.body.visible = true
+  s.body.position.copy(local(new THREE.Vector3(x, 0, size.D / 2 + 20)))
+  walk(s, s.body, [local(new THREE.Vector3(x, 0, lane)), local(new THREE.Vector3(s.home.x, 0, lane)), new THREE.Vector3(0, 0, 0)], () => { s.body.rotation.y = 0 })
+}
+
+// The same way back out, for the night.
+function walkOut(s, then) {
+  const x = aisleX()
+  const lane = aisleZ(roomOfSession(s))
+  const local = p => p.sub(s.home)
+  walk(s, s.body, [local(new THREE.Vector3(s.home.x, 0, lane)), local(new THREE.Vector3(x, 0, lane)), local(new THREE.Vector3(x, 0, size.D / 2 + 20))], then)
+}
+
 function roomOfSession(s) {
   const n = nodes.get(s.id)
   return n && rooms.get(`p:${n.project}`)
@@ -746,15 +769,7 @@ export function sync(showPast) {
         if (!s.placed) {
           s.group.position.copy(s.home)
           s.placed = true
-          if (s.walkIn) {
-            // In from the front of the office, up the right-hand aisle, and
-            // along the aisle in front of its room to its desk.
-            const x = aisleX()
-            const lane = aisleZ(t)
-            const local = p => p.sub(s.home)
-            s.body.position.copy(local(new THREE.Vector3(x, 0, size.D / 2 + 20)))
-            walk(s, s.body, [local(new THREE.Vector3(x, 0, lane)), local(new THREE.Vector3(s.home.x, 0, lane)), new THREE.Vector3(0, 0, 0)], () => { s.body.rotation.y = 0 })
-          }
+          if (s.walkIn) walkIn(s, t)
         }
       })
     }
@@ -933,11 +948,112 @@ export function pulse(ev) {
   }
   // 💬 a message you sent from the office, landing on whoever it's for.
   if (ev.kind === 'chat.sent' && session) talk.say(owner, 'you', { who: 'You', text: ev.text ?? '', thread: session.id }, t)
+  // 🔔 a pull request opened or merged, or a thread that ends.
+  if (ev.kind === 'asset.add' && ev.type === 'pr' && session) {
+    const key = `${ev.session}|${ev.id}|${ev.meta?.state ?? 'open'}`
+    if (!prStates.has(key)) {
+      prStates.add(key)
+      ring(session.id, owner, t)
+    }
+  }
+  if (ev.kind === 'session.end' && session) ring(session.id, session.id, t)
   // You wrote to it, or answered what it asked: it perks up.
   if ((ev.kind === 'chat.sent' || ev.kind === 'ask.close') && session) {
     const view = agentViews.get(owner) ?? session
     view.perkAt = t
   }
+}
+
+// ---------------------------------------------------------------------------
+// Office moments. A pull request (opened or merged) or a thread that ends
+// rings a desk bell, and everyone in that room gathers round for a quick
+// cheer. In the evening the lights dim and critters with nothing to do go
+// home, out the front; they're back in the morning, or as soon as their
+// thread has work.
+
+const BELL_SVG = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.2a1.2 1.2 0 0 1 1.2 1.2v.5a5 5 0 0 1 3.8 4.9v3.4l1.4 1.6H3.6L5 13.2V9.8a5 5 0 0 1 3.8-4.9v-.5A1.2 1.2 0 0 1 10 3.2z" fill="currentColor"/><circle cx="10" cy="16.6" r="1.6" fill="currentColor"/></svg>'
+const GATHER_S = 4.5 // walking over, cheering, and back
+const GATHER_REACH = 70 // the farthest a session leaves its rug to join in
+const RING_GAP_S = 15 // a room rings at most this often
+const HOME_IDLE_MS = 3 * 60000 // quiet this long in the evening: time to go
+const rang = new Map() // room id -> when it last rang
+const prStates = new Set() // `${session}|${id}|${state}` already rung for
+
+function ring(sessionId, sourceId, now) {
+  const n = nodes.get(sessionId)
+  const roomId = n?.project && `p:${n.project}`
+  if (!roomId || now - (rang.get(roomId) ?? -99) < RING_GAP_S) return
+  rang.set(roomId, now)
+  const s = sessionViews.get(sessionId)
+  if (!s || s.away) return
+  sound.bell()
+  s.bellAt = now
+  const at = headOf(sourceId) ?? headOf(sessionId)
+  if (!at) return
+  at.y = 0
+  const source = agentViews.get(sourceId) ?? s
+  source.cheerAt = now
+  // With less motion asked for, they cheer where they are.
+  if (lessMotion.matches) {
+    for (const other of sessionViews.values()) if (nodes.get(other.id)?.project === n.project) other.cheerAt = now
+    return
+  }
+  // Everyone else in the room walks over, cheers, and goes back.
+  let i = 0
+  for (const other of sessionViews.values()) {
+    const o = nodes.get(other.id)
+    if (other === source || other.away || other.walk || !o || resting(o) || o.project !== n.project) continue
+    other.gatherAt = now
+    other.gatherTo = (other.gatherTo ?? new THREE.Vector3()).copy(at)
+    other.cheerAt = now + 1.1
+  }
+  for (const a of agentViews.values()) {
+    const host = nodes.get(a.session)
+    if (a === source || a.gone || a.endedAt || !host || host.project !== n.project || nodes.get(a.id)?.status !== 'active') continue
+    const angle = (i++ / 6) * Math.PI * 2 + 0.4
+    a.gatherAt = now
+    a.gatherTo = (a.gatherTo ?? new THREE.Vector3()).set(at.x + Math.sin(angle) * 30, FLOOR_TOP, at.z + Math.cos(angle) * 30)
+    a.cheerAt = now + 1.1
+  }
+}
+
+// 0..1 how far over to the gathering a critter is right now.
+const gathering = (view, now) => (view.gatherAt === undefined ? 0 : swell((now - view.gatherAt) / GATHER_S))
+
+// The hour, from your clock. ?hour=21 previews the evening (for the demo
+// and for testing; nothing else sets it).
+const hourParam = typeof location === 'object' ? Number(new URLSearchParams(location.search).get('hour')) : NaN
+let hourOverride = Number.isFinite(hourParam) && hourParam >= 0 && hourParam < 24 && new URLSearchParams(location.search).has('hour') ? hourParam : null
+function hourNow() {
+  if (hourOverride !== null) return hourOverride
+  const d = new Date()
+  return d.getHours() + d.getMinutes() / 60
+}
+
+// Called each frame for a session: send it home or bring it back. True
+// while it's away (or on its way out).
+function commute(s, n, now, wall, busy) {
+  const idle = resting(n) || (!busy && !n.turnOpen && !n.asks?.length && wall - (n.lastAt ?? n.startedAt ?? wall) > HOME_IDLE_MS)
+  const leave = homeTime(hourNow()) && idle
+  if (leave && !s.away && !s.leaving) {
+    if (clock() - s.bornAt < 3 || !s.placed) {
+      // Already gone by the time the office first saw it.
+      s.away = true
+      s.body.visible = false
+    } else if (!s.walk) {
+      s.leaving = true
+      walkOut(s, () => { s.away = true; s.leaving = false; s.body.visible = false })
+    }
+  } else if (!leave && s.away) {
+    // Back in the morning (each in their own time), or now if there's work.
+    s.backAt ??= now + (busy || n.turnOpen ? 0 : (hash(s.id) % 20))
+    if (now >= s.backAt) {
+      s.away = false
+      s.backAt = null
+      walkIn(s)
+    }
+  }
+  return s.away || s.leaving
 }
 
 // ---------------------------------------------------------------------------
@@ -949,8 +1065,7 @@ const KEYS = [[0, 'night'], [5.5, 'night'], [7, 'dawn'], [9, 'window'], [16.5, '
 function daylight(now) {
   if (now - daylightAt < 5) return
   daylightAt = now
-  const d = new Date()
-  const h = d.getHours() + d.getMinutes() / 60
+  const h = hourNow()
   let i = 0
   while (KEYS[i + 1][0] <= h) i++
   const [h0, c0] = KEYS[i]
@@ -964,10 +1079,13 @@ function daylight(now) {
   glassMat.emissiveIntensity = 0.45 - dark * 0.15
   lampMat.emissive.copy(palette.glow)
   lampMat.emissiveIntensity = 0.45 + dark * 1.1
-  sun.intensity = SUN - dark * 0.7
+  // After hours the office lights dim too, easing over half an hour either
+  // side of 8pm and 7am; the lamps keep glowing.
+  const late = lateness(h)
+  sun.intensity = SUN - dark * 0.7 - late * 0.35
   sun.color.set('#fffaf2').lerp(new THREE.Color('#c9d4ff'), dark * 0.6)
-  sky.intensity = SKY - dark * 0.3
-  scene.environmentIntensity = ENV * (1 - dark * 0.5)
+  sky.intensity = SKY - dark * 0.3 - late * 0.3
+  scene.environmentIntensity = ENV * (1 - dark * 0.5 - late * 0.2)
 }
 
 // ---------------------------------------------------------------------------
@@ -1095,7 +1213,24 @@ export function animate() {
     const f = fill(n)
     const walking = stepWalk(s, dt)
     const working = running.has(s.id) || wall - (n.lastAt ?? 0) < BUSY_MS
-    const busy = asleep ? 0 : walking || working ? 1 : Math.max(0, 1 - (now - (s.lastAt ?? -9)) / 2.5)
+    const away = commute(s, n, now, wall, working)
+    // Gathering round a bell: over toward it, then back to its rug.
+    if (!walking && !away) {
+      const g = gathering(s, now)
+      if (g > 0) {
+        v.copy(s.gatherTo).sub(s.group.position)
+        const far = v.length()
+        v.setY(0).multiplyScalar(Math.min(1, Math.max(0, far - 30) / Math.max(1, far), GATHER_REACH / Math.max(1, far)) * g)
+        const ease = 1 - Math.pow(0.0005, dt)
+        s.body.position.lerp(v, ease)
+        s.body.rotation.y += (Math.atan2(s.gatherTo.x - s.group.position.x - s.body.position.x, s.gatherTo.z - s.group.position.z - s.body.position.z) * Math.min(1, g * 2) - s.body.rotation.y) * ease
+      } else if (s.gatherAt !== undefined) {
+        s.body.position.lerp(v.set(0, 0, 0), 1 - Math.pow(0.0005, dt))
+        s.body.rotation.y *= Math.pow(0.0005, dt)
+        if (s.body.position.lengthSq() < 0.01) { s.body.position.set(0, 0, 0); s.body.rotation.y = 0; s.gatherAt = undefined }
+      }
+    }
+    const busy = asleep ? 0 : walking || working || gathering(s, now) > 0.05 ? 1 : Math.max(0, 1 - (now - (s.lastAt ?? -9)) / 2.5)
     const dozing = asleep || (!working && !walking && wall - (n.lastAt ?? n.startedAt ?? wall) > DOZE_MS)
     const helper = s.lookAt && agentViews.get(s.lookAt)
     const look = helper && !helper.endedAt ? Math.atan2(helper.group.position.x - s.group.position.x, helper.group.position.z - s.group.position.z) : 0
@@ -1112,13 +1247,14 @@ export function animate() {
     emote(s.char, now, feel(s, dozing || walking, thinking, idleFor), lessMotion.matches)
     oops(s, s.char, s.oops.el, now)
     waving(s, s.char, now)
+    s.bell.el.classList.toggle('on', s.bellAt !== undefined && now - s.bellAt < 2.4)
     // A resting critter fades toward the floor's color.
     s.char.bodyMat.color.copy(palette[s.tint]).lerp(palette.line, asleep ? 0.6 : 0)
     s.char.bulb.visible = !asleep
-    s.zzz.el.classList.toggle('on', dozing && !walking)
-    s.desk.draw(now, asleep ? 'off' : busy > 0.5 && !walking ? 'busy' : 'idle', `#${palette[s.tint].getHexString()}`)
-    s.desk.steam(now, !asleep && working)
-    showWork(s, n, now, asleep)
+    s.zzz.el.classList.toggle('on', dozing && !walking && !away)
+    s.desk.draw(now, asleep || away ? 'off' : busy > 0.5 && !walking ? 'busy' : 'idle', `#${palette[s.tint].getHexString()}`)
+    s.desk.steam(now, !asleep && !away && working)
+    showWork(s, n, now, asleep || (away && !walking))
     updateGauge(s, f)
     const warn = !asleep && f >= WARN_AT
     if (warn && !s.alarm) { s.alarm = flatRing(26.5, 27.5, palette.crit); s.group.add(s.alarm) }
@@ -1127,7 +1263,7 @@ export function animate() {
     const html = `<span class="who">${escapeHtml(who(n).name)}</span><span class="sname">${escapeHtml(n.label)}</span>${n.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span>` : ''}`
     if (s.html !== html) s.label.el.innerHTML = s.html = html
     s.label.el.classList.toggle('selected', selected === s.id)
-    s.label.el.classList.toggle('past', asleep)
+    s.label.el.classList.toggle('past', asleep || away)
   }
 
   for (const a of agentViews.values()) {
@@ -1179,10 +1315,14 @@ export function animate() {
     talk.hold(a.id, 'think', shown && n.status === 'active' && n.description ? { key: n.description, text: n.description, thread: s.id } : null, now)
     const [sx, sz] = slotAt(a.slot)
     const target = new THREE.Vector3(s.group.position.x + sx, FLOOR_TOP, s.group.position.z + sz)
+    const g = gathering(a, now)
+    if (g > 0) target.lerp(a.gatherTo, g)
     const grow = Math.min(1, (now - a.born) / 0.6)
-    a.group.rotation.y = Math.atan2(s.group.position.x - a.group.position.x, s.group.position.z - a.group.position.z) * 0.45
+    a.group.rotation.y = g > 0.05
+      ? Math.atan2(a.gatherTo.x - a.group.position.x, a.gatherTo.z - a.group.position.z) * g
+      : Math.atan2(s.group.position.x - a.group.position.x, s.group.position.z - a.group.position.z) * 0.45
     pose(a.char, now + a.slot, {
-      busy: n.status === 'active' && (running.has(a.id) || now - (a.lastAt ?? -9) < 1.5) ? 1 : 0,
+      busy: n.status === 'active' && (running.has(a.id) || now - (a.lastAt ?? -9) < 1.5 || g > 0.05) ? 1 : 0,
       hop: a.hopAt ? (now - a.hopAt) / 0.3 : 1,
       alarm: n.status === 'active' && fill(n) >= WARN_AT,
     })
@@ -1443,7 +1583,7 @@ function bubbleFor(pick) {
   const live = !resting(n)
   const helpers = [...nodes.values()].filter(x => x.kind === 'agent' && x.session === n.session && x.status !== 'done').length
   const lastDone = activity.get(n.id)?.actions[0]
-  const status = !live ? `ended ${ago(n.endedAt ?? n.lastAt)}` : tool || Date.now() - (n.lastAt ?? 0) < BUSY_MS ? 'working' : `waiting · last active ${ago(n.lastAt)}`
+  const status = sessionViews.get(n.id)?.away ? (live ? 'gone home for the night · back when there’s work' : `ended ${ago(n.endedAt ?? n.lastAt)} · gone home`) : !live ? `ended ${ago(n.endedAt ?? n.lastAt)}` : tool || Date.now() - (n.lastAt ?? 0) < BUSY_MS ? 'working' : `waiting · last active ${ago(n.lastAt)}`
   return `<b><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(n.prompts?.[0]?.text ?? n.label)}</b>
     <p>${escapeHtml([n.projectName, n.gitBranch].filter(Boolean).join(' · '))}</p>
     <dl>${row('who', who(n).title)}${row('status', status)}${row('doing', doing || (lastDone ? lastDone.text : ''))}${row('context', ctx)}${row('helpers', helpers ? String(helpers) : '')}${row('model', n.model)}${row('cost', n.costUsd !== undefined ? `$${n.costUsd.toFixed(2)}` : '')}</dl>`
@@ -1488,4 +1628,4 @@ function bindPointer() {
   renderer.domElement.addEventListener('pointerleave', () => { hoverPick = null; hovered = null })
 }
 // ?debug reaches these through window.cluster.table.debug.
-export const debug = { get renderer() { return renderer }, get size() { return size }, sessionViews, agentViews, rooms, get camera() { return camera }, get stage() { return stage }, get controls() { return controls }, get coffee() { return coffee }, greeted }
+export const debug = { setHour(h) { hourOverride = h; daylightAt = -1 }, get renderer() { return renderer }, get size() { return size }, sessionViews, agentViews, rooms, get camera() { return camera }, get stage() { return stage }, get controls() { return controls }, get coffee() { return coffee }, greeted }

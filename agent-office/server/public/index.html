@@ -236,6 +236,12 @@
   .flag.oops { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--crit); color: #fff; font: 700 11px var(--sans); transform: scale(0.6); transition: opacity 0.2s, transform 0.2s; }
   .flag.oops.on { transform: scale(1); }
   .flag.oops.small { width: 13px; height: 13px; font-size: 9px; }
+  /* The desk bell over a critter whose pull request just landed. */
+  .flag.bell { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--paper); color: var(--mustard); box-shadow: 0 2px 8px rgba(40, 30, 20, 0.2), 0 0 0 1.5px var(--mustard); }
+  .flag.bell svg { width: 15px; height: 15px; transform-origin: 50% 15%; }
+  .flag.bell.on svg { animation: bell-ring 0.5s ease-in-out 4; }
+  @keyframes bell-ring { 25% { transform: rotate(18deg); } 75% { transform: rotate(-18deg); } }
+  @media (prefers-reduced-motion: reduce) { .flag.bell.on svg { animation: none; } }
 
   /* The clipboard's tabs, and its Transcript tab: the conversation and a
      box to message the session or subagent (transcript.js). */

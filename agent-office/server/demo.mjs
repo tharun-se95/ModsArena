@@ -116,7 +116,8 @@ const rand = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo))
 export function startDemo(publish) {
   let seq = 0
 
-  function runSession(session, project, pace, asThread = false, first = pick(PROMPTS)) {
+  // `turnsLeft`: a thread that does that many turns and then ends.
+  function runSession(session, project, pace, asThread = false, first = pick(PROMPTS), turnsLeft = Infinity) {
     const emit = ev => publish([{ t: Date.now(), session, ...ev }])
     let messages = rand(8000, 40000)
     let turns = 0
@@ -250,7 +251,10 @@ export function startDemo(publish) {
         if (Math.random() < 0.6) {
           const [type, title, url] = pick(DELIVERABLES)
           const n = rand(12, 240)
-          emit({ kind: 'asset.add', id: `${type}-${n}`, type, title, url: `${url}${n}`, ...(type === 'pr' && { meta: { state: 'open', additions: rand(20, 300), deletions: rand(2, 80) } }) })
+          const pr = { kind: 'asset.add', id: `${type}-${n}`, type, title, url: `${url}${n}`, ...(type === 'pr' && { meta: { state: 'open', additions: rand(20, 300), deletions: rand(2, 80) } }) }
+          emit(pr)
+          // A while later the pull request is merged (the office rings a bell).
+          if (type === 'pr') setTimeout(() => emit({ ...pr, meta: { ...pr.meta, state: 'merged' } }), rand(12000, 25000) * pace)
         }
         messages += rand(4000, 14000)
         if (used() > WINDOW - 33000) {
@@ -264,6 +268,10 @@ export function startDemo(publish) {
         breakdown()
         // Then it waits on you: sometimes briefly, sometimes a while.
         await sleep((Math.random() < 0.5 ? rand(1500, 5000) : rand(9000, 20000)) * pace)
+        if (turns >= turnsLeft) {
+          emit({ kind: 'session.end', reason: 'prompt_input_exit' })
+          return
+        }
       }
     }
 
@@ -273,6 +281,8 @@ export function startDemo(publish) {
   runSession('demo-payments-1', PROJECTS[0], 1, false, 'Harden the session handling')
   setTimeout(() => runSession('demo-payments-2', PROJECTS[0], 1.6, false, 'Why is the build flaky?'), 2500)
   setTimeout(() => runSession('demo-dashboard-1', PROJECTS[1], 1.3, true, 'Migrate charts to the new tokens'), 5000)
+  // A quick one that finishes and ends: the office rings a bell for it.
+  setTimeout(() => runSession('demo-dashboard-2', PROJECTS[1], 0.8, false, 'Review the open PR', 1), 8000)
 }
 
 // Past sessions in the shape GET /history answers.

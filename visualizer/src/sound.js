@@ -2,7 +2,8 @@
 // are no files to load: keys clicking when a tool runs, a chime when a
 // turn finishes, a soft bonk when a call fails, a pop when a helper
 // arrives, a chirp when critters wave, a clink at the coffee corner and a
-// hush when a session compacts. Browsers only allow sound after you've
+// hush when a session compacts, and a desk bell for a pull request or a
+// finished thread. Browsers only allow sound after you've
 // interacted with the page, so nothing plays until your first click or key.
 
 const KEY = 'agent-office-muted'
@@ -111,6 +112,13 @@ export const sound = {
     if (!ready('clink', 0.3)) return
     tone({ freq: 2637, dur: 0.18, gain: 0.025 })
     tone({ freq: 3520, dur: 0.14, gain: 0.018, at: 0.02 })
+  },
+  // A little desk bell: a bright strike with a long, soft ring.
+  bell() {
+    if (!ready('bell', 1.5)) return
+    tone({ freq: 1568, dur: 1.4, gain: 0.05, attack: 0.002 })
+    tone({ freq: 3951, dur: 0.6, gain: 0.018, attack: 0.002 })
+    tone({ freq: 1568, dur: 1.2, gain: 0.03, at: 0.22, attack: 0.002 })
   },
   hush() {
     if (!ready('hush', 1)) return
