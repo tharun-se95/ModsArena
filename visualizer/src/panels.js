@@ -334,7 +334,7 @@ function directory(running, selected) {
     <h2 class="sideh">Projects <small>${live.length ? `${working} working · ${live.length - working} with you` : 'none live'}</small></h2>
     ${projects.map(p => `
       <section class="project">
-        <p class="room"><button type="button" class="picon room-${roomKey(p.raw)}" data-edit-project="${escapeHtml(p.id)}" data-raw="${escapeHtml(p.raw)}" title="Rename or change the icon" aria-label="Rename ${escapeHtml(p.name)} or change its icon">${projectIcon(p.id, p.raw)}</button>${escapeHtml(p.name)}<small>${p.live.length ? plural(p.live.length, 'thread') : 'earlier'}</small></p>${projectNote(p.raw)}
+        <p class="room"><button type="button" class="picon room-${roomKey(p.raw, p.id)}" data-edit-project="${escapeHtml(p.id)}" data-raw="${escapeHtml(p.raw)}" title="Rename it, or change its icon, walls and decor" aria-label="Rename ${escapeHtml(p.name)} or change its icon, walls and decor">${projectIcon(p.id, p.raw)}</button>${escapeHtml(p.name)}<small>${p.live.length ? plural(p.live.length, 'thread') : 'earlier'}</small></p>${projectNote(p.raw)}
         ${p.live.map(n => threadRow(n, running, selected)).join('')}
         ${p.past.length ? `${p.live.length ? '<p class="earlier">Earlier</p>' : ''}${p.past.map(n => threadRow(n, running, selected)).join('')}` : ''}
       </section>`).join('') || '<p class="muted">No sessions yet. Start Claude Code anywhere and it appears here.</p>'}`
@@ -486,7 +486,7 @@ function head(n, running) {
     : [who(n).title, n.thread ? 'Thread of a claude.ai project' : '', n.gitBranch, isLive(n) ? '' : `ended ${ago(n.endedAt ?? n.lastAt)}`].filter(Boolean).join(' · ')
   return `
     ${crumbs(n)}
-    <h2 class="dtitle"><i class="dot ${isAgent ? tintOf(n.type) : sessionTint(n.session)}"></i>${escapeHtml(isAgent ? who(n).title : title(n))}</h2>
+    <h2 class="dtitle">${isAgent ? `<i class="dot ${tintOf(n.type)}"></i>` : `<button type="button" class="dot-pick" data-critter-color="${escapeHtml(n.session)}" data-name="${escapeHtml(who(n).name)}" title="Change ${escapeHtml(who(n).name)}’s color" aria-label="Change ${escapeHtml(who(n).name)}’s color"><i class="dot ${sessionTint(n.session)}"></i></button>`}${escapeHtml(isAgent ? who(n).title : title(n))}</h2>
     <p class="dmeta">${pill(state)} ${escapeHtml(sub)}</p>
     ${isAgent ? '' : `<p class="dsum">${escapeHtml(summaryOf(n, running))}</p>`}
     ${progressHtml(n.todos, { big: true })}

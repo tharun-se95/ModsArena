@@ -1,9 +1,13 @@
-// Rename a project or pick its icon: a small card that opens from the icon
-// on a room's sign or beside the project in the directory. What you choose
-// is kept in this browser (names.js); Reset goes back to the name the
-// office made from the repository.
+// Rename a project or pick its icon, its room's wall color and its decor:
+// a small card that opens from the icon on a room's sign or beside the
+// project in the directory. What you choose is kept in this browser
+// (names.js, looks.js) and shows at once; Reset goes back to the name the
+// office made from the repository and the room it picked.
 
 import { projectName, projectIcon, prettyProject, defaultIcon, setProject, isCustom, PICKS } from './names.js'
+import { roomLook, setRoomLook } from './looks.js'
+import { WALLS, DECOR } from './themes.js'
+import { roomKey } from './table.js'
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
 
@@ -31,14 +35,21 @@ function place(anchor) {
 function draw() {
   const { id, raw } = current
   const icon = projectIcon(id, raw)
+  const wall = roomKey(raw, id)
+  const decor = roomLook(id).decor
+  const changed = () => isCustom(id) || Object.keys(roomLook(id)).length > 0
   card.innerHTML = `
-    <p class="eyebrow" id="pe-title">Name and icon</p>
+    <p class="eyebrow" id="pe-title">Name, icon and room</p>
     <form>
       <label class="pe-name"><span>Name</span><input name="name" maxlength="40" autocomplete="off" value="${esc(projectName(id, raw))}" placeholder="${esc(prettyProject(raw))}"></label>
       <div class="pe-icons" role="group" aria-label="Icon">${PICKS.map(p => `<button type="button" data-pick-icon="${p}" aria-pressed="${p === icon}" aria-label="Use ${p}">${p}</button>`).join('')}</div>
+      <p class="pe-label" id="pe-walls">Walls</p>
+      <div class="pe-swatches" role="group" aria-labelledby="pe-walls">${WALLS.map(w => `<button type="button" data-pick-wall="${w.id}" class="room-${w.id}" aria-pressed="${w.id === wall}" aria-label="${w.name} walls" title="${w.name}"></button>`).join('')}</div>
+      <p class="pe-label" id="pe-decor">Decor</p>
+      <div class="pe-decor" role="group" aria-labelledby="pe-decor">${DECOR.map(d => `<button type="button" data-pick-decor="${d.id}" aria-pressed="${d.id === decor}"><span aria-hidden="true">${d.icon}</span>${d.name}</button>`).join('')}</div>
       <p class="pe-from">From <code>${esc(raw)}</code></p>
       <div class="pe-actions">
-        <button type="button" data-reset ${isCustom(id) ? '' : 'disabled'}>Reset</button>
+        <button type="button" data-reset ${changed() ? '' : 'disabled'}>Reset</button>
         <button type="submit" class="primary">Done</button>
       </div>
     </form>`
@@ -52,8 +63,27 @@ function draw() {
       icon: icon && icon !== defaultIcon(raw) ? icon : undefined,
       ...changes,
     })
-    card.querySelector('[data-reset]').disabled = !isCustom(id)
+    card.querySelector('[data-reset]').disabled = !changed()
     document.dispatchEvent(new CustomEvent('office:names'))
+  }
+  // The room's look, kept apart from its name. Picking the decor it has
+  // takes it away again.
+  const restyle = (changes) => {
+    setRoomLook(id, { ...roomLook(id), ...changes })
+    card.querySelector('[data-reset]').disabled = !changed()
+  }
+  for (const b of card.querySelectorAll('[data-pick-wall]')) {
+    b.addEventListener('click', () => {
+      for (const o of card.querySelectorAll('[data-pick-wall]')) o.setAttribute('aria-pressed', String(o === b))
+      restyle({ wall: b.dataset.pickWall })
+    })
+  }
+  for (const b of card.querySelectorAll('[data-pick-decor]')) {
+    b.addEventListener('click', () => {
+      const on = b.getAttribute('aria-pressed') !== 'true'
+      for (const o of card.querySelectorAll('[data-pick-decor]')) o.setAttribute('aria-pressed', String(on && o === b))
+      restyle({ decor: on ? b.dataset.pickDecor : undefined })
+    })
   }
   name.addEventListener('input', () => keep())
   for (const b of card.querySelectorAll('[data-pick-icon]')) {
@@ -64,6 +94,7 @@ function draw() {
   }
   card.querySelector('[data-reset]').addEventListener('click', () => {
     setProject(id, {})
+    setRoomLook(id, {})
     document.dispatchEvent(new CustomEvent('office:names'))
     draw()
     card.querySelector('input').focus()
