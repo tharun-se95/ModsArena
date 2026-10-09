@@ -32,6 +32,10 @@ const MAIL_KEEP = 60
 //   type: image, artifact, pr, link, file, plan
 export const outputs = []
 const OUTPUTS_KEEP = 120
+// Every agent spawned, oldest first, for the day's recap: finished agents
+// leave the office, but who helped still counts. { t, session, type }
+export const helpers = []
+const HELPERS_KEEP = 400
 let dirty = true
 
 export const isDirty = () => dirty
@@ -73,6 +77,7 @@ export function reset() {
   notices.length = 0
   mail.length = 0
   outputs.length = 0
+  helpers.length = 0
   dirty = true
 }
 
@@ -253,6 +258,10 @@ const handlers = {
     if (!node) {
       node = addNode({ id, kind: 'agent', session: ev.session, agent: ev.agent, history: 0, compactions: [] })
       addLink(parent, id, 'spawn')
+    }
+    if (!node.announced) {
+      helpers.push({ t: ev.t, session: ev.session, type: ev.name || ev.type || 'subagent' })
+      if (helpers.length > HELPERS_KEEP) helpers.shift()
     }
     Object.assign(node, {
       label: ev.name || ev.type, name: ev.name, type: ev.type, description: ev.description, model: ev.model,

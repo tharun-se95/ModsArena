@@ -14,6 +14,8 @@ import { moments, activity, escapeHtml, quote, ago } from './words.js'
 import { pct, level, tintOf, sessionTint, roomKey } from './table.js'
 import * as transcript from './transcript.js'
 import * as assets from './assets.js'
+import { progressHtml } from './progress.js'
+import * as deliverables from './deliverables.js'
 
 const $ = sel => document.querySelector(sel)
 const k = n => (n === undefined ? '—' : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : `${Math.round(n / 1000)}k`)
@@ -421,7 +423,8 @@ function head(n, running) {
   return `
     ${crumbs(n)}
     <h2 class="dtitle"><i class="dot ${isAgent ? tintOf(n.type) : sessionTint(n.session)}"></i>${escapeHtml(isAgent ? n.label : title(n))}</h2>
-    <p class="dmeta">${pill(state)} ${escapeHtml(sub)}</p>`
+    <p class="dmeta">${pill(state)} ${escapeHtml(sub)}</p>
+    ${progressHtml(n.todos, { big: true })}`
 }
 
 // ---------------------------------------------------------------------------
@@ -525,6 +528,7 @@ export function render(args) {
   for (const b of document.querySelectorAll('[data-library]')) b.onclick = () => { libraryOpen = false; render(lastArgs) }
   for (const b of document.querySelectorAll('[data-shelf]')) b.onclick = () => { assets.setShelf(b.dataset.shelf); render(lastArgs) }
   for (const b of document.querySelectorAll('[data-zoom]')) b.onclick = e => { e.preventDefault(); zoomed = b.dataset.zoom; render(lastArgs) }
+  deliverables.bind(document, { find: key => outputs.find(o => `${o.session}|${o.id}` === key), redraw: () => render(lastArgs) })
   for (const b of document.querySelectorAll('[data-answer]')) {
     b.onclick = e => {
       e.stopPropagation()

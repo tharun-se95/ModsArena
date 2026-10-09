@@ -13,6 +13,8 @@ import { nodes, sid, outputs, openAsks, toolName } from './model.js'
 
 export { toolName }
 import { escapeHtml, ago } from './words.js'
+import { progressHtml } from './progress.js'
+import * as deliverables from './deliverables.js'
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 
@@ -75,25 +77,18 @@ export function checklist(n, { open = true } = {}) {
   const items = n.todos
   if (!items?.length) return ''
   const done = items.filter(i => i.status === 'completed').length
-  const now = items.find(i => i.status === 'in_progress')
   return `
     <details class="todo" ${open ? 'open' : ''} data-todo="${escapeHtml(n.id)}">
       <summary>
         <span class="todo-ring" style="--f:${(done / items.length).toFixed(3)}"></span>
-        <b>${done === items.length ? 'All done' : escapeHtml(now?.active ?? now?.text ?? 'Up next')}</b>
-        <span class="todo-count">${done}/${items.length}</span>
+        <b>Checklist</b><span class="todo-count">${items.length} steps</span>
       </summary>
       <ol>${items.map(i => `<li class="${i.status}"><i>${MARK[i.status] ?? '○'}</i>${escapeHtml(i.text)}</li>`).join('')}</ol>
     </details>`
 }
 
-// A one-line progress strip for cards and the directory.
-export function progress(n) {
-  const items = n.todos
-  if (!items?.length) return ''
-  const done = items.filter(i => i.status === 'completed').length
-  return `<span class="todo-bar" title="${done} of ${items.length} done">${items.map(i => `<i class="${i.status}"></i>`).join('')}</span>`
-}
+// "3 of 7 done" and its bar, for cards and the directory.
+export const progress = n => progressHtml(n.todos)
 
 // ---------------------------------------------------------------------------
 // Outputs
@@ -132,13 +127,14 @@ export function outputsTab(n) {
   const mine = outputs.filter(o => o.session === host?.session && (n.kind === 'session' || o.agent === n.agent))
   if (!mine.length && !n.todos?.length) return '<p class="muted">Nothing made yet. Pictures, artifacts, pull requests and changed files land here as they happen.</p>'
   const images = mine.filter(o => o.type === 'image')
-  const shipped = mine.filter(o => ['artifact', 'pr', 'link', 'plan'].includes(o.type))
+  const shipped = mine.filter(deliverables.isDeliverable)
+  const maker = o => (o.agent ? nodes.get(`a:${o.session}:${o.agent}`)?.label ?? 'a helper' : '')
   const files = mine.filter(o => o.type === 'file')
   const adds = files.reduce((s, f) => s + (f.meta?.additions ?? 0), 0)
   const dels = files.reduce((s, f) => s + (f.meta?.deletions ?? 0), 0)
   return `
     ${checklist(n, { open: true })}
-    ${shipped.length ? `<h3>Delivered</h3><div class="outs">${shipped.map(o => outputCard(o)).join('')}</div>` : ''}
+    ${shipped.length ? `<h3>Delivered <small>${shipped.length}</small></h3><div class="dvs">${shipped.map(o => deliverables.card(o, { where: maker(o), copied: deliverables.copiedKey() })).join('')}</div>` : ''}
     ${images.length ? `<h3>Pictures <small>${images.length}</small></h3><div class="gallery">${images.slice(0, 9).map(o => outputCard(o)).join('')}</div>` : ''}
     ${files.length ? `<h3>Files changed <small><ins>+${adds}</ins> <del>−${dels}</del></small></h3><div class="outs files">${files.slice(0, 8).map(o => outputCard(o)).join('')}</div>` : ''}`
 }
@@ -155,19 +151,17 @@ const onShelf = o => shelf === 'all' ? o.type !== 'file'
 
 export function library() {
   const list = outputs.filter(onShelf)
-  const byThread = new Map()
-  for (const o of list) {
-    if (!byThread.has(o.session)) byThread.set(o.session, [])
-    byThread.get(o.session).push(o)
-  }
-  const groups = [...byThread].map(([session, items]) => {
+  // A folder per thread, its name on the tab.
+  const groups = deliverables.byThread(list).map(({ session, items }) => {
     const n = nodes.get(sid(session))
     const pics = items.filter(o => o.type === 'image')
-    const rest = items.filter(o => o.type !== 'image')
-    return `<section class="lib-group">
-      <p class="lib-thread"><span>${escapeHtml(n?.projectName ?? '')}</span><button type="button" data-pick="${escapeHtml(sid(session))}">${escapeHtml(n?.label ?? session)}</button></p>
+    const cards = items.filter(deliverables.isDeliverable)
+    const rest = items.filter(o => o.type !== 'image' && !deliverables.isDeliverable(o))
+    return `<section class="lib-group folder">
+      <p class="lib-thread"><span>${escapeHtml(n?.projectName ?? '')}</span><button type="button" data-pick="${escapeHtml(sid(session))}">${escapeHtml(n?.label ?? session)}</button><small>${plural(items.length, 'thing')}</small></p>
+      ${cards.length ? `<div class="dvs">${cards.slice(0, 8).map(o => deliverables.card(o, { where: o.agent ? nodes.get(`a:${o.session}:${o.agent}`)?.label : '', copied: deliverables.copiedKey() })).join('')}</div>` : ''}
       ${pics.length ? `<div class="gallery">${pics.slice(0, 6).map(o => outputCard(o)).join('')}</div>` : ''}
-      ${rest.length ? `<div class="outs">${rest.slice(0, 8).map(o => outputCard(o)).join('')}</div>` : ''}
+      ${rest.length ? `<div class="outs files">${rest.slice(0, 8).map(o => outputCard(o)).join('')}</div>` : ''}
     </section>`
   }).join('')
   return `
@@ -194,5 +188,7 @@ export function lightbox(key) {
   const body = o.type === 'plan'
     ? `<article class="lb-plan">${(o.text ?? '').split('\n').map(l => /^#/.test(l) ? `<h3>${escapeHtml(l.replace(/^#+\s*/, ''))}</h3>` : l.trim() ? `<p>${escapeHtml(l)}</p>` : '').join('')}</article>`
     : `<img alt="${escapeHtml(o.title)}" src="${escapeHtml(srcOf(o))}">`
-  return `<figure class="lb-frame paper">${body}<figcaption><b>${escapeHtml(o.title)}</b><span>${escapeHtml([n?.label, o.path, ago(o.t)].filter(Boolean).join(' · '))}</span></figcaption></figure>`
+  const copy = deliverables.copyOf(o)
+  const isCopied = deliverables.copiedKey() === `${o.session}|${o.id}`
+  return `<figure class="lb-frame paper">${body}<figcaption><b>${escapeHtml(o.title)}</b><span>${escapeHtml([n?.label, o.path, ago(o.t)].filter(Boolean).join(' · '))}</span>${copy ? `<button type="button" class="dv-btn ${isCopied ? 'done' : ''}" data-copy="${escapeHtml(`${o.session}|${o.id}`)}">${isCopied ? 'Copied ✓' : copy.label}</button>` : ''}</figcaption></figure>`
 }

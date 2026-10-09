@@ -1012,6 +1012,7 @@ export function animate() {
     s.zzz.el.classList.toggle('on', dozing && !walking)
     s.desk.draw(now, asleep ? 'off' : busy > 0.5 && !walking ? 'busy' : 'idle', `#${palette[s.tint].getHexString()}`)
     s.desk.steam(now, !asleep && working)
+    s.desk.animateTray?.(now)
     showWork(s, n, now, asleep)
     updateGauge(s, f)
     const warn = !asleep && f >= WARN_AT

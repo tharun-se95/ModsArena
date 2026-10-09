@@ -10,6 +10,7 @@ import * as table from './table.js'
 import * as panels from './panels.js'
 import { unlock, isMuted, setMuted } from './sound.js'
 import * as transcript from './transcript.js'
+import * as recap from './recap.js'
 
 const HISTORY_REFRESH_MS = 60000
 const PANEL_REFRESH_MS = 700
@@ -130,6 +131,7 @@ const answer = {
 function refreshPanels() {
   if (selected && !model.nodes.has(selected)) selected = null
   panels.render({ running: running(), selected, pick, hover: table.setHover, answer })
+  recap.tick(running())
 }
 
 function frame() {
@@ -196,8 +198,9 @@ function playDemo() {
 // A bridge started with --demo has sample sessions and no transcripts on
 // disk: its transcript tab plays the demo's too.
 transcript.setDemo(isDemo)
+recap.mount({ onPick: pick, demo: isDemo })
 if (!isDemo) {
-  fetch('/healthz').then(r => r.json()).then(h => { if (h.demo) transcript.setDemo(true) }).catch(() => {})
+  fetch('/healthz').then(r => r.json()).then(h => { if (h.demo) { transcript.setDemo(true); recap.setDemo() } }).catch(() => {})
 }
 
 await loadHistory()
