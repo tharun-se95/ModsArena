@@ -620,6 +620,44 @@
   .astate { display: inline-flex; align-items: center; }
   .folded { margin: 0; padding: 2px 8px 4px calc(8px + var(--depth) * 14px + 13px); font-size: 11px; color: var(--muted); }
 
+  /* The clipboard, crab-colored (clipsize.js sizes it): a shell-orange
+     board and clip, sandy paper, dark claw-tip accents. Bigger by default;
+     drag its left edge or corner to resize it. Up to 900px wide it's a
+     sheet along the bottom with a handle on top instead. */
+  :root { --crab-shell: #e0683e; --crab-shell-deep: #b44a27; --crab-sand: #fcf2e1; --crab-sand-line: #ecd8b8; --crab-claw: #2b211c; --crab-claw-ink: #2b211c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --crab-shell: #c85d36; --crab-shell-deep: #8f3c20; --crab-sand: #2a231d; --crab-sand-line: #463a2f; --crab-claw: #1a1310; --crab-claw-ink: #f2d6b6; }
+  }
+  :root[data-theme="dark"] { --crab-shell: #c85d36; --crab-shell-deep: #8f3c20; --crab-sand: #2a231d; --crab-sand-line: #463a2f; --crab-claw: #1a1310; --crab-claw-ink: #f2d6b6; }
+  #side.clipboard { background: var(--crab-sand); border: 6px solid var(--crab-shell); border-top-width: 6px; box-shadow: 0 0 0 1px var(--crab-shell-deep), 0 14px 34px rgba(70, 35, 15, 0.22); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  #side.clipboard::before { background: radial-gradient(circle at 50% 45%, var(--crab-claw) 0 3px, transparent 3.5px), linear-gradient(var(--crab-shell), var(--crab-shell-deep)); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.25); }
+  #side.clipboard .tabs { border-bottom-color: var(--crab-sand-line); }
+  #side.clipboard .tab.on { color: var(--crab-claw-ink); border-bottom-color: var(--crab-claw-ink); }
+  #side.clipboard h3 { color: var(--crab-claw-ink); opacity: 0.78; }
+  @media (min-width: 901px) {
+    #side.clipboard, #side.clipboard.talking { width: var(--clip-w, 416px); height: min(var(--clip-h, 720px), calc(100% - 80px)); }
+  }
+  .clip-grip { position: absolute; z-index: 6; touch-action: none; border-radius: 8px; }
+  .clip-grip[hidden] { display: none; }
+  .clip-grip::after { content: ""; position: absolute; border-radius: 3px; background: var(--crab-claw); opacity: 0.35; transition: opacity 0.15s; }
+  .clip-grip:hover::after, .clip-grip.dragging::after, .clip-grip:focus-visible::after { opacity: 0.8; }
+  .clip-grip:focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: 1px; }
+  .clip-grip.edge { top: 104px; right: calc(16px + var(--clip-w, 416px) - 8px); width: 14px; height: calc(min(var(--clip-h, 720px), 100% - 80px) - 70px); cursor: ew-resize; }
+  .clip-grip.edge::after { left: 5px; top: 50%; width: 4px; height: 44px; margin-top: -22px; }
+  .clip-grip.corner { top: calc(74px + min(var(--clip-h, 720px), 100% - 80px) - 24px); right: calc(16px + var(--clip-w, 416px) - 24px); width: 30px; height: 30px; cursor: nesw-resize; }
+  .clip-grip.corner::after { left: 7px; bottom: 7px; width: 12px; height: 12px; border-radius: 0 0 0 4px; background: none; border-left: 3px solid var(--crab-claw); border-bottom: 3px solid var(--crab-claw); }
+  :root.clip-resizing, :root.clip-resizing * { user-select: none; }
+  :root.clip-resizing .clip-grip.edge, :root.clip-resizing #side { cursor: ew-resize; }
+  @media (max-width: 900px) {
+    :root { --sheet-base: 12px; }
+    #side.clipboard, #side.clipboard.talking { max-height: none; height: var(--sheet-h, 60%); padding-top: 18px; }
+    #side.clipboard::before { display: none; }
+    .clip-grip.sheet { left: 50%; width: 120px; margin-left: -60px; height: 44px; bottom: calc(var(--sheet-base) + var(--sheet-h, 60%) - 26px); cursor: ns-resize; }
+    .clip-grip.sheet::after { left: 50%; top: 50%; width: 64px; height: 8px; margin: -4px 0 0 -32px; border-radius: 4px; opacity: 1; background: linear-gradient(var(--crab-shell), var(--crab-shell-deep)); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); }
+    .clip-grip.sheet:hover::after, .clip-grip.sheet.dragging::after { opacity: 1; filter: brightness(1.1); }
+  }
+  @media (prefers-reduced-motion: reduce) { .clip-grip::after { transition: none; } }
+
   /* The clipboard: where you are, then the conversation, the team, the details. */
   .crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
   .crumbs button { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
@@ -1165,6 +1203,10 @@
     :root[data-phone="projects"] #stage { visibility: hidden; }
     :root[data-phone="projects"] #side { top: var(--phone-top); bottom: var(--phone-bottom); left: calc(env(safe-area-inset-left) + 8px); right: calc(env(safe-area-inset-right) + 8px); width: auto; max-height: none; height: auto; }
     :root[data-phone="projects"] #side.talking { height: auto; }
+    /* A clipboard is a sheet over the office, which shows above it. */
+    :root[data-phone] { --sheet-base: var(--phone-bottom); }
+    :root[data-phone="projects"][data-sheet] #stage { visibility: visible; }
+    :root[data-phone="projects"][data-sheet] #side.clipboard { top: auto; height: var(--sheet-h, 60%); }
     :root[data-phone="projects"] .entry, :root[data-phone="projects"] .agent-row, :root[data-phone="projects"] .member, :root[data-phone="projects"] .tab, :root[data-phone="projects"] .crumbs button { min-height: 44px; }
     :root[data-phone="projects"] .tx-compose textarea { font-size: 16px; min-height: 44px; }
     :root[data-phone="projects"] .tx-compose button { min-height: 44px; }

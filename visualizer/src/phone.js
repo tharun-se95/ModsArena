@@ -22,8 +22,9 @@ let onChange = () => {}
 
 export const isPhone = () => media.matches
 export const current = () => (media.matches ? view : null)
-// Whether the office is on screen at all: hidden behind Projects on a phone.
-export const sceneShown = () => !media.matches || view !== 'projects'
+// Whether the office is on screen at all: hidden behind Projects on a
+// phone, unless a clipboard is open there as a sheet (clipsize.js).
+export const sceneShown = () => !media.matches || view !== 'projects' || globalThis.document?.documentElement.dataset.sheet !== undefined
 // Whether the office is the small window in the Inbox.
 export const isMini = () => media.matches && view === 'inbox'
 

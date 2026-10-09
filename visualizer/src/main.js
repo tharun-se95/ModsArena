@@ -13,6 +13,7 @@ import * as transcript from './transcript.js'
 import * as recap from './recap.js'
 import * as desk from './desk.js'
 import * as settings from './settings.js'
+import { mountClipSize } from './clipsize.js'
 import { mountHelp } from './help.js'
 import * as answering from './answer.js'
 import * as actions from './actions.js'
@@ -160,6 +161,9 @@ settings.add({
   hint: () => (motion.bySystem() ? 'On because your system asks for less motion' : 'No camera glides, hops, confetti or bobbing'),
   get: motion.reduced, set: motion.setReduced, disabled: motion.bySystem,
 })
+
+// The clipboard: bigger, and resizable (a sheet on narrow screens).
+mountClipSize()
 
 const pastToggle = document.getElementById('show-past')
 pastToggle.addEventListener('change', () => {
