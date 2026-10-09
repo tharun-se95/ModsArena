@@ -8,7 +8,7 @@ import * as model from './model.js'
 import * as words from './words.js'
 import * as table from './table.js'
 import * as panels from './panels.js'
-import { unlock, isMuted, setMuted } from './sound.js'
+import { unlock, isMuted, setMuted, mountControls as mountSound } from './sound.js'
 import * as transcript from './transcript.js'
 import * as recap from './recap.js'
 import * as desk from './desk.js'
@@ -129,6 +129,7 @@ function showSound() {
 }
 soundButton.addEventListener('click', () => { setMuted(!isMuted()); showSound() })
 showSound()
+mountSound()
 for (const type of ['pointerdown', 'keydown']) addEventListener(type, unlock, { once: true })
 
 // Developer view: plain words everywhere, or the raw tool lines.

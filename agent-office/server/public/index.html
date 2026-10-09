@@ -464,6 +464,22 @@
   #settings .menu-row > span { display: inline; }
   .settings-pop label.menu-row input { width: 16px; height: 16px; margin: 0; }
   .menu-sep { border: 0; border-top: 1px solid var(--line); margin: 6px 0 10px; }
+  /* Sound settings (sound.js): volume, quiet hours and the one chime they
+     keep, tucked under the Sound button. */
+  .sound-set { margin: 0 0 4px 26px; min-width: 0; padding: 2px 0 6px; font-size: 12.5px; }
+  .sound-set.off { opacity: 0.6; }
+  .sound-set .alerts-times { margin: 2px 0 4px 20px; gap: 4px 10px; flex-wrap: wrap; font-size: 12px; }
+  .sound-set .alerts-times > span { white-space: nowrap; }
+  .sound-set .alerts-times input { padding: 2px 4px; font-size: 11.5px; }
+  .sound-set .alerts-row { font-size: 12.5px; flex-wrap: nowrap; align-items: flex-start; }
+  .sound-set .alerts-row input { margin-top: 2px; }
+  .sound-set [hidden] { display: none; }
+  .sound-sub { padding-left: 22px !important; }
+  .sound-vol { display: flex; align-items: center; gap: 8px; padding: 2px 0 4px; color: var(--muted); }
+  .sound-vol input { flex: 1; min-width: 0; accent-color: var(--accent); margin: 0; }
+  .sound-vol input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+  .sound-vol output { width: 2.4em; text-align: right; font: 12px var(--mono); color: var(--ink); }
+  :root[data-phone] .sound-set .alerts-row, :root[data-phone] .sound-vol { min-height: 40px; }
 
   /* Friendly names: a project's icon (click it to rename the project or
      pick another), and context as energy, draining as the window fills. */
@@ -1305,6 +1321,7 @@
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8h3l4-3.5v11L6 12H3z" fill="currentColor"/><path class="waves" d="M13 7.5a3.5 3.5 0 0 1 0 5M15 5.5a6.4 6.4 0 0 1 0 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path class="cross" d="M13.5 8l4 4m0-4l-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
         <span>Sound on</span>
       </button>
+      <div class="sound-set" id="sound-set" role="group" aria-label="Sound settings"></div>
       <label class="toggle menu-row" title="Show past sessions"><input type="checkbox" id="show-past" checked aria-label="Past sessions"> <span>Past sessions</span></label>
       <button class="tourbtn menu-row" id="tour-open" type="button" title="Take the tour: a one-minute look around the office">
         <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7.9 8a2.2 2.2 0 1 1 3 2.05c-.6.25-.9.7-.9 1.3v.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="14.4" r=".95" fill="currentColor"/></svg>
