@@ -480,6 +480,48 @@
   .lib-group.folder .dv { background: linear-gradient(225deg, transparent 10px, var(--paper) 10.5px); }
   @media (prefers-reduced-motion: reduce) { .dv.fresh { animation: none; } }
 
+  /* Today in the office (recap.js): the day's recap as a card, and the
+     note that offers it once the work winds down. */
+  #recap { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0; color: var(--ink); background: var(--paper); border: 1px solid var(--line); overflow: auto; }
+  #recap::backdrop { background: color-mix(in srgb, var(--ink) 32%, transparent); backdrop-filter: blur(3px); }
+  #recap[open] { animation: rc-in 0.35s cubic-bezier(.25, 1.25, .5, 1); }
+  @keyframes rc-in { from { opacity: 0; transform: translateY(14px) scale(0.97); } }
+  .rc-body { position: relative; padding: 22px 26px 18px; border-top: 5px solid var(--accent); }
+  .rc-head h2 { margin: 2px 0 4px; font: 600 26px/1.15 var(--serif); }
+  .rc-headline { margin: 0; font: 400 16px/1.4 var(--serif); color: var(--muted); text-wrap: pretty; }
+  .rc-close { position: absolute; top: 14px; right: 14px; }
+  .rc-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 16px 0 4px; }
+  .rc-tile { display: flex; flex-direction: column; padding: 9px 11px; border-radius: 10px; background: var(--bg); }
+  .rc-tile b { font: 600 24px/1.1 var(--serif); }
+  .rc-tile span { font-size: 11.5px; color: var(--muted); }
+  .rc-tile.ok b { color: var(--ok); } .rc-tile.warn b { color: var(--accent); }
+  .rc-sec h3 { margin: 14px 0 3px; font: 500 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .rc-line { margin: 0; font-size: 13.5px; line-height: 1.45; }
+  .rc-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+  .rc-list li { display: flex; align-items: center; gap: 8px; font-size: 13px; min-width: 0; }
+  .rc-list li > a, .rc-list li > span, .rc-list li > button { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink); text-decoration: none; font-weight: 500; }
+  .rc-list li > a:hover, .rc-list li > button:hover { color: var(--accent); }
+  .rc-list small { margin-left: auto; padding-left: 8px; flex: none; max-width: 42%; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rc-list.plain small { max-width: 50%; }
+  .rc-kind { display: inline-grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: 4px; color: #fff; font: 700 10px var(--sans); font-style: normal; background: var(--muted); }
+  .rc-kind.leaf { background: var(--leaf); } .rc-kind.lilac { background: var(--lilac); } .rc-kind.sky { background: var(--sky); } .rc-kind.teal { background: var(--teal); }
+  .rc-check { flex: none; width: 18px; text-align: center; font-style: normal; font-weight: 700; color: var(--ok); }
+  .rc-dot { flex: none; width: 8px; height: 8px; margin: 0 5px; border-radius: 50%; background: var(--accent); }
+  .rc-dot.stuck { background: var(--crit); }
+  .rc-more { margin: 4px 0 0 26px; font-size: 11.5px; color: var(--muted); }
+  .rc-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 18px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  .rc-foot .dv-btn { padding: 6px 14px; font-size: 12.5px; }
+  .rc-status { font-size: 12px; color: var(--ok); }
+  .rc-list a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  #recap-offer { position: absolute; z-index: 8; left: 50%; bottom: 52px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 14px; border-radius: 14px; animation: rc-offer 0.6s cubic-bezier(.25, 1.3, .5, 1); }
+  #recap-offer[hidden] { display: none; }
+  #recap-offer p { display: flex; flex-direction: column; margin: 0 6px 0 0; font-size: 12px; color: var(--muted); line-height: 1.3; }
+  #recap-offer p b { font: 600 14px var(--serif); color: var(--ink); }
+  .rc-sun { flex: none; width: 26px; height: 26px; border-radius: 50%; background: radial-gradient(circle at 50% 70%, var(--glow) 0 38%, transparent 40%), linear-gradient(to top, var(--dusk), var(--dawn)); box-shadow: inset 0 -6px 0 color-mix(in srgb, var(--wood-dark) 40%, transparent); }
+  @keyframes rc-offer { from { opacity: 0; transform: translate(-50%, 20px); } }
+  @media (prefers-reduced-motion: reduce) { #recap[open], #recap-offer { animation: none; } }
+  @media (max-width: 600px) { .rc-tiles { grid-template-columns: repeat(2, 1fr); } .rc-body { padding: 18px 18px 14px; } #recap-offer { left: 12px; right: 12px; transform: none; bottom: 12px; flex-wrap: wrap; } @keyframes rc-offer { from { opacity: 0; } } }
+
   /* In the conversation: what it made, its checklist, what it asked. */
   .tx.made { align-self: flex-start; max-width: 86%; }
   .tx.made.image { width: 62%; }
@@ -609,6 +651,10 @@
         <span class="word">Agent Office</span>
       </span>
       <span class="controls paper">
+        <button class="libbtn" id="recap-open" type="button" title="Today in the office: what got done">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="11" r="4" fill="currentColor"/><path d="M10 3v2M3.5 11h-2M18.5 11h-2M5 6l1.4 1.4M15 6l-1.4 1.4M2 16h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>
+          <span>Today</span>
+        </button>
         <button class="libbtn" id="library-open" type="button" title="Everything the office has made">
           <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="3" height="14" rx="1" fill="currentColor"/><rect x="7.5" y="5" width="3" height="12" rx="1" fill="currentColor" opacity=".7"/><rect x="12" y="4" width="3" height="13" rx="1" transform="rotate(-12 13.5 10.5)" fill="currentColor" opacity=".85"/></svg>
           <span>Library</span><span class="count" id="library-count"></span>
@@ -642,6 +688,13 @@
     <aside class="hud paper" id="side" aria-live="polite"></aside>
     <aside class="hud paper" id="library" aria-label="Library" hidden></aside>
     <div id="lightbox" role="dialog" aria-label="Full size" hidden></div>
+    <dialog id="recap" class="paper" aria-labelledby="recap-title"><div class="rc-body"></div></dialog>
+    <div id="recap-offer" class="paper" role="status" hidden>
+      <span class="rc-sun" aria-hidden="true"></span>
+      <p><b>That’s a wrap?</b><span>See what got done today.</span></p>
+      <button type="button" class="dv-btn primary" data-offer="open">Show me</button>
+      <button type="button" class="dv-btn" data-offer="later">Not now</button>
+    </div>
     <span class="hint paper"><kbd>j</kbd> <kbd>k</kbd> move between threads and agents &middot; <kbd>r</kbd> reply &middot; <kbd>1</kbd>–<kbd>4</kbd> tabs &middot; <kbd>Esc</kbd> back &middot; drag to look around</span>
   </main>
 </div>
