@@ -15,8 +15,9 @@
 
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { existsSync, readFileSync } from 'node:fs'
 import { realpath, stat } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { resolve, win32 } from 'node:path'
 
 const MAX_PROMPT = 8000
 const MAX_TITLE = 80
@@ -26,7 +27,52 @@ const RUN_MS = 60000
 const KEEP = 50
 
 // What `claude` to run: AGENT_OFFICE_CLAUDE for tests and unusual installs.
-const claudeBin = () => process.env.AGENT_OFFICE_CLAUDE || 'claude'
+//
+// Never through a shell: the prompt is your own words, and a shell would
+// read them as commands. On Windows that rules out running `claude.cmd`,
+// the stand-in npm installs, directly (only a shell runs a .cmd), so:
+//   - a native claude.exe on PATH is run as it is;
+//   - else npm's stand-in is opened to find the script it hands to node,
+//     and this same node runs that script;
+//   - else there is no safe way to start it, and the job says so.
+// { command, args } to put before claude's own arguments, or { error }.
+const NO_CLAUDE = 'Couldn’t find Claude Code on this computer in a form the office can start safely. Install Claude Code (or reinstall it), make sure claude works in a new terminal, then try again.'
+const SHIM_TARGET = /"(?:%~?dp0%?|\$basedir)[\\/]([^"%$]+?\.(?:c?js|mjs|exe))"/gi
+
+export function resolveClaude({ platform = process.platform, env = process.env, exists = existsSync, read = readFileSync, node = process.execPath } = {}) {
+  const named = env.AGENT_OFFICE_CLAUDE
+  if (platform !== 'win32') return { command: named || 'claude', args: [] }
+  const path = win32 // Windows paths, whatever this machine is (for the tests)
+  // What a shim runs: the last script or program it names beside itself.
+  const unwrap = shim => {
+    let text
+    try { text = String(read(shim)) } catch { return undefined }
+    const found = [...text.matchAll(SHIM_TARGET)].map(m => path.join(path.dirname(shim), m[1].replace(/\//g, '\\')))
+    const target = found.filter(f => !/[\\/]node\.exe$/i.test(f)).at(-1)
+    if (!target || !exists(target)) return undefined
+    return /\.exe$/i.test(target) ? { command: target, args: [] } : { command: node, args: [target] }
+  }
+  if (named) {
+    if (/\.(cmd|bat|ps1)$/i.test(named)) return unwrap(named) ?? { error: NO_CLAUDE }
+    return { command: named, args: [] }
+  }
+  // Windows spells it Path; a copied environment may not be case-blind.
+  const PATH = Object.entries(env).find(([k]) => k.toUpperCase() === 'PATH')?.[1] ?? ''
+  const dirs = PATH.split(';').map(d => d.trim().replace(/^"(.*)"$/, '$1')).filter(Boolean)
+  for (const dir of dirs) {
+    const exe = path.join(dir, 'claude.exe')
+    if (exists(exe)) return { command: exe, args: [] }
+  }
+  for (const dir of dirs) {
+    for (const name of ['claude.cmd', 'claude']) {
+      const shim = path.join(dir, name)
+      if (!exists(shim)) continue
+      const found = unwrap(shim)
+      if (found) return found
+    }
+  }
+  return { error: NO_CLAUDE }
+}
 
 // The bridge may have been started from inside a session (the plugin's
 // mod starts it), and these would make a new session think it's that one.
@@ -52,6 +98,7 @@ export function shortIdOf(output) {
 export function explain(output, code) {
   const text = String(output ?? '')
   if (/not trusted/i.test(text)) return 'Claude Code hasn’t been trusted in that folder yet. Open Claude Code there once, say yes to trusting it, then try again.'
+  if (code === 'NO_CLAUDE') return text
   if (code === 'ENOENT') return 'Couldn’t find the claude command. Is Claude Code installed on this computer?'
   if (/log ?in|auth/i.test(text)) return 'Claude Code needs you to log in first. Run claude in a terminal once, then try again.'
   const line = text.split('\n').map(s => s.trim()).find(Boolean)
@@ -83,8 +130,10 @@ function run(args, { cwd, timeout = RUN_MS } = {}) {
   return new Promise(done => {
     let out = ''
     let child
+    const claude = resolveClaude()
+    if (claude.error) return done({ code: 'NO_CLAUDE', out: claude.error })
     try {
-      child = spawn(claudeBin(), args, { cwd, env: childEnv(), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+      child = spawn(claude.command, [...claude.args, ...args], { cwd, env: childEnv(), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, shell: false })
     } catch (err) {
       return done({ code: err.code ?? 1, out: String(err.message) })
     }

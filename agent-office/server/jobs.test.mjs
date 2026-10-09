@@ -8,12 +8,58 @@ import { mkdtemp, writeFile, readFile, chmod } from 'node:fs/promises'
 import { request } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { startArgs, shortIdOf, explain, stateOf, check, childEnv } from './jobs.mjs'
+import { startArgs, shortIdOf, explain, stateOf, check, childEnv, resolveClaude } from './jobs.mjs'
 
 test('a job starts as a background session, never with a permission mode or a bypass', () => {
   const args = startArgs({ title: 'Write a README', prompt: '--sneaky: write it' })
   assert.deepEqual(args, ['--bg', '-n', 'Write a README', '--', '--sneaky: write it'])
   for (const a of args.slice(0, 3)) assert.doesNotMatch(a, /permission|dangerous|bypass/i)
+})
+
+// A pretend Windows disk: path -> file contents, for resolveClaude().
+function windows(files, PATH) {
+  const disk = new Map(Object.entries(files).map(([k, v]) => [k.toLowerCase(), v]))
+  return {
+    platform: 'win32', env: { Path: PATH }, node: 'C:\\Program Files\\nodejs\\node.exe',
+    exists: p => disk.has(p.toLowerCase()),
+    read: p => { if (!disk.has(p.toLowerCase())) throw new Error('ENOENT'); return disk.get(p.toLowerCase()) },
+  }
+}
+// What npm writes next to a package's command on Windows (cmd-shim).
+const CMD_SHIM = '@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\r\nIF EXIST "%dp0%\\node.exe" (\r\n  SET "_prog=%dp0%\\node.exe"\r\n) ELSE (\r\n  SET "_prog=node"\r\n  SET PATHEXT=%PATHEXT:;.JS;=;%\r\n)\r\n\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\@anthropic-ai\\claude-code\\cli.js" %*\r\n'
+const SH_SHIM = '#!/bin/sh\nbasedir=$(dirname "$(echo "$0" | sed -e \'s,\\\\,/,g\')")\nexec node  "$basedir/node_modules/@anthropic-ai/claude-code/cli.js" "$@"\n'
+const NPM = 'C:\\Users\\ann\\AppData\\Roaming\\npm'
+const CLI = `${NPM}\\node_modules\\@anthropic-ai\\claude-code\\cli.js`
+
+test('elsewhere than Windows, claude is run as it is', () => {
+  assert.deepEqual(resolveClaude({ platform: 'linux', env: {} }), { command: 'claude', args: [] })
+  assert.deepEqual(resolveClaude({ platform: 'darwin', env: { AGENT_OFFICE_CLAUDE: '/opt/claude' } }), { command: '/opt/claude', args: [] })
+})
+
+test('on Windows, a native claude.exe on PATH comes first, even after an npm shim', () => {
+  const native = 'C:\\Users\\ann\\.local\\bin'
+  const r = resolveClaude(windows({ [`${NPM}\\claude.cmd`]: CMD_SHIM, [CLI]: '', [`${native}\\claude.exe`]: 'MZ' }, `C:\\Windows;${NPM};${native}`))
+  assert.deepEqual(r, { command: `${native}\\claude.exe`, args: [] })
+})
+
+test('on Windows, the npm claude.cmd is run as node with the script it wraps, never through a shell', () => {
+  const r = resolveClaude(windows({ [`${NPM}\\claude.cmd`]: CMD_SHIM, [CLI]: '' }, `C:\\Windows;${NPM}\\`))
+  assert.deepEqual(r, { command: 'C:\\Program Files\\nodejs\\node.exe', args: [CLI] })
+  // The sh shim npm writes beside it works the same.
+  const sh = resolveClaude(windows({ [`${NPM}\\claude`]: SH_SHIM, [CLI]: '' }, `"${NPM}"`))
+  assert.deepEqual(sh, { command: 'C:\\Program Files\\nodejs\\node.exe', args: [CLI] })
+  // AGENT_OFFICE_CLAUDE naming a shim is unwrapped too.
+  const named = resolveClaude({ ...windows({ [`${NPM}\\claude.cmd`]: CMD_SHIM, [CLI]: '' }, ''), env: { AGENT_OFFICE_CLAUDE: `${NPM}\\claude.cmd` } })
+  assert.deepEqual(named.args, [CLI])
+})
+
+test('on Windows, a shim whose script is missing, or no claude at all, is refused in plain words', () => {
+  const broken = resolveClaude(windows({ [`${NPM}\\claude.cmd`]: CMD_SHIM }, NPM))
+  assert.ok(broken.error)
+  const none = resolveClaude(windows({}, 'C:\\Windows'))
+  assert.match(none.error, /Claude Code/)
+  assert.doesNotMatch(none.error, /ENOENT|spawn|shim|PATH/)
+  assert.equal(explain(none.error, 'NO_CLAUDE'), none.error)
 })
 
 test('the session id, the state and the reasons come out in plain words', () => {
