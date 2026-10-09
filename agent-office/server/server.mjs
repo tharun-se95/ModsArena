@@ -8,7 +8,8 @@
 //   --replace   take over the port from a managed bridge already holding it
 //
 //   POST /event    one event or an array (mod schema or classic hook stdin)
-//   GET  /stream   SSE: replays the recent log and gauges, then every new event
+//   GET  /stream   SSE: replays what places each thread, the recent log and
+//                  gauges, then every new event
 //   GET  /history  past sessions read from ~/.claude/projects transcripts
 //   GET  /healthz  liveness probe the mod uses before spawning a bridge, with
 //                  this bridge's version, so a newer mod can replace it
@@ -42,6 +43,7 @@ import * as chat from './chat.mjs'
 import { createJobs } from './jobs.mjs'
 import * as asks from './asks.mjs'
 import { findTranscript, readTranscript } from './transcript.mjs'
+import { isEngineNote } from './prompts.mjs'
 
 const args = process.argv.slice(2)
 const flag = name => args.includes(`--${name}`)
@@ -91,6 +93,67 @@ const log = []
 const gauges = new Map()
 const clients = new Set()
 
+// What places each thread in the office: its start (project, so its room),
+// its first prompt (its name), the coordinator's marker, its end, and the
+// agents and questions still open. Kept outside the log like the gauges, so
+// a page opened on a long-running bridge still finds every thread in its
+// room once the log has moved on. session -> { events: Map, endedAt? }
+const anchors = new Map()
+const ANCHOR_SESSIONS = 500
+const ANCHORS_PER_SESSION = 64
+const ANCHOR_ENDED_MS = 6 * 60 * 60 * 1000 // /history has it after that
+
+function anchorKey(ev) {
+  switch (ev.kind) {
+    case 'session.start': return 'start'
+    case 'session.thread': return 'thread'
+    case 'session.end': return 'end'
+    case 'turn.start': return !ev.agent && typeof ev.text === 'string' && !isEngineNote(ev.text) ? 'prompt' : undefined
+    case 'agent.spawn': return `agent|${ev.agent}`
+    case 'ask.open': return `ask|${ev.id}`
+  }
+}
+
+function anchor(ev) {
+  if (typeof ev.session !== 'string') return
+  if (ev.kind === 'agent.end') return void anchors.get(ev.session)?.events.delete(`agent|${ev.agent}`)
+  if (ev.kind === 'ask.close') return void anchors.get(ev.session)?.events.delete(`ask|${ev.id}`)
+  const key = anchorKey(ev)
+  if (!key) return
+  let a = anchors.get(ev.session)
+  if (!a) anchors.set(ev.session, (a = { events: new Map() }))
+  // Only the first prompt names a thread.
+  if (key === 'prompt' && a.events.has('prompt')) return
+  if (key === 'start') {
+    // Resumed: it is live again.
+    a.events.delete('end')
+    a.endedAt = undefined
+  }
+  if (key === 'end') a.endedAt = Date.now()
+  a.events.set(key, ev)
+  if (a.events.size > ANCHORS_PER_SESSION) {
+    const oldest = [...a.events.keys()].find(k => k.includes('|'))
+    if (oldest) a.events.delete(oldest)
+  }
+}
+
+function pruneAnchors(now = Date.now()) {
+  for (const [session, a] of anchors) if (a.endedAt && now - a.endedAt > ANCHOR_ENDED_MS) anchors.delete(session)
+  // Too many: ended threads go first, then the longest-known ones.
+  while (anchors.size > ANCHOR_SESSIONS) {
+    const ended = [...anchors].find(([, a]) => a.endedAt)
+    anchors.delete(ended ? ended[0] : anchors.keys().next().value)
+  }
+}
+
+// What a fresh page is sent: the anchors the log no longer holds, oldest
+// first, then the log, then the gauges.
+function replay() {
+  const inLog = new Set(log)
+  const kept = [...anchors.values()].flatMap(a => [...a.events.values()]).filter(ev => !inLog.has(ev)).sort((a, b) => a.t - b.t)
+  return [...kept, ...log, ...gauges.values()]
+}
+
 // The bridge names projects itself, so live and past sessions of one
 // repository land in one room whatever the producer called it.
 function enrich(ev) {
@@ -127,12 +190,14 @@ function publish(events) {
     }
     if (GAUGES.has(ev.kind)) gauges.set(gaugeKey(ev), ev)
     else log.push(ev)
+    anchor(ev)
     // A finished agent's last reading has nothing left to show.
     if (ev.kind === 'agent.end') gauges.delete(gaugeKey({ kind: 'agent.context', session: ev.session, agent: ev.agent }))
     const frame = `data: ${JSON.stringify(ev)}\n\n`
     for (const res of clients) res.write(frame)
   }
   if (log.length > LOG_LIMIT) log.splice(0, log.length - LOG_LIMIT)
+  pruneAnchors()
 }
 
 // Settings hooks carry no context figures, but they name the transcript.
@@ -314,7 +379,7 @@ const server = createServer(async (req, res) => {
       'cache-control': 'no-cache',
       connection: 'keep-alive',
     })
-    res.write(`event: replay\ndata: ${JSON.stringify([...log, ...gauges.values()])}\n\n`)
+    res.write(`event: replay\ndata: ${JSON.stringify(replay())}\n\n`)
     clients.add(res)
     const ping = setInterval(() => res.write(': ping\n\n'), 15000)
     req.on('close', () => {

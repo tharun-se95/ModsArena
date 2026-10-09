@@ -99,3 +99,50 @@ test('Stop is guarded like chat and reaches the session’s mod through its inbo
   const inbox = (await call('GET', '/inbox?session=sess-stop', { headers: { 'x-agent-office-inbox': '1' } })).json()
   assert.deepEqual(inbox.messages, [{ id: sent.json().id, action: 'stop', text: '' }])
 })
+
+// The first replay frame a fresh page gets from /stream.
+function firstReplay() {
+  return new Promise((resolve, reject) => {
+    const req = request({ host: '127.0.0.1', port: PORT, path: '/stream' }, res => {
+      let text = ''
+      res.on('data', c => {
+        text += c
+        const m = /event: replay\ndata: (.*)\n\n/.exec(text)
+        if (m) {
+          req.destroy()
+          resolve(JSON.parse(m[1]))
+        }
+      })
+    })
+    req.on('error', err => (err.code === 'ECONNRESET' ? null : reject(err)))
+    req.end()
+  })
+}
+
+test('a long-running bridge still replays what places each thread in its room', async () => {
+  const t = Date.now()
+  const project = { id: '/w/long', name: 'long', remote: false }
+  await call('POST', '/event', { body: [
+    { t, kind: 'session.start', session: 'long-1', cwd: '/w/long', project },
+    { t: t + 1, kind: 'turn.start', session: 'long-1', text: 'tidy the long log' },
+    { t: t + 2, kind: 'session.thread', session: 'long-1' },
+    { t: t + 3, kind: 'agent.spawn', session: 'long-1', agent: 'helper', type: 'Explore' },
+    { t: t + 4, kind: 'agent.spawn', session: 'long-1', agent: 'gone', type: 'Explore' },
+    { t: t + 5, kind: 'agent.end', session: 'long-1', agent: 'gone' },
+  ] })
+  // Far more than the log keeps, in bodies under the size limit.
+  for (let batch = 0; batch < 9; batch++) {
+    const events = []
+    for (let i = 0; i < 1000; i++) events.push({ t: t + 10 + batch * 1000 + i, kind: 'turn.start', session: 'long-1', text: `step ${batch}-${i}` })
+    assert.equal((await call('POST', '/event', { body: events })).status, 200)
+  }
+  const replay = await firstReplay()
+  const mine = replay.filter(e => e.session === 'long-1')
+  const start = mine.findIndex(e => e.kind === 'session.start')
+  assert.ok(start >= 0, 'the session.start is replayed')
+  assert.equal(mine[start].project.name, 'long')
+  assert.equal(mine.find(e => e.kind === 'turn.start')?.text, 'tidy the long log', 'its first prompt comes before the rest')
+  assert.ok(mine.some(e => e.kind === 'session.thread'), 'the thread marker too')
+  assert.deepEqual(mine.filter(e => e.kind === 'agent.spawn').map(e => e.agent), ['helper'], 'only agents still at work')
+  assert.equal(mine.filter(e => e.kind === 'session.start').length, 1, 'nothing twice')
+})
