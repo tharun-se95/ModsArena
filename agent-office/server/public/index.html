@@ -709,7 +709,7 @@
   .ask-opts.row .ask-opt.rec b::after, .ask-opt.pic.rec b::after { content: ""; }
   button.ask-opt:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--paper)); }
   button.ask-opt.picked { background: var(--accent); color: #fff; }
-  .ask-opts.row .ask-opt.rec { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .ask-opts.row .ask-opt.rec { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
   .ask-opt.pic { padding: 4px; gap: 4px; align-items: stretch; }
   .ask-opt.pic img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; border-radius: 5px; display: block; }
   .ask-opt.pic b { text-align: center; font-size: 11.5px; }
@@ -1023,7 +1023,7 @@
   .jrooms legend { width: 100%; }
   .jroom { position: relative; display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px 6px 9px; border-radius: 10px; border: 1px solid var(--line); cursor: pointer; font-size: 13px; }
   .jroom input { position: absolute; opacity: 0; pointer-events: none; }
-  .jroom i { width: 14px; height: 14px; border-radius: 4px; border: 1px solid color-mix(in srgb, var(--ink) 15%, transparent); }
+  .jroom i { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; font-size: 12px; font-style: normal; line-height: 1; border: 1px solid color-mix(in srgb, var(--ink) 15%, transparent); }
   .jroom span { font: 600 13px var(--serif); }
   .jroom small { color: var(--muted); font-size: 11px; }
   .jroom.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--paper)); }

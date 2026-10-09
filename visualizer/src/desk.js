@@ -13,6 +13,7 @@ import { escapeHtml, ago } from './words.js'
 import { roomKey } from './table.js'
 import { demoJob } from '../../agent-office/server/demo.mjs'
 import { KINDS, titleOf, matchJob } from './jobcards.js'
+import { projectName, projectIcon } from './names.js'
 
 const token = document.querySelector('meta[name="agent-office-token"]')?.content || ''
 
@@ -76,7 +77,8 @@ const rooms = () => {
   const out = new Map()
   for (const n of nodes.values()) {
     if (n.kind !== 'session' || !n.project || n.project === 'unknown') continue
-    const room = out.get(n.project) ?? { dir: n.project, name: n.projectName ?? n.project, live: 0, last: 0 }
+    const raw = n.projectName ?? n.project
+    const room = out.get(n.project) ?? { dir: n.project, raw, name: projectName(n.project, raw), icon: projectIcon(n.project, raw), live: 0, last: 0 }
     if (!n.past && n.status !== 'done') room.live++
     room.last = Math.max(room.last, n.lastAt ?? n.startedAt ?? n.endedAt ?? 0)
     out.set(n.project, room)
@@ -107,7 +109,7 @@ function roomPicker() {
   return list.map(r => `
     <label class="jroom ${r.dir === dir ? 'on' : ''}" title="${escapeHtml(r.dir)}">
       <input type="radio" name="jroom" value="${escapeHtml(r.dir)}" ${r.dir === dir ? 'checked' : ''}>
-      <i class="room-${roomKey(r.name)}"></i><span>${escapeHtml(r.name)}</span>
+      <i class="room-${roomKey(r.raw)}" aria-hidden="true">${r.icon}</i><span>${escapeHtml(r.name)}</span>
       <small>${r.live ? `${r.live} working here` : 'quiet'}</small>
     </label>`).join('')
 }

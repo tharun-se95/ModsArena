@@ -6,6 +6,7 @@ import { nodes, sid, aid, mail } from './model.js'
 import { describe } from './plain.js'
 import { devView } from './prefs.js'
 import { projectName } from './names.js'
+import { who as critter } from './critters.js'
 
 const ACTION_KEEP = 30
 const MOMENT_KEEP = 40
@@ -62,6 +63,11 @@ function phrase(tool, summary, ok) {
 
 const sessionName = session => nodes.get(sid(session))?.label ?? 'A session'
 const who = ev => (ev.agent ? (nodes.get(aid(ev.session, ev.agent))?.label ?? 'A subagent') : 'The session')
+// The same, by the critter's first name, for the plain-words lines.
+const named = ev => {
+  const n = ev.agent && nodes.get(aid(ev.session, ev.agent))
+  return n ? critter(n).name : ev.agent ? 'A helper' : 'The session'
+}
 
 // `raw` is how Developer view says the same moment, when it differs.
 //
@@ -123,7 +129,7 @@ const lower = s => s.charAt(0).toLowerCase() + s.slice(1)
 function plainDone(ev, tool, summary) {
   const d = describe(tool, summary)
   const said = ev.ok ? d.done : d.fail
-  return ev.agent ? `${who(ev)} ${lower(said)}` : said
+  return ev.agent ? `${named(ev)} ${lower(said)}` : said
 }
 
 // An action as the page shows it: plain words, or the raw line in
@@ -170,14 +176,19 @@ export function ingest(ev) {
       break
     }
     case 'agent.spawn':
-      moment(ev, `${quote(sessionName(ev.session))} brought in ${ev.name || ev.type}${ev.description ? ` to ${lower(ev.description)}` : ''}.`, 'quiet', aid(ev.session, ev.agent),
+      moment(ev, `${quote(sessionName(ev.session))} brought in ${critter({ kind: 'agent', session: ev.session, agent: ev.agent, type: ev.type, name: ev.name }).title}${ev.description ? ` to ${lower(ev.description)}` : ''}.`, 'quiet', aid(ev.session, ev.agent),
         `${quote(sessionName(ev.session))} started ${/^[aeiou]/i.test(ev.type ?? '') ? 'an' : 'a'} ${ev.name || ev.type} subagent${ev.description ? `: ${ev.description}` : ''}.`)
       break
     case 'agent.end': {
       const n = nodes.get(aid(ev.session, ev.agent))
-      if (n) moment(ev, n.endStatus === 'failed' || n.endStatus === 'killed'
-        ? `${n.label} stopped before finishing its work for ${quote(sessionName(ev.session))}.`
-        : `${n.label} finished its work for ${quote(sessionName(ev.session))}.`, 'quiet')
+      if (n) {
+        const stopped = n.endStatus === 'failed' || n.endStatus === 'killed'
+        const end = name => stopped
+          ? `${name} stopped before finishing its work for ${quote(sessionName(ev.session))}.`
+          : `${name} finished its work for ${quote(sessionName(ev.session))}.`
+        // Its name in plain view; its agent type in Developer view.
+        moment(ev, end(critter(n).title), 'quiet', undefined, end(n.label))
+      }
       break
     }
     case 'agent.message': {
@@ -197,7 +208,7 @@ export function ingest(ev) {
       break
     }
     case 'context.compact':
-      moment(ev, `${ev.agent ? who(ev) : quote(sessionName(ev.session))} tidied up its memory and has room again.`, 'quiet', undefined,
+      moment(ev, `${ev.agent ? named(ev) : quote(sessionName(ev.session))} tidied up its memory and has room again.`, 'quiet', undefined,
         `${ev.agent ? who(ev) : quote(sessionName(ev.session))} compacted its context and has room again.`)
       break
     case 'session.start':
@@ -230,15 +241,15 @@ export function ingest(ev) {
       if (!MADE[ev.type]) break
       const key = `made:${ev.session}:${ev.id}`
       if (byKey(key)) break
-      moment(ev, `${ev.agent ? who(ev) : quote(sessionName(ev.session))} made ${MADE[ev.type]}${ev.title ? `: ${clipText(ev.title, 70)}` : '.'}`, 'made', ev.agent ? aid(ev.session, ev.agent) : sid(ev.session), undefined, { key })
+      const made = name => `${name} made ${MADE[ev.type]}${ev.title ? `: ${clipText(ev.title, 70)}` : '.'}`
+      moment(ev, made(ev.agent ? named(ev) : quote(sessionName(ev.session))), 'made', ev.agent ? aid(ev.session, ev.agent) : sid(ev.session), ev.agent ? made(who(ev)) : undefined, { key })
       break
     }
     case 'ask.open': {
-      const name = ev.agent ? who(ev) : quote(sessionName(ev.session))
-      const text = ev.type === 'permission' ? `${name} is waiting for your OK to go on.`
+      const asks = name => ev.type === 'permission' ? `${name} is waiting for your OK to go on.`
         : ev.type === 'plan' ? `${name} has a plan for you to approve.`
           : `${name} asked you: ${clipText(ev.questions?.[0]?.question ?? 'a question', 90)}`
-      moment(ev, text, 'block', ev.agent ? aid(ev.session, ev.agent) : sid(ev.session), undefined, { key: `ask:${ev.session}:${ev.id}`, ask: true })
+      moment(ev, asks(ev.agent ? named(ev) : quote(sessionName(ev.session))), 'block', ev.agent ? aid(ev.session, ev.agent) : sid(ev.session), ev.agent ? asks(who(ev)) : undefined, { key: `ask:${ev.session}:${ev.id}`, ask: true })
       break
     }
     case 'ask.close': {
