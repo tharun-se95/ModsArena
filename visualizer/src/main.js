@@ -13,11 +13,15 @@ import * as transcript from './transcript.js'
 import * as settings from './settings.js'
 import * as a11y from './a11y.js'
 import * as motion from './motion.js'
+import * as power from './power.js'
 
 const HISTORY_REFRESH_MS = 60000
 const PANEL_REFRESH_MS = 700
 const params = new URLSearchParams(location.search)
-const isDemo = Boolean(window.AGENT_OFFICE_DEMO) || params.get('demo') === '1'
+// ?busy=1 plays a crowded demo in the page (about 12 threads and 25 agents)
+// for checking the office stays smooth; demo-only, it never reads the bridge.
+const isBusy = params.get('busy') === '1'
+const isDemo = Boolean(window.AGENT_OFFICE_DEMO) || params.get('demo') === '1' || isBusy
 
 let showPast = true
 let history = []
@@ -146,14 +150,43 @@ function refreshPanels() {
   a11y.render({ running: now, pick })
 }
 
-function frame() {
+// ?debug keeps the last 600 frames' main-thread cost (ms) for profiling.
+const frameCost = params.has('debug') ? [] : null
+
+// A tab you can't see draws nothing; "Save battery" draws 30 frames a
+// second (power.js). The loop starts again when the tab comes back.
+let rafId = 0
+let lastFrame = -Infinity
+
+function frame(t) {
+  rafId = requestAnimationFrame(frame)
+  if (!power.due(t, lastFrame, power.budget().fps)) return
+  lastFrame = t
+  const t0 = frameCost && performance.now()
   model.sweep(Date.now())
   table.sync(showPast)
   table.animate()
-  requestAnimationFrame(frame)
+  if (frameCost) { frameCost.push(performance.now() - t0); if (frameCost.length > 600) frameCost.shift() }
 }
 
-setInterval(refreshPanels, PANEL_REFRESH_MS)
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    cancelAnimationFrame(rafId)
+    rafId = 0
+  } else if (!rafId) {
+    rafId = requestAnimationFrame(frame)
+    refreshPanels()
+  }
+})
+
+setInterval(() => { if (!document.hidden) refreshPanels() }, PANEL_REFRESH_MS)
+
+settings.add({
+  id: 'low-power', type: 'toggle', label: 'Save battery',
+  hint: 'Draws 30 frames a second, a little softer, with simpler shadows',
+  get: power.isSaving, set: power.setSaving,
+})
+power.onChange(table.setPower)
 
 // ---------------------------------------------------------------------------
 // Sources
@@ -204,7 +237,7 @@ function connect() {
 // synthetic activity as `server.mjs --demo`.
 function playDemo() {
   setStatus('Sample activity', 'live')
-  startDemo(events => events.forEach(ingest))
+  startDemo(events => events.forEach(ingest), { busy: isBusy })
 }
 
 // A bridge started with --demo has sample sessions and no transcripts on
@@ -219,6 +252,6 @@ setInterval(loadHistory, HISTORY_REFRESH_MS)
 if (isDemo) playDemo()
 else connect()
 refreshPanels()
-requestAnimationFrame(frame)
+if (!document.hidden) rafId = requestAnimationFrame(frame)
 // ?debug exposes the model to the console.
-if (params.has('debug')) window.cluster = { model, words, table }
+if (params.has('debug')) window.cluster = { model, words, table, frameCost }

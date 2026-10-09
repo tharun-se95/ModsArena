@@ -452,6 +452,9 @@ function morph(from, to) {
 }
 
 function patch(el, html) {
+  // Unchanged since the last refresh: nothing to rebuild or compare.
+  if (el._html === html) return
+  el._html = html
   const fresh = el.cloneNode(false)
   fresh.innerHTML = html
   morph(el, fresh)

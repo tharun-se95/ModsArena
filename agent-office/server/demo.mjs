@@ -113,7 +113,15 @@ const pick = list => list[Math.floor(Math.random() * list.length)]
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const rand = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo))
 
-export function startDemo(publish) {
+// `busy` (the page's ?busy=1) fills the office for profiling: twelve
+// threads across four projects, each keeping two or three agents at work,
+// so about 25 agents are busy at once. Demo-only.
+const BUSY_PROJECTS = [
+  { id: '/work/mobile-app', name: 'acme/mobile-app', remote: 'git@github.com:acme/mobile-app.git' },
+  { id: '/work/infra', name: 'acme/infra', remote: 'git@github.com:acme/infra.git' },
+]
+
+export function startDemo(publish, { busy = false } = {}) {
   let seq = 0
 
   function runSession(session, project, pace, asThread = false, first = pick(PROMPTS)) {
@@ -215,7 +223,7 @@ export function startDemo(publish) {
         const items = PLANS[text] ?? FOLLOWUPS[text] ?? ['Look around', 'Make the change', 'Test it']
         checklist(items, 0, true)
         const work = []
-        for (let i = 0; i < rand(0, 3); i++) work.push(runAgent(undefined, 0))
+        for (let i = 0, n = busy ? rand(1, 4) : rand(0, 3); i < n; i++) work.push(runAgent(undefined, 0))
         const hue = rand(0, 360)
         for (let step = 0; step < items.length; step++) {
           checklist(items, step, true)
@@ -273,6 +281,11 @@ export function startDemo(publish) {
   runSession('demo-payments-1', PROJECTS[0], 1, false, 'Harden the session handling')
   setTimeout(() => runSession('demo-payments-2', PROJECTS[0], 1.6, false, 'Why is the build flaky?'), 2500)
   setTimeout(() => runSession('demo-dashboard-1', PROJECTS[1], 1.3, true, 'Migrate charts to the new tokens'), 5000)
+  if (!busy) return
+  const all = [...PROJECTS, ...BUSY_PROJECTS]
+  for (let i = 0; i < 9; i++) {
+    setTimeout(() => runSession(`demo-busy-${i + 1}`, all[(i + 1) % all.length], 0.8 + (i % 4) * 0.25, false, PROMPTS[i % PROMPTS.length]), 300 + i * 400)
+  }
 }
 
 // Past sessions in the shape GET /history answers.

@@ -17,11 +17,12 @@ import {
   buildRoom, rug, desk, easel, coffeeCorner, officeShell, glassMat, lampMat,
   FLOOR_TOP, WALL_H, COFFEE_W, COFFEE_D,
 } from './office.js'
-import { nodes, fill, sid, aid, WARN_AT, outputs, openAsks, mail } from './model.js'
+import { nodes, fill, sid, aid, WARN_AT, outputs, mail } from './model.js'
 import { srcOf, toolName } from './assets.js'
 import { createBubbles } from './bubbles.js'
 import { beadColor, escapeHtml, activity, ago } from './words.js'
 import { sound } from './sound.js'
+import { budget } from './power.js'
 import { reduced } from './motion.js'
 
 const ROW_DEPTH = 160 // one row: helpers, desk, the session, its label
@@ -117,6 +118,7 @@ let slowFrames = 0
 let last = 0
 let tick = 0
 const v = new THREE.Vector3()
+const spot = new THREE.Vector3() // scratch, so a frame allocates no vectors
 
 const clock = () => performance.now() / 1000
 
@@ -124,11 +126,12 @@ export function mount(el, { pick }) {
   stage = el
   onPick = pick
   renderer = new THREE.WebGLRenderer({ antialias: true })
-  renderer.setPixelRatio(Math.min(2, devicePixelRatio))
+  renderer.setPixelRatio(Math.min(budget().pixelRatio, devicePixelRatio))
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
   // The light never moves, so the shadows only change as the critters do;
-  // animate() redraws them every other frame instead of every frame.
+  // animate() redraws them every few frames (power.js) instead of every
+  // frame: the shadow pass draws the whole office a second time.
   renderer.shadowMap.autoUpdate = false
   renderer.outputColorSpace = THREE.SRGBColorSpace
   stage.append(renderer.domElement)
@@ -172,7 +175,7 @@ export function mount(el, { pick }) {
   sun = new THREE.DirectionalLight('#fffaf2', SUN)
   sun.position.set(-90, 220, 120)
   sun.castShadow = true
-  sun.shadow.mapSize.set(2048, 2048)
+  sun.shadow.mapSize.set(budget().shadowSize, budget().shadowSize)
   sun.shadow.radius = 6
   sun.shadow.bias = -0.0005
   // A shadow-map texel is close to a unit across a big office; nudging the
@@ -764,8 +767,13 @@ function headAt(id) {
   return { x, y }
 }
 
+// Beads and confetti share their shapes: a busy office fires several tool
+// calls a second, and each used to build (and throw away) its own sphere.
+const BEAD = new THREE.SphereGeometry(1.7, 12, 10)
+const PAPER = new THREE.BoxGeometry(1.6, 0.3, 1)
+
 function addBead(from, color) {
-  const m = new THREE.Mesh(new THREE.SphereGeometry(1.7, 16, 16), new THREE.MeshStandardMaterial({ color, roughness: 0.5, transparent: true }))
+  const m = new THREE.Mesh(BEAD, new THREE.MeshStandardMaterial({ color, roughness: 0.5, transparent: true }))
   m.castShadow = true
   m.position.copy(from)
   scene.add(m)
@@ -774,9 +782,8 @@ function addBead(from, color) {
 
 // A little burst of colored paper when a session finishes a turn.
 function addConfetti(from) {
-  const geo = new THREE.BoxGeometry(1.6, 0.3, 1)
   for (let i = 0; i < 18; i++) {
-    const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: palette[TINTS[i % TINTS.length]], transparent: true }))
+    const m = new THREE.Mesh(PAPER, new THREE.MeshStandardMaterial({ color: palette[TINTS[i % TINTS.length]], transparent: true }))
     m.position.copy(from)
     scene.add(m)
     const a = Math.random() * Math.PI * 2
@@ -928,8 +935,10 @@ function greetings(now) {
 }
 
 // Standing helpers nudge apart so nobody stands inside anybody else.
+const standing = []
 function makeRoom() {
-  const standing = [...agentViews.values()].filter(a => !a.gone && !a.walk && !a.leaving && a.settled)
+  standing.length = 0
+  for (const a of agentViews.values()) if (!a.gone && !a.walk && !a.leaving && a.settled) standing.push(a)
   for (let i = 0; i < standing.length; i++) {
     for (let j = i + 1; j < standing.length; j++) {
       const p = standing[i].group.position, q = standing[j].group.position
@@ -996,6 +1005,7 @@ export function animate() {
     vacuum.led.visible = Math.floor(now * 2) % 2 === 0
   } else if (vacuum) vacuum.led.visible = true
 
+  gatherAsks()
   for (const s of sessionViews.values()) {
     const n = nodes.get(s.id)
     if (!n) continue
@@ -1056,7 +1066,7 @@ export function animate() {
       pose(a.char, idle + a.slot, { busy: walking ? 1 : 0, hop: 1 })
       if (!still) waving(a, a.char, now)
       if (a.onBreak && !a.leaving) {
-        const table = coffee.target.clone().add(coffee.tableAt)
+        const table = spot.copy(coffee.target).add(coffee.tableAt)
         const face = Math.atan2(table.x - a.group.position.x, table.z - a.group.position.z)
         a.group.rotation.y += Math.atan2(Math.sin(face - a.group.rotation.y), Math.cos(face - a.group.rotation.y)) * Math.min(1, dt * 6)
         // The mug arm rests forward, with a sip now and then.
@@ -1080,7 +1090,7 @@ export function animate() {
     const shown = selected && (selected === s.id || nodes.get(selected)?.session === nodes.get(s.id)?.session)
     talk.hold(a.id, 'think', shown && n.status === 'active' && n.description ? { key: n.description, text: n.description, thread: s.id } : null, now)
     const [sx, sz] = slotAt(a.slot)
-    const target = new THREE.Vector3(s.group.position.x + sx, FLOOR_TOP, s.group.position.z + sz)
+    const target = spot.set(s.group.position.x + sx, FLOOR_TOP, s.group.position.z + sz)
     const grow = still ? 1 : Math.min(1, (now - a.born) / 0.6)
     a.group.rotation.y = Math.atan2(s.group.position.x - a.group.position.x, s.group.position.z - a.group.position.z) * 0.45
     pose(a.char, idle + a.slot, {
@@ -1101,7 +1111,7 @@ export function animate() {
 
   for (let i = beads.length - 1; i >= 0; i--) {
     const b = beads[i], k = (now - b.born) / 1.6
-    if (k >= 1) { scene.remove(b.m); b.m.geometry.dispose(); b.m.material.dispose(); beads.splice(i, 1); continue }
+    if (k >= 1) { scene.remove(b.m); b.m.material.dispose(); beads.splice(i, 1); continue }
     if (still) b.m.position.copy(b.from)
     else b.m.position.copy(b.from).addScaledVector(b.drift, k).add(v.set(0, k * 16, 0))
     b.m.material.opacity = 1 - k * k
@@ -1136,7 +1146,7 @@ export function animate() {
   controls.update()
   if (!camGoal) keepInOffice()
   fitDepth()
-  if (tick % 2 === 0) renderer.shadowMap.needsUpdate = true
+  if (tick % budget().shadowEvery === 0) renderer.shadowMap.needsUpdate = true
   sharpness(now, dt)
   renderer.render(scene, camera)
   labels.render(scene, camera)
@@ -1178,9 +1188,39 @@ function askWords(ask) {
   return { text: 'Plan ready. Approve?', long: `Plan ready: ${(ask.plan ?? '').replace(/^#+\s*/, '').split('\n')[0]}. Approve?` }
 }
 
+// Once a frame rather than once per session: each thread's oldest open ask
+// (what openAsks(n)[0] gives), from one pass over the nodes, and each
+// thread's outputs, regrouped only when the list changes.
+const firstAsk = new Map()
+function gatherAsks() {
+  firstAsk.clear()
+  for (const x of nodes.values()) {
+    if (!x.asks?.length || (x.kind !== 'session' && x.kind !== 'agent')) continue
+    for (const a of x.asks) {
+      const had = firstAsk.get(x.session)
+      if (!had || a.t < had.t) firstAsk.set(x.session, { ...a, who: x })
+    }
+  }
+}
+let outKey = ''
+const outBy = new Map()
+const NONE = []
+function outputsBy(session) {
+  const key = `${outputs.length}|${outputs[0]?.session}|${outputs[0]?.id}|${outputs[0]?.t}`
+  if (key !== outKey) {
+    outKey = key
+    outBy.clear()
+    for (const o of outputs) {
+      if (!outBy.has(o.session)) outBy.set(o.session, [])
+      outBy.get(o.session).push(o)
+    }
+  }
+  return outBy.get(session) ?? NONE
+}
+
 function showWork(s, n, now, asleep) {
   // 💬 a question it's holding the turn for, and the monitor turns into it.
-  const ask = asleep ? null : openAsks(n)[0]
+  const ask = asleep ? null : firstAsk.get(n.session)
   talk.hold(s.id, 'ask', ask && { key: ask.id, type: ask.type, ...askWords(ask), thread: s.id }, now)
   s.desk.showAsk(ask?.type, ask?.type === 'permission' ? `#${palette.mustard.getHexString()}` : ask?.type === 'plan' ? `#${palette.sky.getHexString()}` : `#${palette.clay.getHexString()}`)
 
@@ -1194,7 +1234,7 @@ function showWork(s, n, now, asleep) {
   if (s.easel.group.visible) s.easel.draw(todos, `#${palette[s.tint].getHexString()}`, reduced() ? 0.5 : now)
 
   // 💬 "look": something new it made.
-  const mine = outputs.filter(o => o.session === n.session)
+  const mine = outputsBy(n.session)
   if (mine.length !== s.seen) {
     const fresh = mine.slice(0, Math.max(0, mine.length - (s.seen ?? 0)))
     s.seen = mine.length
@@ -1304,6 +1344,18 @@ function declutter() {
   for (const t of [...rooms.values(), ...(coffee ? [coffee] : [])]) {
     t.label.el.classList.toggle('covered', Boolean(over && overlaps(t.label.el.getBoundingClientRect(), [over])))
   }
+}
+
+// Saving battery (or not): the sharpness cap and the shadow map's size.
+export function setPower({ pixelRatio, shadowSize }) {
+  if (!renderer) return
+  renderer.setPixelRatio(Math.min(pixelRatio, devicePixelRatio))
+  if (sun.shadow.mapSize.x !== shadowSize) {
+    sun.shadow.mapSize.set(shadowSize, shadowSize)
+    sun.shadow.map?.dispose()
+    sun.shadow.map = null
+  }
+  renderer.shadowMap.needsUpdate = true
 }
 
 export function setSelected(id) {
