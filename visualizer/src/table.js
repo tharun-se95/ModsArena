@@ -1382,5 +1382,39 @@ function bindPointer() {
   })
   renderer.domElement.addEventListener('pointerleave', () => { hoverPick = null; hovered = null })
 }
+// Where things are on screen, for the help overlay (help.js): page
+// pixels, or null for what's out of sight. Picks a live thread in view,
+// one of its helpers, its rug, a room's sign and the coffee corner.
+export function landmarks() {
+  const box = stage.getBoundingClientRect()
+  const onScreen = p => {
+    const q = p.clone().project(camera)
+    if (q.z > 1) return null
+    const x = ((q.x + 1) / 2) * stage.clientWidth, y = ((1 - q.y) / 2) * stage.clientHeight
+    return x < 0 || y < 0 || x > stage.clientWidth || y > stage.clientHeight ? null : { x: x + box.left, y: y + box.top }
+  }
+  const centre = el => {
+    const r = el?.getBoundingClientRect()
+    return r?.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height } : null
+  }
+  // A live critter at its desk with helpers, if there is one, rather
+  // than one still walking in.
+  const views = [...sessionViews.values()].filter(s => nodes.get(s.id) && onScreen(s.group.position.clone().add(s.body.position)))
+    .sort((a, b) => Boolean(a.walk) - Boolean(b.walk))
+  const s = views.find(x => !resting(nodes.get(x.id)) && [...agentViews.values()].some(a => a.session === x.id && !a.gone)) ??
+    views.find(x => !resting(nodes.get(x.id))) ?? views[0]
+  const head = s && headOf(s.id)
+  const helper = s && [...agentViews.values()].find(a => a.session === s.id && !a.gone && onScreen(a.group.position))
+  const sign = [...rooms.values()].map(t => centre(t.label.el)).find(Boolean)
+  return {
+    critter: s && onScreen(s.group.position.clone().add(s.body.position).add(v.set(0, FLOOR_TOP + SS * s.char.height * 0.5, 0))),
+    beads: head && onScreen(head.add(v.set(0, 12, 0))),
+    ring: s && !s.walk ? onScreen(s.group.position.clone().add(v.set(0, FLOOR_TOP, 22))) : null,
+    helper: helper && onScreen(helper.group.position.clone().add(v.set(0, AG * helper.char.height * 0.6, 0))),
+    sign,
+    coffee: coffee && centre(coffee.label.el),
+  }
+}
+
 // ?debug reaches these through window.cluster.table.debug.
 export const debug = { get renderer() { return renderer }, get size() { return size }, sessionViews, agentViews, rooms, get camera() { return camera }, get stage() { return stage }, get controls() { return controls }, get coffee() { return coffee }, greeted }

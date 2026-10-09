@@ -11,6 +11,7 @@ import * as panels from './panels.js'
 import { unlock, isMuted, setMuted } from './sound.js'
 import * as transcript from './transcript.js'
 import { mountSettings } from './settings.js'
+import { mountHelp } from './help.js'
 
 const HISTORY_REFRESH_MS = 60000
 const PANEL_REFRESH_MS = 700
@@ -104,6 +105,8 @@ for (const type of ['pointerdown', 'keydown']) addEventListener(type, unlock, { 
 
 // Developer view: plain words everywhere, or the raw tool lines.
 mountSettings(() => { transcript.redraw(); refreshPanels() })
+// "What am I looking at?": the ? button and the ? key.
+mountHelp()
 // A project renamed or given a new icon.
 document.addEventListener('office:names', () => refreshPanels())
 

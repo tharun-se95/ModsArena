@@ -337,6 +337,34 @@
   #moments li.bumps ul li { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; border: 0; opacity: 1; font-size: 11.5px; color: var(--muted); }
   #moments li.bumps details > button { margin: 0 0 6px 18px; font-size: 11.5px; color: var(--accent); }
 
+  /* What am I looking at? Labels laid over the office, each with a pin on
+     what it explains; on a phone the labels are a list under the pins. */
+  .helpbtn { display: inline-grid; place-items: center; width: 24px; height: 24px; margin: 0 2px; border-radius: 50%; border: 1.5px solid currentColor; color: var(--muted); font: 700 12.5px/1 var(--sans); }
+  .helpbtn:hover, .helpbtn[aria-expanded="true"] { color: var(--accent); }
+  .help { position: fixed; inset: 0; z-index: 60; background: color-mix(in srgb, #14100c 34%, transparent); cursor: pointer; }
+  .help[hidden] { display: none; }
+  .help-head { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); width: min(440px, calc(100% - 32px)); padding: 12px 16px; text-align: center; background: var(--paper); cursor: default; }
+  .help-head h2 { margin: 0; font: 600 18px var(--serif); }
+  .help-head p { margin: 4px 0 9px; font-size: 12.5px; color: var(--muted); }
+  .help-head kbd { font: 11px var(--mono); padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; }
+  .help-close { padding: 5px 16px; border-radius: 999px; background: var(--accent); color: #fff; font-weight: 500; font-size: 12.5px; }
+  .help-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .help-lines line { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 3 3; }
+  .help-notes { list-style: none; margin: 0; padding: 0; }
+  .help-note { position: absolute; width: 210px; box-sizing: border-box; padding: 8px 11px; font-size: 12px; line-height: 1.42; background: var(--paper); color: var(--ink); animation: help-fade .22s ease-out both; }
+  .help-note b { font: 600 13px var(--serif); }
+  .help-num, .help-pin { display: inline-grid; place-items: center; border-radius: 50%; background: var(--accent); color: #fff; font: 700 10px/1 var(--sans); }
+  .help-num { width: 16px; height: 16px; margin-right: 5px; vertical-align: 1px; }
+  .help-pin { position: absolute; width: 22px; height: 22px; font-size: 11px; transform: translate(-50%, -50%); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent), 0 2px 6px rgba(0, 0, 0, .3); animation: help-pop .28s ease-out both; }
+  @keyframes help-fade { from { opacity: 0; transform: translateY(4px); } }
+  @keyframes help-pop { from { opacity: 0; transform: translate(-50%, -50%) scale(.4); } }
+  .help.narrow .help-notes { position: absolute; left: 12px; right: 12px; bottom: 12px; max-height: 38%; overflow-y: auto; display: grid; gap: 6px; border-radius: 14px; }
+  .help.narrow .help-head p { font-size: 12px; margin: 2px 0 6px; }
+  .help-pin[hidden] { display: none; }
+  .help.narrow .help-note { position: static; width: auto; }
+  .help.narrow .help-head { padding: 10px 14px; }
+  @media (prefers-reduced-motion: reduce) { .help-note, .help-pin { animation: none; } }
+
 
 
   /* Waiting on you: a letter for each thread whose next move is yours,
@@ -658,6 +686,7 @@
           <span>Sound on</span>
         </button>
         <label class="toggle" title="Show past sessions"><input type="checkbox" id="show-past" checked> <span>Past sessions</span></label>
+        <button class="helpbtn" id="help-open" type="button" aria-expanded="false" aria-keyshortcuts="?" aria-label="What am I looking at?" title="What am I looking at? (?)"><span aria-hidden="true">?</span></button>
         <span class="settings">
           <button class="gear" id="settings-open" type="button" aria-expanded="false" aria-controls="settings" title="Settings">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 6.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8Z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -691,7 +720,7 @@
     <aside class="hud paper" id="side" aria-live="polite"></aside>
     <aside class="hud paper" id="library" aria-label="Library" hidden></aside>
     <div id="lightbox" role="dialog" aria-label="Full size" hidden></div>
-    <span class="hint paper"><kbd>j</kbd> <kbd>k</kbd> move between threads and agents &middot; <kbd>r</kbd> reply &middot; <kbd>1</kbd>–<kbd>4</kbd> tabs &middot; <kbd>Esc</kbd> back &middot; drag to look around</span>
+    <span class="hint paper"><kbd>j</kbd> <kbd>k</kbd> move between threads and agents &middot; <kbd>r</kbd> reply &middot; <kbd>1</kbd>–<kbd>4</kbd> tabs &middot; <kbd>Esc</kbd> back &middot; <kbd>?</kbd> what’s what &middot; drag to look around</span>
   </main>
 </div>
 
