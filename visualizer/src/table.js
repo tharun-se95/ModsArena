@@ -14,7 +14,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
-import { makeCharacter, pose, emote } from './character.js'
+import { makeCharacter, pose, emote, wave, sip, hold, disposeCharacter, restyle as restyleChar } from './character.js'
 import { moodOf } from './moods.js'
 import { homeTime, lateness, swell } from './hours.js'
 import {
@@ -547,6 +547,7 @@ function dropSession(id) {
   const s = sessionViews.get(id)
   if (!s) return
   unmount(s.group)
+  disposeCharacter(s.char)
   sessionViews.delete(id)
   for (const [key, a] of agentViews) if (a.session === id) dropAgent(key)
 }
@@ -585,6 +586,7 @@ function dropAgent(id) {
   const a = agentViews.get(id)
   if (!a) return
   unmount(a.group)
+  disposeCharacter(a.char)
   if (a.spot !== undefined) coffee?.taken.delete(a.spot)
   agentViews.delete(id)
 }
@@ -827,9 +829,8 @@ function startBreak(a, s) {
   walk(a, a.group, path, () => {
     a.onBreak = clock()
     sound.clink()
-    const mug = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.15, 0.32, 12), new THREE.MeshStandardMaterial({ color: palette.trim }))
-    mug.position.set(0.45, -0.12, 0.2)
-    a.char.arms[1].add(mug)
+    const mug = a.mug = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.15, 0.32, 12), new THREE.MeshStandardMaterial({ color: palette.trim }))
+    hold(a.char, mug)
   })
 }
 
@@ -1238,9 +1239,7 @@ function oops(view, char, el, now, still) {
 function waving(view, char, now) {
   const k = view.waveAt ? (now - view.waveAt) / WAVE_S : 1
   if (k >= 1) return
-  const arm = char.arms[0]
-  arm.rotation.x = 0
-  arm.rotation.z = -(2.1 + Math.sin(now * 16) * 0.35) * Math.sin(Math.min(1, k * 4) * Math.PI / 2)
+  wave(char, Math.sin(Math.min(1, k * 4) * Math.PI / 2), now)
 }
 
 // Critters on the move (walking in, off to coffee, or on their break) wave
@@ -1382,6 +1381,8 @@ export function animate() {
       hop: s.hopAt && !still ? (now - s.hopAt) / 0.35 : 1,
       alarm: !asleep && !walking && f >= WARN_AT,
       asleep: dozing,
+      walk: walking,
+      asking: !asleep && firstAsk.has(n.session),
     })
     // Thinking between tools mid-turn; yawning once it has waited on you a while.
     const thinking = !walking && n.turnOpen && !running.has(s.id) && !n.asks?.length && now - (s.lastAt ?? -9) > 1.2
@@ -1429,7 +1430,7 @@ export function animate() {
     if (a.endedAt) {
       // On the way to coffee, on a break, then off home.
       if (!walking && a.onBreak && !a.leaving && now - a.onBreak > BREAK_S) a.leaving = now
-      pose(a.char, idle + a.slot, { busy: walking ? 1 : 0, hop: 1 })
+      pose(a.char, idle + a.slot, { busy: walking ? 1 : 0, hop: 1, walk: walking })
       emote(a.char, now, feel(a, false, false, 0), lessMotion.matches || still)
       if (!still) waving(a, a.char, now)
       if (a.onBreak && !a.leaving) {
@@ -1437,9 +1438,8 @@ export function animate() {
         const face = Math.atan2(table.x - a.group.position.x, table.z - a.group.position.z)
         a.group.rotation.y += Math.atan2(Math.sin(face - a.group.rotation.y), Math.cos(face - a.group.rotation.y)) * Math.min(1, dt * 6)
         // The mug arm rests forward, with a sip now and then.
-        const sip = !still && Math.sin((now - a.onBreak) * 1.3) > 0.85
-        a.char.arms[1].rotation.x = sip ? -1.3 : -0.5
-        a.char.arms[1].rotation.z = 0.35
+        const sipping = !still && Math.sin((now - a.onBreak) * 1.3) > 0.85
+        sip(a.char, sipping)
       }
       if (a.leaving) {
         const k = still ? 1 : Math.min(1, (now - a.leaving) / 1.6)
@@ -1468,6 +1468,7 @@ export function animate() {
       busy: n.status === 'active' && (running.has(a.id) || now - (a.lastAt ?? -9) < 1.5 || g > 0.05) ? 1 : 0,
       hop: a.hopAt && !still ? (now - a.hopAt) / 0.3 : 1,
       alarm: n.status === 'active' && fill(n) >= WARN_AT,
+      asking: Boolean(n.asks?.length),
     })
     // A teammate between turns waits, and yawns; an active one between
     // tools thinks.
@@ -1725,6 +1726,27 @@ function declutter() {
   for (const t of [...rooms.values(), ...(coffee ? [coffee] : [])]) {
     t.label.el.classList.toggle('covered', Boolean(over && overlaps(t.label.el.getBoundingClientRect(), [over])))
   }
+}
+
+// Classic critters or robot crabs (robots.js): every critter is rebuilt
+// where it stands, mid-walk, mid-break or mid-mood, with its colors, and its
+// flags move to its new height. Name tags sit at its feet, and bubbles ask
+// its height each time, so they follow on their own. The camera and the
+// thread you picked stay as they are.
+export function restyleCritters(style) {
+  for (const s of sessionViews.values()) {
+    s.char = restyleChar(s.char, style)
+    const h = FLOOR_TOP + SS * s.char.height
+    s.zzz.obj.position.y = h + 4
+    s.oops.obj.position.y = h + 10
+    s.bell.obj.position.y = h + 6
+  }
+  for (const a of agentViews.values()) {
+    a.char = restyleChar(a.char, style)
+    a.oops.obj.position.y = AG * a.char.height + 8
+    if (a.mug && a.onBreak) hold(a.char, a.mug)
+  }
+  if (renderer) renderer.shadowMap.needsUpdate = true
 }
 
 // Saving battery (or not): the sharpness cap and the shadow map's size.

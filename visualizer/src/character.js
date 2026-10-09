@@ -6,8 +6,11 @@
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { envelope } from './moods.js'
+import { critterStyle } from './robots.js'
+import { makeRobot, robotPose, robotEmote, disposeRobot, robotWave, robotSip, robotHold, trimRobots } from './robot-character.js'
 
 const cache = new Map()
+const NO_OPTS = {}
 const DOT_GEO = new THREE.SphereGeometry(1, 12, 10)
 const DOT_MAT = new THREE.MeshStandardMaterial({ color: '#fbf6ec', roughness: 0.5 })
 function box(w, h, d, r = 0.08) {
@@ -26,7 +29,11 @@ const BUILDS = {
   'test-runner': { w: 2.0, h: 0.85, d: 0.95, legs: 6, legH: 0.55, eye: [0.2, 0.26], crown: 'antennae' },
 }
 
-export function makeCharacter({ build = 'general-purpose', bodyColor, inkColor, accentColor, pick }) {
+// `style` is 'classic' (these block critters) or 'robot' (the robot crabs
+// in robot-character.js); it follows the Settings choice unless the caller
+// says otherwise.
+export function makeCharacter({ build = 'general-purpose', bodyColor, inkColor, accentColor, pick, style = critterStyle() }) {
+  if (style === 'robot') return makeRobot({ build, bodyColor, inkColor, accentColor, pick })
   const b = BUILDS[build] ?? BUILDS['general-purpose']
   const root = new THREE.Group()
   const rig = new THREE.Group()
@@ -144,6 +151,7 @@ export function makeCharacter({ build = 'general-purpose', bodyColor, inkColor, 
   for (const e of eyes) e.castShadow = false
 
   return {
+    style: 'classic', build, pick, inkColor,
     root, rig, top, eyes, arms, legs, bulb, bodyMat, inkMat, accentMat, height, dots,
     seed: Math.random() * 10,
     blinkAt: 1 + Math.random() * 3,
@@ -152,8 +160,11 @@ export function makeCharacter({ build = 'general-purpose', bodyColor, inkColor, 
 
 // Per-frame pose. `busy` is 0..1 (how recently it acted), `look` an angle
 // to turn toward, `hop` 0..1 a one-shot jump when it calls a tool, and
-// `asleep` closes its eyes for good.
-export function pose(c, t, { busy = 0, look = 0, hop = 0, alarm = false, asleep = false } = {}) {
+// `asleep` closes its eyes for good. `walk` (it's on the move) and `asking`
+// (it's waiting on your answer) matter to the robots.
+export function pose(c, t, opts = NO_OPTS) {
+  if (c.style === 'robot') return robotPose(c, t, opts)
+  const { busy = 0, look = 0, hop = 0, alarm = false, asleep = false } = opts
   const breathe = Math.sin(t * (asleep ? 0.9 : 2) + c.seed) * 0.02
   const jump = Math.sin(Math.min(1, hop) * Math.PI) * 0.5
   c.rig.position.y = jump
@@ -195,6 +206,7 @@ export function pose(c, t, { busy = 0, look = 0, hop = 0, alarm = false, asleep 
 // pose(). `still` (prefers-reduced-motion) keeps the shapes and drops the
 // bouncing.
 export function emote(c, t, mood, still = false) {
+  if (c.style === 'robot') return robotEmote(c, t, mood, still)
   const kind = mood?.kind
   c.dots.visible = kind === 'think'
   c.top.rotation.x = 0
@@ -230,4 +242,60 @@ export function emote(c, t, mood, still = false) {
     for (const p of c.arms) p.rotation.z = p.userData.side * 1.05 * e
     for (const eye of c.eyes) eye.scale.y = 1 - 0.85 * e
   }
+}
+
+// One arm up and waving (amount 0..1), on top of the pose.
+export function wave(c, amount, now) {
+  if (c.style === 'robot') return robotWave(c, amount, now)
+  const arm = c.arms[0]
+  arm.rotation.x = 0
+  arm.rotation.z = -(2.1 + Math.sin(now * 16) * 0.35) * amount
+}
+
+// On a coffee break: the mug arm rests forward, raised for a sip.
+export function sip(c, sipping) {
+  if (c.style === 'robot') return robotSip(c, sipping)
+  c.arms[1].rotation.x = sipping ? -1.3 : -0.5
+  c.arms[1].rotation.z = 0.35
+}
+
+// Something held (a coffee mug) in its right hand or claw.
+export function hold(c, obj) {
+  if (c.style === 'robot') return robotHold(c, obj)
+  c.arms[1].add(obj)
+  obj.position.set(0.45, -0.12, 0.2)
+}
+
+// Frees what a critter owns (its materials, its screen, its bones); the
+// geometry it shares with others stays.
+export function disposeCharacter(c) {
+  if (c.style === 'robot') return disposeRobot(c)
+  if (c.disposed) return
+  c.disposed = true
+  c.root.removeFromParent()
+  for (const m of [c.bodyMat, c.inkMat, c.accentMat]) m.dispose()
+  if (c.bulb) { c.bulb.material.dispose(); c.bulb.geometry.dispose() }
+}
+
+// The same critter in the other style: built fresh with its colors and
+// pick, put where the old one was, and the old one freed. Its seed and
+// blink carry over, so it doesn't skip a beat.
+export function restyle(c, style) {
+  if (c.style === style) return c
+  const next = makeCharacter({
+    build: c.build, pick: c.pick, style,
+    bodyColor: c.bodyMat.color.clone(), inkColor: c.inkColor,
+    accentColor: (c.bulb?.material.color ?? c.accentMat.color).clone(),
+  })
+  next.seed = c.seed
+  next.blinkAt = c.blinkAt
+  next.root.position.copy(c.root.position)
+  next.root.rotation.copy(c.root.rotation)
+  next.root.scale.copy(c.root.scale)
+  next.root.visible = c.root.visible
+  const parent = c.root.parent
+  if (parent) parent.add(next.root)
+  disposeCharacter(c)
+  if (style !== 'robot') trimRobots()
+  return next
 }
