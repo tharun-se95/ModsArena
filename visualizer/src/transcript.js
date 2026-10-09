@@ -7,8 +7,12 @@
 // session's mod delivers it. In the demo there's no bridge: the transcript
 // is drawn from the sample activity and messages get a sample reply.
 
-import { nodes, sid } from './model.js'
+import { nodes, sid, outputs } from './model.js'
 import { activity, escapeHtml, ago } from './words.js'
+import { outputCard } from './assets.js'
+import { describe, stepSummary } from './plain.js'
+import { devView } from './prefs.js'
+import * as mentions from './mentions.js'
 
 const POLL_MS = 1500
 const KEEP = 600
@@ -19,6 +23,7 @@ let demo = false
 export function setDemo(isDemo) {
   demo = isDemo
 }
+export const isDemo = () => demo
 
 // What's open: one transcript at a time.
 let view = null
@@ -40,6 +45,18 @@ function bubble(entry, results) {
       return `<div class="tx say"><p>${escapeHtml(entry.text)}</p>${time}</div>`
     case 'note':
       return `<div class="tx note">${escapeHtml(entry.text)}</div>`
+    // What the work made, as the card the Outputs tab shows.
+    case 'output':
+      return `<div class="tx made ${entry.output.type}">${outputCard(entry.output)}</div>`
+    // A checklist update (TodoWrite): where it stands, folded.
+    case 'todo': {
+      const done = entry.items.filter(i => i.status === 'completed').length
+      const now = entry.items.find(i => i.status === 'in_progress')
+      return `<details class="tx todo-snap"><summary><span class="todo-ring" style="--f:${(done / entry.items.length).toFixed(3)}"></span>${done === entry.items.length ? 'Checked off the last item' : `Checklist ${done}/${entry.items.length}${now ? `: ${escapeHtml(now.text)}` : ''}`}</summary><ol>${entry.items.map(i => `<li class="${i.status}"><i>${{ completed: '✓', in_progress: '✱' }[i.status] ?? '○'}</i>${escapeHtml(i.text)}</li>`).join('')}</ol></details>`
+    }
+    // A question it asked you (AskUserQuestion), and what you picked.
+    case 'ask':
+      return `<div class="tx asked"><p class="ask-eyebrow"><i class="ask-icon">${entry.type === 'permission' ? '>_' : entry.type === 'plan' ? '✎' : '?'}</i>${entry.type === 'permission' ? 'Asked to run' : entry.type === 'plan' ? 'Asked you to approve a plan' : 'Asked you'}</p><p>${escapeHtml(entry.text)}</p>${entry.answer ? `<span class="tx-answer">${escapeHtml(entry.answer)}</span>` : ''}${time}</div>`
     case 'tool': {
       const result = results.get(entry.id)
       const state = !result ? 'running' : result.ok ? 'ok' : 'bad'
@@ -53,6 +70,48 @@ function bubble(entry, results) {
   }
 }
 
+// A run of tool calls between two things said, as one readable step
+// ("Looked through 6 files and ran the tests") that opens to the raw lines.
+// Developer view shows the raw lines on their own, as before.
+// A call with no result yet is still running only at the end of the
+// conversation; earlier, its result is just out of view.
+function stepBubble(tools, results, last) {
+  const calls = tools.map(e => ({ tool: e.name, summary: e.summary, ok: results.get(e.id)?.ok ?? (last ? undefined : true) }))
+  const running = calls.some(c => c.ok === undefined)
+  const bumps = calls.filter(c => c.ok === false).length
+  const state = running ? 'running' : calls.at(-1).ok === false ? 'bad' : 'ok'
+  // While it works: what it has done so far, then what it's doing now.
+  const finished = calls.filter(c => c.ok !== undefined)
+  const current = calls.find(c => c.ok === undefined)
+  const now = current && describe(current.tool, current.summary).now
+  const text = !running ? stepSummary(calls)
+    : finished.length ? `${stepSummary(finished)}, now ${now.charAt(0).toLowerCase()}${now.slice(1)}` : now
+  const meta = [calls.length > 1 ? `${calls.length} steps` : '', bumps && state !== 'bad' ? `${bumps} ${bumps === 1 ? 'bump' : 'bumps'}` : ''].filter(Boolean).join(' · ')
+  return `<details class="tx steps ${state}" data-id="steps-${escapeHtml(tools[0].id)}"><summary><i class="tx-dot ${state}"></i><span class="step-text">${escapeHtml(text)}</span>${meta ? `<small>${meta}</small>` : ''}</summary><div class="step-lines">${tools.map(e => bubble(e, results)).join('')}</div></details>`
+}
+
+// Entries in order, with each run of tool calls gathered into one step.
+function drawEntries(shown, results) {
+  if (devView()) return shown.map(e => bubble(e, results)).join('')
+  const out = []
+  let run = []
+  const flush = last => { if (run.length) out.push(stepBubble(run, results, last)); run = [] }
+  for (const e of shown) {
+    if (e.kind === 'tool') { run.push(e); continue }
+    flush(false)
+    out.push(bubble(e, results))
+  }
+  flush(true)
+  return out.join('')
+}
+
+// Developer view changed: draw again in the other voice.
+export function redraw() {
+  if (!view) return
+  view.html = null
+  draw()
+}
+
 function pendingBubble(p) {
   return `<div class="tx you chat pending ${p.ok === false ? 'failed' : ''}"><span class="tx-from">From the office</span><p>${escapeHtml(p.text)}</p><span class="tx-status">${escapeHtml(p.status)}</span></div>`
 }
@@ -63,7 +122,7 @@ function draw() {
   const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60
   const results = new Map(view.entries.filter(e => e.kind === 'result').map(e => [e.id, e]))
   const shown = view.entries.filter(e => e.kind !== 'result')
-  const html = (shown.map(e => bubble(e, results)).join('') + view.pending.map(pendingBubble).join('')) ||
+  const html = (drawEntries(shown, results) + view.pending.map(pendingBubble).join('')) ||
     `<p class="tx-empty">${escapeHtml(view.empty)}</p>`
   if (html === view.html) return
   view.html = html
@@ -124,19 +183,23 @@ function demoEntries(n) {
   if (!n) return []
   const host = nodes.get(sid(n.session))
   const actions = [...(activity.get(sid(n.session))?.actions ?? [])].reverse()
-  const mine = n.kind === 'agent'
-    ? actions.filter(a => a.text.startsWith(n.label))
-    : actions
+  const mine = actions.filter(a => (n.kind === 'agent' ? a.agent === n.agent : !a.agent))
   const entries = n.kind === 'agent'
     ? [{ kind: 'you', text: n.description ?? `Help with ${host?.label ?? 'the session'}`, t: n.startedAt }]
     : (n.prompts ?? []).map(p => ({ kind: 'you', text: p.text, t: p.t }))
-  mine.forEach((a, i) => {
-    const id = `demo-${n.id}-${a.t}-${i}`
-    // "Explore searched for X": who did it in bold, then what.
-    const [who, what] = a.text.startsWith('The session ') ? ['session', a.text.slice(12)] : [a.text.split(' ')[0], a.text.split(' ').slice(1).join(' ')]
-    entries.push({ kind: 'tool', id, name: who, summary: what, t: a.t })
+  mine.forEach(a => {
+    // Keyed by when it happened, so an opened step stays open as more arrive.
+    const id = `demo-${n.id}-${a.t}-${a.tool}`
+    entries.push({ kind: 'tool', id, name: a.tool, summary: a.summary ?? '', t: a.t })
     entries.push({ kind: 'result', id, ok: a.ok, text: a.ok ? '' : 'Something went wrong (sample activity).' })
   })
+  // What it made, and what it asked you, where they happened.
+  for (const o of outputs) {
+    if (o.session !== n.session || (n.kind === 'agent' ? o.agent !== n.agent : o.agent) || o.type === 'plan') continue
+    entries.push({ kind: 'output', output: o, t: o.t })
+  }
+  for (const a of n.answered ?? []) entries.push(a)
+  if (n.todosLog) entries.push(...n.todosLog)
   entries.push(...(demoReplies.get(n.id) ?? []))
   return entries.sort((a, b) => (a.t ?? 0) - (b.t ?? 0))
 }
@@ -152,7 +215,19 @@ async function send(text) {
   const pending = { text: text.trim(), status: 'Sending…' }
   view.pending.push(pending)
   draw()
+  // @name: to that agent of the thread instead (mentions.js). It answers in
+  // its own conversation, so the note here just says where it went.
+  const to = n.kind === 'session' ? mentions.resolve(n, text) : { node: n }
+  if (to.node !== n) {
+    const result = await sendTo(to.node, to.text)
+    pending.ok = result.ok
+    pending.status = result.ok ? `Sent to ${to.node.label}. Its answer shows in its own conversation.` : result.status
+    draw()
+    return
+  }
   if (demo) {
+    // The demo has no bridge to announce it: tell the page ourselves.
+    document.dispatchEvent(new CustomEvent('office:event', { detail: { kind: 'chat.sent', t: Date.now(), ...view.target, text: pending.text } }))
     const id = view.id
     setTimeout(() => {
       pending.status = 'Queued as the next prompt'
@@ -205,6 +280,7 @@ const capitalize = s => s.charAt(0).toUpperCase() + s.slice(1)
 export async function sendTo(n, text) {
   if (!n || !text.trim()) return { ok: false, status: 'Nothing to send' }
   if (demo) {
+    document.dispatchEvent(new CustomEvent('office:event', { detail: { kind: 'chat.sent', t: Date.now(), ...target(n), text: text.trim() } }))
     const list = demoReplies.get(n.id) ?? []
     list.push({ kind: 'chat', text: text.trim(), from: 'agent-office', t: Date.now() })
     demoReplies.set(n.id, list)
@@ -223,6 +299,18 @@ export async function sendTo(n, text) {
   } catch (err) {
     return { ok: false, status: `Not sent: ${err.message}` }
   }
+}
+
+// A message from a quick action (actions.js): into the open conversation
+// when it's this one's, so it shows there with its progress; else as from
+// the inbox.
+export async function say(n, text) {
+  if (view?.id === n.id && view.root.isConnected) {
+    await send(text)
+    const last = view?.pending.at(-1)
+    return last?.ok === false ? { ok: false, status: last.status } : { ok: true }
+  }
+  return sendTo(n, text)
 }
 
 export const canMessage = () => demo || Boolean(token)
@@ -245,7 +333,7 @@ function composer(n) {
     return { placeholder: `Message ${n.label}…`, hint: 'It has finished: a message resumes it to answer, which uses tokens.' }
   }
   if (n.kind === 'agent') return { placeholder: `Message ${n.label}…`, hint: 'Goes straight to this subagent while it works.' }
-  return { placeholder: 'Message this session…', hint: 'Arrives as its next prompt, marked as from Agent Office. Tool approvals still happen in Claude Code.' }
+  return { placeholder: 'Message this session… (@ to pick an agent)', hint: 'Arrives as its next prompt, marked as from Agent Office. Tool approvals still happen in Claude Code.' }
 }
 
 // Put the transcript for node `n` into `root` (the tab's holder), or keep
@@ -265,8 +353,16 @@ export function attach(root, n) {
           <p class="tx-hint">${escapeHtml(box.hint)} Enter sends, Shift+Enter starts a new line.</p>
         </form>`}`
   view = { id: n.id, root, target: target(n), entries: [], pending: [], next: undefined, empty: 'Reading the transcript…', firstDraw: true }
+  // A picture in the conversation opens in the lightbox (panels.js).
+  root.querySelector('.tx-log').addEventListener('click', e => {
+    const zoom = e.target.closest('[data-zoom]')
+    if (!zoom) return
+    e.preventDefault()
+    document.dispatchEvent(new CustomEvent('office:zoom', { detail: zoom.dataset.zoom }))
+  })
   const form = root.querySelector('form')
   const field = form?.querySelector('textarea')
+  if (field && n.kind === 'session') mentions.attach(field, () => nodes.get(n.id))
   form?.addEventListener('submit', e => {
     e.preventDefault()
     const text = field.value

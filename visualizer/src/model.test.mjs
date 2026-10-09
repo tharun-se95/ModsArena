@@ -44,3 +44,24 @@ test('an agent never spawned leaves once it is quiet; a spawned one stays', () =
   assert.ok(!model.nodes.has(phantom), 'gone once quiet')
   assert.ok(model.nodes.has(model.aid(S, 'a1')))
 })
+
+test('a question mid-turn puts the thread on you until it is answered', () => {
+  model.apply({ t: t0, session: S, kind: 'turn.start', text: 'Pick a chart' })
+  const session = model.nodes.get(model.sid(S))
+  session.lastAt = 0
+  assert.equal(model.threadState(session), 'working')
+  model.apply({ t: t0 + 1, session: S, kind: 'ask.open', id: 'q1', type: 'question', questions: [{ header: 'Chart', question: 'Bars or area?', options: [{ label: 'Bars' }, { label: 'Area' }] }] })
+  assert.equal(model.threadState(session), 'asking')
+  model.apply({ t: t0 + 2, session: S, kind: 'ask.close', id: 'q1', answer: 'Bars' })
+  assert.equal(model.threadState(session), 'working')
+  assert.equal(session.answered.at(-1).answer, 'Bars')
+})
+
+test('outputs and the checklist land on their thread', () => {
+  model.apply({ t: t0, session: S, kind: 'todo.update', items: [{ text: 'a', status: 'completed' }, { text: 'b', status: 'in_progress' }] })
+  model.apply({ t: t0 + 1, session: S, kind: 'asset.add', id: 'img-1', type: 'image', title: 'Shot', path: '/w/shot.png' })
+  model.apply({ t: t0 + 2, session: S, kind: 'asset.add', id: 'img-1', type: 'image', title: 'Shot again', path: '/w/shot.png' })
+  const session = model.nodes.get(model.sid(S))
+  assert.equal(session.todos.length, 2)
+  assert.deepEqual(model.outputsOf(session).map(o => o.title), ['Shot again'])
+})

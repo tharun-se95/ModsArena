@@ -3,6 +3,7 @@
 // knows nothing about Three.js.
 
 import { unwrapPrompt, isEngineNote } from '../../agent-office/server/prompts.mjs'
+import { goalTitle } from './names.js'
 
 export const TOOL_LINGER_MS = 6000 // a finished tool stays visible this long
 const FINISHED_AGENT_LIMIT = 12
@@ -27,6 +28,15 @@ export const stats = { calls: 0, errors: 0 }
 export const notices = [] // compactions and other moments, newest first
 export const mail = [] // messages between loops, newest first: { t, session, from, to, fromName, toName, via, text }
 const MAIL_KEEP = 60
+// What the work produces and asks, newest first across the whole office:
+// { id, t, session, agent?, type, title, url?, path?, src?, meta? }
+//   type: image, artifact, pr, link, file, plan
+export const outputs = []
+const OUTPUTS_KEEP = 120
+// Every agent spawned, oldest first, for the day's recap: finished agents
+// leave the office, but who helped still counts. { t, session, type }
+export const helpers = []
+const HELPERS_KEEP = 400
 let dirty = true
 
 export const isDirty = () => dirty
@@ -67,6 +77,8 @@ export function reset() {
   Object.assign(stats, { calls: 0, errors: 0 })
   notices.length = 0
   mail.length = 0
+  outputs.length = 0
+  helpers.length = 0
   dirty = true
 }
 
@@ -81,7 +93,8 @@ function sessionWindow(n) {
   return nodes.get(sid(n.session))?.context?.window
 }
 
-export const promptLabel = text => (text.length > 26 ? `${text.slice(0, 25)}…` : text)
+// A thread's short name is its goal, tidied up (names.js).
+export const promptLabel = text => goalTitle(text, 26) || (text.length > 26 ? `${text.slice(0, 25)}…` : text)
 
 export const shortId = s => (s.length > 14 ? `${s.slice(0, 8)}…` : s)
 
@@ -174,9 +187,16 @@ const handlers = {
       const { text, from } = unwrapPrompt(ev.text)
       // A session the page first met in /history already has this prompt.
       if (node.prompts.some(p => !p.live && Math.abs(p.t - ev.t) < SAME_PROMPT_MS && samePrompt(p.text, text))) return
+      // The front desk announced this job's prompt before the session did.
+      const desk = node.prompts.at(-1)
+      if (desk?.desk && desk.text === text && ev.via !== 'front-desk') {
+        desk.desk = false
+        node.turns--
+        return
+      }
       // Sessions are named by what they were first asked, as /resume lists them.
       if (!node.prompts.length) node.label = promptLabel(text)
-      node.prompts.push({ t: ev.t, text, from, live: true })
+      node.prompts.push({ t: ev.t, text, from, live: true, ...(ev.via === 'front-desk' && { desk: true }) })
       if (node.prompts.length > PROMPT_KEEP) node.prompts.shift()
     }
   },
@@ -248,6 +268,10 @@ const handlers = {
       node = addNode({ id, kind: 'agent', session: ev.session, agent: ev.agent, history: 0, compactions: [] })
       addLink(parent, id, 'spawn')
     }
+    if (!node.announced) {
+      helpers.push({ t: ev.t, session: ev.session, type: ev.name || ev.type || 'subagent' })
+      if (helpers.length > HELPERS_KEEP) helpers.shift()
+    }
     Object.assign(node, {
       label: ev.name || ev.type, name: ev.name, type: ev.type, description: ev.description, model: ev.model,
       background: ev.background, teammate: ev.teammate, teammateId: ev.teammateId, fork: ev.fork, cwd: ev.cwd,
@@ -271,6 +295,40 @@ const handlers = {
     node.endStatus = ev.status
     node.endedAt = ev.t
     trimFinishedAgents()
+  },
+  // A checklist, whole each time (TodoWrite sends the full list; the mod
+  // keeps TaskCreate/TaskUpdate's tasks and sends them the same way).
+  'todo.update'(ev) {
+    const node = owner(ev)
+    node.todos = (ev.items ?? []).map(i => ({ text: i.text, status: i.status, active: i.active }))
+    node.todosAt = ev.t
+    // The conversation shows a snapshot when an item is checked off.
+    const done = node.todos.filter(i => i.status === 'completed').length
+    if (done !== node.todosDone) {
+      node.todosDone = done
+      if (!done) return
+      node.todosLog = [...(node.todosLog ?? []).slice(-12), { kind: 'todo', items: node.todos, t: ev.t }]
+    }
+  },
+  // Claude Code waiting on you mid-turn: a question (AskUserQuestion), a
+  // plan to approve (ExitPlanMode) or a tool to allow.
+  'ask.open'(ev) {
+    const node = owner(ev)
+    node.asks = (node.asks ?? []).filter(a => a.id !== ev.id)
+    node.asks.push({ id: ev.id, t: ev.t, type: ev.type ?? 'question', questions: ev.questions, tool: ev.tool, summary: ev.summary, plan: ev.plan, answerable: ev.answerable === true })
+    node.askAt = ev.t
+    if (ev.type === 'plan' && ev.plan) addOutput(ev, { id: `plan-${ev.id}`, type: 'plan', title: firstLine(ev.plan), text: ev.plan })
+  },
+  'ask.close'(ev) {
+    const node = owner(ev)
+    const ask = node.asks?.find(a => a.id === ev.id)
+    node.asks = (node.asks ?? []).filter(a => a.id !== ev.id)
+    if (!ask) return
+    const text = ask.type === 'question' ? ask.questions?.map(q => q.question).join(' ') : ask.type === 'plan' ? firstLine(ask.plan ?? '') : `${toolName(ask.tool)} ${ask.summary ?? ''}`.trim()
+    node.answered = [...(node.answered ?? []).slice(-12), { kind: 'ask', type: ask.type, text, answer: ev.answer, t: ask.t }]
+  },
+  'asset.add'(ev) {
+    addOutput(ev, ev)
   },
   'tool.start'(ev) {
     const own = owner(ev)
@@ -305,6 +363,42 @@ const handlers = {
     }
   },
 }
+
+// A tool as people say it: mcp__github__create_pull_request is "GitHub:
+// create pull request".
+export function toolName(tool) {
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(tool ?? '')
+  if (!mcp) return tool ?? 'a tool'
+  const server = mcp[1].replace(/^plugin_\w+_/, '').replace(/[-_]/g, ' ')
+  return `${server.charAt(0).toUpperCase()}${server.slice(1)}: ${mcp[2].replace(/_/g, ' ')}`
+}
+
+const firstLine = text => text.replace(/^#+\s*/gm, '').split('\n').find(l => l.trim())?.trim().slice(0, 80) ?? 'Plan'
+
+function addOutput(ev, item) {
+  const own = owner(ev)
+  const out = {
+    id: item.id, t: ev.t, session: ev.session, ...(ev.agent && { agent: ev.agent }),
+    type: item.type, title: item.title, url: item.url, path: item.path, src: item.src, text: item.text, meta: item.meta,
+  }
+  const at = outputs.findIndex(o => o.session === out.session && o.id === out.id)
+  if (at >= 0) outputs.splice(at, 1)
+  outputs.unshift(out)
+  if (outputs.length > OUTPUTS_KEEP) outputs.pop()
+  own.outputAt = ev.t
+  const host = nodes.get(sid(ev.session))
+  if (host) host.outputAt = ev.t
+}
+
+// What one thread (and its agents) has made, newest first.
+export const outputsOf = sessionNode => outputs.filter(o => o.session === sessionNode.session)
+
+// Everything a thread or agent is waiting on you for, oldest first.
+export const asksOf = n => n.asks ?? []
+export const openAsks = sessionNode => [...nodes.values()]
+  .filter(x => (x.kind === 'session' || x.kind === 'agent') && x.session === sessionNode.session && x.asks?.length)
+  .flatMap(x => x.asks.map(a => ({ ...a, who: x })))
+  .sort((a, b) => a.t - b.t)
 
 function trimFinishedAgents() {
   const finished = [...nodes.values()]
@@ -412,10 +506,13 @@ export const BUSY_MS = 2500
 // Where a thread stands, in the words claude.ai's Overview uses:
 //   working   a turn is running or a tool just ran
 //   waiting   it answered and the next move is yours
+//   asking    mid-turn, but Claude Code is holding it for you: a question,
+//             a plan to approve or a tool to allow
 //   stuck     its last turn ended on an error, a refusal or an interrupt
 //   ended     the session is over (or is a past one)
 export function threadState(n, running = new Set()) {
   if (n.past || n.status === 'done') return 'ended'
+  if (n.kind === 'session' && openAsks(n).length) return 'asking'
   if (n.turnOpen || running.has(n.id) || Date.now() - (n.lastAt ?? 0) < BUSY_MS) return 'working'
   if (n.lastReason && n.lastReason !== 'answer') return 'stuck'
   return 'waiting'

@@ -12,14 +12,28 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
-import { makeCharacter, pose } from './character.js'
+import { makeCharacter, pose, emote } from './character.js'
+import { moodOf } from './moods.js'
+import { homeTime, lateness, swell } from './hours.js'
 import {
-  buildRoom, rug, desk, coffeeCorner, officeShell, glassMat, lampMat,
-  FLOOR_TOP, WALL_H, COFFEE_W, COFFEE_D,
+  buildRoom, rug, desk, easel, coffeeCorner, officeShell, frontDesk, glassMat, lampMat, roomDecor,
+  FLOOR_TOP, WALL_H, COFFEE_W, COFFEE_D, FRONT_W,
 } from './office.js'
-import { nodes, fill, sid, aid, WARN_AT } from './model.js'
-import { beadColor, escapeHtml, activity, ago } from './words.js'
+import { jobFor } from './desk.js'
+import { nodes, fill, sid, aid, WARN_AT, outputs, mail } from './model.js'
+import { srcOf, toolName } from './assets.js'
+import { createBubbles } from './bubbles.js'
+import { beadColor, escapeHtml, activity, ago, say, doingNow } from './words.js'
+import { goalTitle, projectName, projectIcon, energy, energyMeter } from './names.js'
+import { devView } from './prefs.js'
+import * as answering from './answer.js'
 import { sound } from './sound.js'
+import { who } from './critters.js'
+import * as milestones from './milestones.js'
+import { toast } from './toast.js'
+import { cropOf } from './snapshot.js'
+import { budget } from './power.js'
+import { reduced } from './motion.js'
 
 const ROW_DEPTH = 160 // one row: helpers, desk, the session, its label
 const BACK_SPACE = 44 // along the back wall, for the shelf, window and plants
@@ -90,7 +104,7 @@ export const roomKey = roomOf
 // ---------------------------------------------------------------------------
 // Scene
 
-let stage, renderer, labels, scene, camera, controls, sun, sky, floor, bubble
+let stage, renderer, labels, scene, camera, controls, sun, sky, floor, bubble, talk
 const palette = {}
 const rooms = new Map() // project node id -> room view
 const sessionViews = new Map() // session node id -> view
@@ -114,18 +128,35 @@ let slowFrames = 0
 let last = 0
 let tick = 0
 const v = new THREE.Vector3()
+const spot = new THREE.Vector3() // scratch, so a frame allocates no vectors
 
 const clock = () => performance.now() / 1000
+// Moods keep their shapes but drop the bouncing for people who ask for less
+// motion.
+const lessMotion = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : { matches: false }
+// What moodOf() is asked, filled in place for each critter in turn.
+const feeling = {}
+function feel(view, asleep, thinking, idleFor) {
+  feeling.asleep = asleep
+  feeling.perkAt = view.perkAt
+  feeling.sulkAt = view.sulkAt
+  feeling.cheerAt = view.cheerAt
+  feeling.thinking = thinking
+  feeling.idleFor = idleFor
+  feeling.seed = view.char.seed
+  return moodOf(clock(), feeling, view.mood ??= { kind: null, k: 0 })
+}
 
 export function mount(el, { pick }) {
   stage = el
   onPick = pick
   renderer = new THREE.WebGLRenderer({ antialias: true })
-  renderer.setPixelRatio(Math.min(2, devicePixelRatio))
+  renderer.setPixelRatio(Math.min(budget().pixelRatio, devicePixelRatio))
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
   // The light never moves, so the shadows only change as the critters do;
-  // animate() redraws them every other frame instead of every frame.
+  // animate() redraws them every few frames (power.js) instead of every
+  // frame: the shadow pass draws the whole office a second time.
   renderer.shadowMap.autoUpdate = false
   renderer.outputColorSpace = THREE.SRGBColorSpace
   stage.append(renderer.domElement)
@@ -136,6 +167,7 @@ export function mount(el, { pick }) {
   bubble.className = 'bubble'
   bubble.hidden = true
   stage.append(bubble)
+  talk = createBubbles({ stage, headAt, onPick: id => onPick(id) })
 
   scene = new THREE.Scene()
   // A soft studio environment for every surface to reflect: glazes, metal
@@ -168,7 +200,7 @@ export function mount(el, { pick }) {
   sun = new THREE.DirectionalLight('#fffaf2', SUN)
   sun.position.set(-90, 220, 120)
   sun.castShadow = true
-  sun.shadow.mapSize.set(2048, 2048)
+  sun.shadow.mapSize.set(budget().shadowSize, budget().shadowSize)
   sun.shadow.radius = 6
   sun.shadow.bias = -0.0005
   // A shadow-map texel is close to a unit across a big office; nudging the
@@ -202,9 +234,9 @@ function readPalette() {
   floor.material.color.copy(palette.scene)
   // Rooms, the coffee corner and the office are rebuilt in the new colors
   // on the next sync.
-  for (const t of rooms.values()) { if (t.mesh) scene.remove(t.mesh); t.w = null }
-  if (coffee) { scene.remove(coffee.group); coffee = null }
-  if (shell) { scene.remove(shell.group); shell = null }
+  for (const t of rooms.values()) { if (t.mesh) unmount(t.mesh); t.w = null }
+  if (coffee) { unmount(coffee.group); coffee = null }
+  if (shell) { unmount(shell.group); shell = null }
   layoutKey = ''
   for (const s of sessionViews.values()) {
     s.track.material.color.copy(palette.line)
@@ -238,6 +270,16 @@ function placeDesk(s) {
   s.desk.group.position.set(0, FLOOR_TOP, DESK_Z)
   s.desk.group.traverse(o => { if (o.isMesh) o.userData.pick = { kind: 'session', id: s.id } })
   s.group.add(s.desk.group)
+}
+
+// Takes a group out of the scene with its labels. three drops a label's
+// element from the page only when that label itself is removed, so a
+// rebuilt room, coffee corner or office would otherwise show its sign twice.
+// A label that is reused (a room's sign, the front desk's) comes back on
+// the next frame once its new group is in the scene.
+function unmount(group) {
+  group.removeFromParent()
+  group.traverse(o => { if (o.isCSS2DObject) o.element.remove() })
 }
 
 function label(html, cls) {
@@ -287,11 +329,37 @@ function ensureCoffee() {
 function ensureShell(W, D) {
   const key = `${Math.round(W)}x${Math.round(D)}`
   if (shell && key === shellKey) return
-  if (shell) scene.remove(shell.group)
+  if (shell) unmount(shell.group)
   shell = officeShell({ W, D, colors: roomColors('a') })
   shellKey = key
   scene.add(shell.group)
+  placeFrontDesk(W, D)
   ensureVacuum(W, D)
+}
+
+// The front desk stands by the front door, just left of the aisle new
+// critters walk in along, its doormat at the door. Click it (or its sign)
+// to start a new job. Part of the office shell, so it moves with the walls.
+let front = null
+let frontSign = null
+function placeFrontDesk(W, D) {
+  if (!frontSign) {
+    frontSign = label('<button type="button" class="pname" title="Start a new job (n)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 14h10l-1.4-2V8.5a3.6 3.6 0 0 0-7.2 0V12zM8.5 16.5a1.6 1.6 0 0 0 3 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Front desk<small>New job</small></button>', 'project frontdesk')
+    frontSign.el.addEventListener('click', () => document.dispatchEvent(new CustomEvent('office:frontdesk')))
+  }
+  front = frontDesk({ ...roomColors('a'), accent: palette.clay })
+  front.group.traverse(o => { if (o.isMesh) o.userData.pick = { kind: 'frontdesk' } })
+  front.group.position.set(W / 2 - OFFICE_MARGIN / 2 - FRONT_W / 2 - 26, 0.4, D / 2 - 18)
+  frontSign.obj.position.set(0, 50, 0)
+  front.group.add(frontSign.obj)
+  shell.group.add(front.group)
+}
+
+// The bell on the front desk, rung when a new job comes in.
+function ringBell(now) {
+  if (!front) return
+  front.ringAt = now
+  sound.chime()
 }
 
 // A robot vacuum doing laps of the open floor around the rooms.
@@ -311,7 +379,9 @@ function ensureVacuum(W, D) {
   }
   const x = W / 2 - 34
   const z = D / 2 - 34
-  vacuum.loop = [new THREE.Vector3(-x, 0, z), new THREE.Vector3(x, 0, z), new THREE.Vector3(x, 0, -z + 30), new THREE.Vector3(-x, 0, -z + 30)]
+  // Its front lane passes behind the front desk.
+  const zf = D / 2 - 50
+  vacuum.loop = [new THREE.Vector3(-x, 0, zf), new THREE.Vector3(x, 0, zf), new THREE.Vector3(x, 0, -z + 30), new THREE.Vector3(-x, 0, -z + 30)]
   vacuum.group.position.copy(vacuum.loop[0])
   vacuum.i = 1
 }
@@ -349,7 +419,12 @@ function ensureRoom(p) {
   let t = rooms.get(p.id)
   if (!t) {
     t = { id: p.id, label: label('', 'project'), center: new THREE.Vector3(), target: new THREE.Vector3() }
-    t.label.el.addEventListener('click', () => focusProject(focusedProject === p.id ? null : p.id))
+    t.label.el.addEventListener('click', e => {
+      // The icon on the sign renames the project or changes its icon.
+      const icon = e.target.closest('[data-edit-project]')
+      if (icon) document.dispatchEvent(new CustomEvent('office:project-edit', { detail: { id: icon.dataset.editProject, raw: icon.dataset.raw, anchor: icon } }))
+      else focusProject(focusedProject === p.id ? null : p.id)
+    })
     rooms.set(p.id, t)
   }
   const cols = gridCols(p.sessions.length)
@@ -357,10 +432,14 @@ function ensureRoom(p) {
   const d = BACK_SPACE + BEHIND + (Math.ceil(p.sessions.length / cols) - 1) * ROW_DEPTH + IN_FRONT
   t.cols = cols
   if (t.w !== w || t.d !== d) {
-    if (t.mesh) scene.remove(t.mesh)
+    if (t.mesh) unmount(t.mesh)
     const built = buildRoom({ w, d, name: p.name, colors: roomColors(roomOf(p.name)) })
     t.mesh = built.group
     t.plants = built.plants
+    // What the project has earned so far; grow() shows it.
+    t.decor = roomDecor({ w, d, colors: roomColors(roomOf(p.name)), shelfAt: built.shelfAt })
+    t.mesh.add(t.decor.group)
+    t.decorKey = ''
     t.mesh.position.copy(t.center)
     t.mesh.add(t.label.obj)
     scene.add(t.mesh)
@@ -370,7 +449,9 @@ function ensureRoom(p) {
   // The room's name hangs as a sign over its back wall.
   t.label.obj.position.set(0, WALL_H + 8, -d / 2)
   const more = p.hidden > 0 ? `<span class="pmore">+${p.hidden}</span>` : ''
-  const html = `<span class="pname">${escapeHtml(p.name)}</span>${more}`
+  const id = p.id.slice(2)
+  const shown = projectName(id, p.name)
+  const html = `<button type="button" class="picon" data-edit-project="${escapeHtml(id)}" data-raw="${escapeHtml(p.name)}" title="Rename or change the icon" aria-label="Rename ${escapeHtml(shown)} or change its icon">${projectIcon(id, p.name)}</button><span class="pname">${escapeHtml(shown)}</span>${more}`
   if (t.html !== html) t.label.el.innerHTML = t.html = html
   t.label.el.classList.toggle('focused', focusedProject === p.id)
   return t
@@ -398,11 +479,21 @@ function ensureSession(n) {
   s.zzz.obj.position.set(10, FLOOR_TOP + SS * s.char.height + 4, 0)
   s.oops = flag('oops', '!')
   s.oops.obj.position.set(0, FLOOR_TOP + SS * s.char.height + 10, 0)
-  s.body.add(s.zzz.obj, s.oops.obj)
+  s.bell = flag('bell', BELL_SVG)
+  s.bell.obj.position.set(-14, FLOOR_TOP + SS * s.char.height + 6, 0)
+  s.body.add(s.zzz.obj, s.oops.obj, s.bell.obj)
   s.group.add(s.rug, s.track, s.body, s.label.obj)
   placeDesk(s)
+  s.easel = easel(roomColors(s.room))
+  s.easel.group.position.set(-50, FLOOR_TOP, DESK_Z + 4)
+  s.easel.group.rotation.y = 0.35
+  s.easel.group.visible = false
+  s.easel.group.traverse(o => { if (o.isMesh) o.userData.pick = { kind: 'session', id: n.id } })
+  s.group.add(s.easel.group)
+  s.seen = outputs.filter(o => o.session === n.session).length
   // A session that starts while you watch walks in through the office.
   s.walkIn = !resting(n) && clock() - mountedAt > 3
+  s.bornAt = clock()
   scene.add(s.group)
   sessionViews.set(n.id, s)
   return s
@@ -411,8 +502,7 @@ function ensureSession(n) {
 function dropSession(id) {
   const s = sessionViews.get(id)
   if (!s) return
-  scene.remove(s.group)
-  for (const el of [s.label.el, s.zzz.el, s.oops.el]) el.remove()
+  unmount(s.group)
   sessionViews.delete(id)
   for (const [key, a] of agentViews) if (a.session === id) dropAgent(key)
 }
@@ -431,7 +521,11 @@ function ensureAgent(n, s) {
   a.char.root.scale.setScalar(AG)
   a.oops = flag('oops small', '!')
   a.oops.obj.position.set(0, AG * a.char.height + 8, 0)
-  a.group.add(a.char.root, a.oops.obj)
+  // Its name tag, at its feet; shown when you're looking at its room.
+  a.tag = label(`<i class="dot ${tint}"></i>${escapeHtml(who(n).name)}`, 'agent')
+  a.tag.obj.position.set(0, 0, 9)
+  a.tag.el.addEventListener('click', () => onPick(n.id))
+  a.group.add(a.char.root, a.oops.obj, a.tag.obj)
   a.group.visible = !a.gone
   scene.add(a.group)
   agentViews.set(n.id, a)
@@ -446,8 +540,7 @@ function ensureAgent(n, s) {
 function dropAgent(id) {
   const a = agentViews.get(id)
   if (!a) return
-  scene.remove(a.group)
-  a.oops.el.remove()
+  unmount(a.group)
   if (a.spot !== undefined) coffee?.taken.delete(a.spot)
   agentViews.delete(id)
 }
@@ -532,7 +625,8 @@ function frame(jump = false) {
   const goal = { pos: new THREE.Vector3(c.x, Math.sin(TILT) * dist, c.z + Math.cos(TILT) * dist), target }
   // Zoomed all the way out shows the whole office and no more.
   if (!t) controls.maxDistance = dist
-  if (jump || !framedOnce) {
+  // With less motion the camera cuts to the new view instead of gliding.
+  if (jump || !framedOnce || reduced()) {
     framedOnce = true
     camera.position.copy(goal.pos)
     controls.target.copy(goal.target)
@@ -596,16 +690,26 @@ const aisleX = () => size.W / 2 - OFFICE_MARGIN / 2
 const aisleZ = room => (room?.rowFront ?? room?.target.z ?? 0) + ROOM_GAP / 2
 
 function walk(view, group, path, then) {
-  view.walk = { group, path: path.map(p => p.clone()), then }
+  view.walk = { group, path: path.map(p => (p.clone ? p.clone() : p)), then }
 }
 
 // Move along the path; true while still walking.
 function stepWalk(view, dt) {
   const w = view.walk
   if (!w) return false
-  let step = WALK_SPEED * dt
+  // With less motion a critter is simply where it was going.
+  let step = reduced() ? Infinity : WALK_SPEED * dt
   while (step > 0 && w.path.length) {
     const to = w.path[0]
+    // A stop on the way: a callback, or a pause of `wait` seconds.
+    if (typeof to === 'function') { w.path.shift(); to(); continue }
+    if (to.wait !== undefined) {
+      w.until ??= clock() + to.wait
+      if (clock() < w.until) return true
+      w.until = null
+      w.path.shift()
+      continue
+    }
     const pos = w.group.position
     const dx = to.x - pos.x
     const dz = to.z - pos.z
@@ -624,6 +728,31 @@ function stepWalk(view, dt) {
     return false
   }
   return true
+}
+
+// In from the front of the office, up the right-hand aisle, and along the
+// aisle in front of its room to its desk.
+// `ticket`: one the front desk sent stops at the counter on the way.
+function walkIn(s, t = roomOfSession(s), ticket = false) {
+  const x = aisleX()
+  const lane = aisleZ(t)
+  const local = p => p.sub(s.home)
+  s.body.visible = true
+  s.body.position.copy(local(new THREE.Vector3(x, 0, size.D / 2 + 20)))
+  const atDesk = ticket && front ? [
+    local(new THREE.Vector3(x, 0, front.group.position.z + 8)),
+    () => { s.body.rotation.y = -Math.PI / 2; ringBell(clock()); s.waveAt = clock() + 0.3 },
+    { wait: 1.1 },
+  ] : []
+  walk(s, s.body, [...atDesk, local(new THREE.Vector3(x, 0, lane)), local(new THREE.Vector3(s.home.x, 0, lane)), new THREE.Vector3(0, 0, 0)], () => { s.body.rotation.y = 0 })
+}
+
+// The same way back out, for the night.
+function walkOut(s, then) {
+  const x = aisleX()
+  const lane = aisleZ(roomOfSession(s))
+  const local = p => p.sub(s.home)
+  walk(s, s.body, [local(new THREE.Vector3(s.home.x, 0, lane)), local(new THREE.Vector3(x, 0, lane)), local(new THREE.Vector3(x, 0, size.D / 2 + 20))], then)
 }
 
 function roomOfSession(s) {
@@ -664,6 +793,7 @@ function startBreak(a, s) {
 // Reconcile with the model
 
 export function sync(showPast) {
+  if (clock() - grownAt > 1) grow()
   const list = chooseSessions(showPast)
   const shownSessions = new Set()
   for (const p of list) {
@@ -671,7 +801,7 @@ export function sync(showPast) {
     p.sessions.forEach(n => { shownSessions.add(n.id); ensureSession(n) })
   }
   for (const id of [...rooms.keys()]) {
-    if (!list.some(p => p.id === id)) { scene.remove(rooms.get(id).mesh); rooms.get(id).label.el.remove(); rooms.delete(id) }
+    if (!list.some(p => p.id === id)) { unmount(rooms.get(id).mesh); rooms.get(id).label.el.remove(); rooms.delete(id) }
   }
   if (focusedProject && !rooms.has(focusedProject)) focusedProject = null
   for (const id of [...sessionViews.keys()]) if (!shownSessions.has(id)) dropSession(id)
@@ -707,21 +837,77 @@ export function sync(showPast) {
         if (!s.placed) {
           s.group.position.copy(s.home)
           s.placed = true
-          if (s.walkIn) {
-            // In from the front of the office, up the right-hand aisle, and
-            // along the aisle in front of its room to its desk.
-            const x = aisleX()
-            const lane = aisleZ(t)
-            const local = p => p.sub(s.home)
-            s.body.position.copy(local(new THREE.Vector3(x, 0, size.D / 2 + 20)))
-            walk(s, s.body, [local(new THREE.Vector3(x, 0, lane)), local(new THREE.Vector3(s.home.x, 0, lane)), new THREE.Vector3(0, 0, 0)], () => { s.body.rotation.y = 0 })
-          }
+          // One the front desk sent stops at the counter first: the bell
+          // rings, it picks up its ticket, then heads for its desk.
+          if (s.walkIn) walkIn(s, t, Boolean(jobFor(n) && front))
         }
       })
     }
     frame()
   }
   return list
+}
+
+// ---------------------------------------------------------------------------
+// An office that grows: once a second, tally what each thread has done into
+// its project's milestones (milestones.js), celebrate what's new, and dress
+// each room in what its project has earned.
+
+let grownAt = -9
+
+function countsOf(n, made) {
+  const m = made.get(n.session)
+  let team = n.pastAgents?.length ?? 0
+  if (!n.past) for (const a of nodes.values()) if (a.kind === 'agent' && a.session === n.session && a.status !== 'done') team++
+  return { turns: n.turns ?? 0, tools: n.toolCalls ?? 0, outputs: m?.outputs ?? 0, pictures: m?.pictures ?? 0, prs: m?.prs ?? 0, team }
+}
+
+function grow() {
+  grownAt = clock()
+  const store = milestones.mine()
+  const made = new Map()
+  for (const o of outputs) {
+    if (o.type === 'file') continue
+    const m = made.get(o.session) ?? { outputs: 0, pictures: 0, prs: 0 }
+    m.outputs++
+    if (o.type === 'image') m.pictures++
+    if (o.type === 'pr') m.prs++
+    made.set(o.session, m)
+  }
+  let changed = false
+  const projects = new Map()
+  for (const n of nodes.values()) {
+    if (n.kind !== 'session' || !n.project) continue
+    projects.set(n.project, projectName(n.project, n.projectName ?? nodes.get(`p:${n.project}`)?.label))
+    if (milestones.record(store, n.project, n.session, countsOf(n, made))) changed = true
+  }
+  // What was already reached when the page opened arrives quietly.
+  const quiet = clock() - mountedAt < 6
+  for (const [project, name] of projects) {
+    const fresh = milestones.check(store, project)
+    if (!fresh.length) continue
+    changed = true
+    if (!quiet) celebrate(project, name, fresh)
+  }
+  if (changed) milestones.save(store)
+  for (const t of rooms.values()) {
+    if (!t.decor) continue
+    const state = milestones.decorOf(store, t.id.slice(2))
+    const key = `${state.trophies}|${state.poster}|${state.neon}|${state.plant}`
+    if (key === t.decorKey) continue
+    t.decorKey = key
+    t.decor.set(state, t.plants?.[1])
+    renderer.shadowMap.needsUpdate = true
+  }
+}
+
+function celebrate(project, name, fresh) {
+  const m = fresh.at(-1)
+  const more = fresh.length > 1 ? ` (and ${fresh.length - 1} more)` : ''
+  toast({ icon: '★', title: `${name}: ${m.title}!${more}`, text: m.adds, onClick: () => focusProject(`p:${project}`) })
+  sound.chime()
+  const t = rooms.get(`p:${project}`)
+  if (t) addConfetti(t.center.clone().add(v.set(0, WALL_H, -t.d / 2 + 20)))
 }
 
 // ---------------------------------------------------------------------------
@@ -736,8 +922,28 @@ function headOf(id) {
   return null
 }
 
+// Where a critter's bubble hangs, in stage pixels, or null when it's out
+// of sight.
+function headAt(id) {
+  const head = headOf(id)
+  if (!head) return null
+  const isAgent = agentViews.has(id)
+  head.y += isAgent ? 5 : 9
+  const p = head.project(camera)
+  if (p.z > 1) return null
+  const x = ((p.x + 1) / 2) * stage.clientWidth
+  const y = ((1 - p.y) / 2) * stage.clientHeight
+  if (x < -40 || y < -40 || x > stage.clientWidth + 40 || y > stage.clientHeight + 40) return null
+  return { x, y }
+}
+
+// Beads and confetti share their shapes: a busy office fires several tool
+// calls a second, and each used to build (and throw away) its own sphere.
+const BEAD = new THREE.SphereGeometry(1.7, 12, 10)
+const PAPER = new THREE.BoxGeometry(1.6, 0.3, 1)
+
 function addBead(from, color) {
-  const m = new THREE.Mesh(new THREE.SphereGeometry(1.7, 16, 16), new THREE.MeshStandardMaterial({ color, roughness: 0.5, transparent: true }))
+  const m = new THREE.Mesh(BEAD, new THREE.MeshStandardMaterial({ color, roughness: 0.5, transparent: true }))
   m.castShadow = true
   m.position.copy(from)
   scene.add(m)
@@ -746,9 +952,8 @@ function addBead(from, color) {
 
 // A little burst of colored paper when a session finishes a turn.
 function addConfetti(from) {
-  const geo = new THREE.BoxGeometry(1.6, 0.3, 1)
   for (let i = 0; i < 18; i++) {
-    const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: palette[TINTS[i % TINTS.length]], transparent: true }))
+    const m = new THREE.Mesh(PAPER, new THREE.MeshStandardMaterial({ color: palette[TINTS[i % TINTS.length]], transparent: true }))
     m.position.copy(from)
     scene.add(m)
     const a = Math.random() * Math.PI * 2
@@ -757,8 +962,15 @@ function addConfetti(from) {
   }
 }
 
+function fly(from, to, tint, t) {
+  talk.fly(from, to, tint, t)
+}
+
+const calm = matchMedia('(prefers-reduced-motion: reduce)')
+
 export function pulse(ev) {
   const t = clock()
+  if (ev.kind === 'job.start') ringBell(t)
   const owner = ev.agent ? aid(ev.session, ev.agent) : sid(ev.session)
   const session = sessionViews.get(sid(ev.session))
   if (ev.kind === 'tool.start' || (ev.kind === 'tool.end' && !ev.ok)) {
@@ -784,11 +996,141 @@ export function pulse(ev) {
     sound.hush()
   } else if (ev.kind === 'turn.start' && session && !ev.agent) {
     session.hopAt = t
+    // Your next prompt: it looks up at you.
+    if (ev.text) session.perkAt = t
   } else if (ev.kind === 'turn.complete' && session && !ev.agent) {
+    // A good finish gets a cheer; an error or a refusal, a short sulk.
+    if (ev.reason === 'answer' || !ev.reason) session.cheerAt = t
+    else if (ev.reason !== 'aborted') session.sulkAt = t
     const from = headOf(session.id)
-    if (from) addConfetti(from)
+    if (from && !reduced()) addConfetti(from)
     sound.chime()
+    // 💬 the first words of its answer.
+    if (ev.answer) talk.say(session.id, 'answer', { text: ev.answer, thread: session.id }, t)
   }
+  if (ev.kind === 'turn.complete' && ev.agent && ev.answer && agentViews.has(owner)) {
+    talk.say(owner, 'answer', { text: ev.answer, thread: session?.id }, t)
+  }
+  // 💬 one loop messaging another, with an envelope flying across; work
+  // arriving from outside drops in over the thread.
+  if (ev.kind === 'agent.message' && session) {
+    const m = mail[0]
+    if (!m || m.t !== ev.t) return
+    if (!m.from) {
+      talk.say(m.to ?? session.id, 'relay', { who: m.fromName ?? 'From outside', text: m.text ?? '', thread: session.id }, t)
+    } else {
+      talk.say(m.from, 'mail', { who: `To ${m.toName ?? 'someone'}`, text: m.text ?? '', thread: session.id }, t)
+      if (m.to) fly(m.from, m.to, 'teal', t)
+    }
+  }
+  // 💬 a message you sent from the office, landing on whoever it's for.
+  if (ev.kind === 'chat.sent' && session) talk.say(owner, 'you', { who: 'You', text: ev.text ?? '', thread: session.id }, t)
+  // 🔔 a pull request opened or merged, or a thread that ends.
+  if (ev.kind === 'asset.add' && ev.type === 'pr' && session) {
+    const key = `${ev.session}|${ev.id}|${ev.meta?.state ?? 'open'}`
+    if (!prStates.has(key)) {
+      prStates.add(key)
+      ring(session.id, owner, t)
+    }
+  }
+  if (ev.kind === 'session.end' && session) ring(session.id, session.id, t)
+  // You wrote to it, or answered what it asked: it perks up.
+  if ((ev.kind === 'chat.sent' || ev.kind === 'ask.close') && session) {
+    const view = agentViews.get(owner) ?? session
+    view.perkAt = t
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Office moments. A pull request (opened or merged) or a thread that ends
+// rings a desk bell, and everyone in that room gathers round for a quick
+// cheer. In the evening the lights dim and critters with nothing to do go
+// home, out the front; they're back in the morning, or as soon as their
+// thread has work.
+
+const BELL_SVG = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.2a1.2 1.2 0 0 1 1.2 1.2v.5a5 5 0 0 1 3.8 4.9v3.4l1.4 1.6H3.6L5 13.2V9.8a5 5 0 0 1 3.8-4.9v-.5A1.2 1.2 0 0 1 10 3.2z" fill="currentColor"/><circle cx="10" cy="16.6" r="1.6" fill="currentColor"/></svg>'
+const GATHER_S = 4.5 // walking over, cheering, and back
+const GATHER_REACH = 70 // the farthest a session leaves its rug to join in
+const RING_GAP_S = 15 // a room rings at most this often
+const HOME_IDLE_MS = 3 * 60000 // quiet this long in the evening: time to go
+const rang = new Map() // room id -> when it last rang
+const prStates = new Set() // `${session}|${id}|${state}` already rung for
+
+function ring(sessionId, sourceId, now) {
+  const n = nodes.get(sessionId)
+  const roomId = n?.project && `p:${n.project}`
+  if (!roomId || now - (rang.get(roomId) ?? -99) < RING_GAP_S) return
+  rang.set(roomId, now)
+  const s = sessionViews.get(sessionId)
+  if (!s || s.away) return
+  sound.bell()
+  s.bellAt = now
+  const at = headOf(sourceId) ?? headOf(sessionId)
+  if (!at) return
+  at.y = 0
+  const source = agentViews.get(sourceId) ?? s
+  source.cheerAt = now
+  // With less motion asked for, they cheer where they are.
+  if (lessMotion.matches) {
+    for (const other of sessionViews.values()) if (nodes.get(other.id)?.project === n.project) other.cheerAt = now
+    return
+  }
+  // Everyone else in the room walks over, cheers, and goes back.
+  let i = 0
+  for (const other of sessionViews.values()) {
+    const o = nodes.get(other.id)
+    if (other === source || other.away || other.walk || !o || resting(o) || o.project !== n.project) continue
+    other.gatherAt = now
+    other.gatherTo = (other.gatherTo ?? new THREE.Vector3()).copy(at)
+    other.cheerAt = now + 1.1
+  }
+  for (const a of agentViews.values()) {
+    const host = nodes.get(a.session)
+    if (a === source || a.gone || a.endedAt || !host || host.project !== n.project || nodes.get(a.id)?.status !== 'active') continue
+    const angle = (i++ / 6) * Math.PI * 2 + 0.4
+    a.gatherAt = now
+    a.gatherTo = (a.gatherTo ?? new THREE.Vector3()).set(at.x + Math.sin(angle) * 30, FLOOR_TOP, at.z + Math.cos(angle) * 30)
+    a.cheerAt = now + 1.1
+  }
+}
+
+// 0..1 how far over to the gathering a critter is right now.
+const gathering = (view, now) => (view.gatherAt === undefined ? 0 : swell((now - view.gatherAt) / GATHER_S))
+
+// The hour, from your clock. ?hour=21 previews the evening (for the demo
+// and for testing; nothing else sets it).
+const hourParam = typeof location === 'object' ? Number(new URLSearchParams(location.search).get('hour')) : NaN
+let hourOverride = Number.isFinite(hourParam) && hourParam >= 0 && hourParam < 24 && new URLSearchParams(location.search).has('hour') ? hourParam : null
+function hourNow() {
+  if (hourOverride !== null) return hourOverride
+  const d = new Date()
+  return d.getHours() + d.getMinutes() / 60
+}
+
+// Called each frame for a session: send it home or bring it back. True
+// while it's away (or on its way out).
+function commute(s, n, now, wall, busy) {
+  const idle = resting(n) || (!busy && !n.turnOpen && !n.asks?.length && wall - (n.lastAt ?? n.startedAt ?? wall) > HOME_IDLE_MS)
+  const leave = homeTime(hourNow()) && idle
+  if (leave && !s.away && !s.leaving) {
+    if (clock() - s.bornAt < 3 || !s.placed) {
+      // Already gone by the time the office first saw it.
+      s.away = true
+      s.body.visible = false
+    } else if (!s.walk) {
+      s.leaving = true
+      walkOut(s, () => { s.away = true; s.leaving = false; s.body.visible = false })
+    }
+  } else if (!leave && s.away) {
+    // Back in the morning (each in their own time), or now if there's work.
+    s.backAt ??= now + (busy || n.turnOpen ? 0 : (hash(s.id) % 20))
+    if (now >= s.backAt) {
+      s.away = false
+      s.backAt = null
+      walkIn(s)
+    }
+  }
+  return s.away || s.leaving
 }
 
 // ---------------------------------------------------------------------------
@@ -800,8 +1142,7 @@ const KEYS = [[0, 'night'], [5.5, 'night'], [7, 'dawn'], [9, 'window'], [16.5, '
 function daylight(now) {
   if (now - daylightAt < 5) return
   daylightAt = now
-  const d = new Date()
-  const h = d.getHours() + d.getMinutes() / 60
+  const h = hourNow()
   let i = 0
   while (KEYS[i + 1][0] <= h) i++
   const [h0, c0] = KEYS[i]
@@ -815,10 +1156,13 @@ function daylight(now) {
   glassMat.emissiveIntensity = 0.45 - dark * 0.15
   lampMat.emissive.copy(palette.glow)
   lampMat.emissiveIntensity = 0.45 + dark * 1.1
-  sun.intensity = SUN - dark * 0.7
+  // After hours the office lights dim too, easing over half an hour either
+  // side of 8pm and 7am; the lamps keep glowing.
+  const late = lateness(h)
+  sun.intensity = SUN - dark * 0.7 - late * 0.35
   sun.color.set('#fffaf2').lerp(new THREE.Color('#c9d4ff'), dark * 0.6)
-  sky.intensity = SKY - dark * 0.3
-  scene.environmentIntensity = ENV * (1 - dark * 0.5)
+  sky.intensity = SKY - dark * 0.3 - late * 0.3
+  scene.environmentIntensity = ENV * (1 - dark * 0.5 - late * 0.2)
 }
 
 // ---------------------------------------------------------------------------
@@ -834,9 +1178,9 @@ function updateGauge(s, f) {
 }
 
 // A short wobble and a "!" after a failed call.
-function oops(view, char, el, now) {
+function oops(view, char, el, now, still) {
   const k = view.failAt ? (now - view.failAt) / 1.4 : 1
-  char.rig.rotation.z = k < 1 ? Math.sin(now * 38) * 0.09 * (1 - k) : 0
+  char.rig.rotation.z = k < 1 && !still ? Math.sin(now * 38) * 0.09 * (1 - k) : 0
   el.classList.toggle('on', k < 1)
 }
 
@@ -877,8 +1221,10 @@ function greetings(now) {
 }
 
 // Standing helpers nudge apart so nobody stands inside anybody else.
+const standing = []
 function makeRoom() {
-  const standing = [...agentViews.values()].filter(a => !a.gone && !a.walk && !a.leaving && a.settled)
+  standing.length = 0
+  for (const a of agentViews.values()) if (!a.gone && !a.walk && !a.leaving && a.settled) standing.push(a)
   for (let i = 0; i < standing.length; i++) {
     for (let j = i + 1; j < standing.length; j++) {
       const p = standing[i].group.position, q = standing[j].group.position
@@ -896,6 +1242,13 @@ export function animate() {
   const now = clock()
   const dt = Math.min(0.1, now - last)
   last = now
+  // Less motion (motion.js): no hops, bobbing, swaying, wobbles or waves,
+  // and nothing slides into place. `idle` is the clock the decorative
+  // motion runs on, stopped when motion is reduced; states still show
+  // (a busy critter's bulb glows, an alarm ring stays lit).
+  const still = reduced()
+  const idle = still ? 0 : now
+  const ease = still ? 1 : 0.12
   const wall = Date.now()
   // Who has a tool running right now.
   const running = new Set()
@@ -903,24 +1256,30 @@ export function animate() {
 
   daylight(now)
   for (const t of rooms.values()) {
-    t.center.lerp(t.target, 0.12)
+    t.center.lerp(t.target, ease)
     t.mesh.position.copy(t.center)
-    for (const p of t.plants ?? []) p.rotation.z = Math.sin(now * 0.8 + p.userData.plant) * 0.035
+    for (const p of t.plants ?? []) p.rotation.z = Math.sin(idle * 0.8 + p.userData.plant) * 0.035
+    t.decor?.animate(idle)
+  }
+  if (front?.ringAt !== undefined) {
+    const k = (now - front.ringAt) / 0.9
+    front.bell.rotation.z = k < 1 && !calm.matches && !still ? Math.sin(now * 42) * 0.25 * (1 - k) : 0
   }
   if (coffee) {
-    coffee.center.lerp(coffee.target, 0.12)
+    coffee.center.lerp(coffee.target, ease)
     coffee.group.position.copy(coffee.center)
-    coffee.animate(now)
+    coffee.animate(idle)
   }
   if (shell) {
-    for (const p of shell.plants) p.rotation.z = Math.sin(now * 0.7 + p.userData.plant) * 0.03
+    for (const p of shell.plants) p.rotation.z = Math.sin(idle * 0.7 + p.userData.plant) * 0.03
     const d = new Date()
     const secs = d.getSeconds() + d.getMilliseconds() / 1000
     shell.clock.second.rotation.z = -(secs / 60) * Math.PI * 2
     shell.clock.minute.rotation.z = -((d.getMinutes() + secs / 60) / 60) * Math.PI * 2
     shell.clock.hour.rotation.z = -(((d.getHours() % 12) + d.getMinutes() / 60) / 12) * Math.PI * 2
   }
-  if (vacuum?.loop) {
+  // The vacuum parks while motion is reduced.
+  if (vacuum?.loop && !still) {
     const to = vacuum.loop[vacuum.i]
     const g = vacuum.group
     const dx = to.x - g.position.x
@@ -935,44 +1294,69 @@ export function animate() {
       g.rotation.y += turn * Math.min(1, dt * 4)
     }
     vacuum.led.visible = Math.floor(now * 2) % 2 === 0
-  }
+  } else if (vacuum) vacuum.led.visible = true
 
+  gatherAsks()
   for (const s of sessionViews.values()) {
     const n = nodes.get(s.id)
     if (!n) continue
-    s.group.position.lerp(s.home, 0.12)
+    s.group.position.lerp(s.home, ease)
     const asleep = resting(n)
     const f = fill(n)
     const walking = stepWalk(s, dt)
     const working = running.has(s.id) || wall - (n.lastAt ?? 0) < BUSY_MS
-    const busy = asleep ? 0 : walking || working ? 1 : Math.max(0, 1 - (now - (s.lastAt ?? -9)) / 2.5)
+    const away = commute(s, n, now, wall, working)
+    // Gathering round a bell: over toward it, then back to its rug.
+    if (!walking && !away) {
+      const g = gathering(s, now)
+      if (g > 0) {
+        v.copy(s.gatherTo).sub(s.group.position)
+        const far = v.length()
+        v.setY(0).multiplyScalar(Math.min(1, Math.max(0, far - 30) / Math.max(1, far), GATHER_REACH / Math.max(1, far)) * g)
+        const glide = still ? 1 : 1 - Math.pow(0.0005, dt)
+        s.body.position.lerp(v, glide)
+        s.body.rotation.y += (Math.atan2(s.gatherTo.x - s.group.position.x - s.body.position.x, s.gatherTo.z - s.group.position.z - s.body.position.z) * Math.min(1, g * 2) - s.body.rotation.y) * glide
+      } else if (s.gatherAt !== undefined) {
+        s.body.position.lerp(v.set(0, 0, 0), 1 - Math.pow(0.0005, dt))
+        s.body.rotation.y *= Math.pow(0.0005, dt)
+        if (s.body.position.lengthSq() < 0.01) { s.body.position.set(0, 0, 0); s.body.rotation.y = 0; s.gatherAt = undefined }
+      }
+    }
+    const busy = asleep ? 0 : walking || working || gathering(s, now) > 0.05 ? 1 : Math.max(0, 1 - (now - (s.lastAt ?? -9)) / 2.5)
     const dozing = asleep || (!working && !walking && wall - (n.lastAt ?? n.startedAt ?? wall) > DOZE_MS)
     const helper = s.lookAt && agentViews.get(s.lookAt)
     const look = helper && !helper.endedAt ? Math.atan2(helper.group.position.x - s.group.position.x, helper.group.position.z - s.group.position.z) : 0
-    pose(s.char, now, {
+    pose(s.char, idle, {
       busy,
       look: walking ? 0 : Math.max(-0.45, Math.min(0.45, look * 0.3)),
-      hop: s.hopAt ? (now - s.hopAt) / 0.35 : 1,
+      hop: s.hopAt && !still ? (now - s.hopAt) / 0.35 : 1,
       alarm: !asleep && !walking && f >= WARN_AT,
       asleep: dozing,
     })
-    oops(s, s.char, s.oops.el, now)
-    waving(s, s.char, now)
+    // Thinking between tools mid-turn; yawning once it has waited on you a while.
+    const thinking = !walking && n.turnOpen && !running.has(s.id) && !n.asks?.length && now - (s.lastAt ?? -9) > 1.2
+    const idleFor = !walking && !working && !n.turnOpen ? (wall - (n.lastAt ?? wall)) / 1000 : 0
+    emote(s.char, now, feel(s, dozing || walking, thinking, idleFor), lessMotion.matches || still)
+    oops(s, s.char, s.oops.el, now, still)
+    if (!still) waving(s, s.char, now)
+    s.bell.el.classList.toggle('on', s.bellAt !== undefined && now - s.bellAt < 2.4)
     // A resting critter fades toward the floor's color.
     s.char.bodyMat.color.copy(palette[s.tint]).lerp(palette.line, asleep ? 0.6 : 0)
     s.char.bulb.visible = !asleep
-    s.zzz.el.classList.toggle('on', dozing && !walking)
-    s.desk.draw(now, asleep ? 'off' : busy > 0.5 && !walking ? 'busy' : 'idle', `#${palette[s.tint].getHexString()}`)
-    s.desk.steam(now, !asleep && working)
+    s.zzz.el.classList.toggle('on', dozing && !walking && !away)
+    s.desk.draw(now, asleep || away ? 'off' : busy > 0.5 && !walking ? 'busy' : 'idle', `#${palette[s.tint].getHexString()}`, still)
+    s.desk.steam(idle, !asleep && !away && working)
+    s.desk.animateTray?.(idle)
+    showWork(s, n, now, asleep || (away && !walking))
     updateGauge(s, f)
     const warn = !asleep && f >= WARN_AT
     if (warn && !s.alarm) { s.alarm = flatRing(26.5, 27.5, palette.crit); s.group.add(s.alarm) }
     if (!warn && s.alarm) { s.group.remove(s.alarm); s.alarm = null }
-    if (s.alarm) s.alarm.material.opacity = 0.35 + 0.45 * (Math.sin(now * 3) + 1) / 2
-    const html = `<span class="sname">${escapeHtml(n.label)}</span>${n.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span>` : ''}`
+    if (s.alarm) s.alarm.material.opacity = still ? 0.7 : 0.35 + 0.45 * (Math.sin(now * 3) + 1) / 2
+    const html = `<span class="who">${escapeHtml(who(n).name)}</span><span class="sname">${escapeHtml(n.label)}</span>${n.context?.tokens ? (devView() ? `<span class="pct ${level(f)}">${pct(f)}</span>` : energyMeter(f, { bare: true })) : ''}`
     if (s.html !== html) s.label.el.innerHTML = s.html = html
     s.label.el.classList.toggle('selected', selected === s.id)
-    s.label.el.classList.toggle('past', asleep)
+    s.label.el.classList.toggle('past', asleep || away)
   }
 
   for (const a of agentViews.values()) {
@@ -981,30 +1365,34 @@ export function animate() {
     if (!n || !s) continue
     if (n.status === 'done' && !a.endedAt) {
       a.endedAt = now
+      // Stopped short: a moment's sulk before it heads off.
+      if (!a.gone && (n.endStatus === 'failed' || n.endStatus === 'killed')) a.sulkAt = now
+      talk.hold(a.id, 'think', null, now)
       // A wave goodbye (and one back from the session), then off to coffee.
       if (!a.gone) { a.waveAt = now; s.waveAt = now + 0.2; a.departAt = now + 0.9 }
     }
     if (a.gone) continue
     if (a.departAt && now >= a.departAt) { a.departAt = null; startBreak(a, s) }
-    oops(a, a.char, a.oops.el, now)
+    oops(a, a.char, a.oops.el, now, still)
     const walking = stepWalk(a, dt)
 
     if (a.endedAt) {
       // On the way to coffee, on a break, then off home.
       if (!walking && a.onBreak && !a.leaving && now - a.onBreak > BREAK_S) a.leaving = now
-      pose(a.char, now + a.slot, { busy: walking ? 1 : 0, hop: 1 })
-      waving(a, a.char, now)
+      pose(a.char, idle + a.slot, { busy: walking ? 1 : 0, hop: 1 })
+      emote(a.char, now, feel(a, false, false, 0), lessMotion.matches || still)
+      if (!still) waving(a, a.char, now)
       if (a.onBreak && !a.leaving) {
-        const table = coffee.target.clone().add(coffee.tableAt)
+        const table = spot.copy(coffee.target).add(coffee.tableAt)
         const face = Math.atan2(table.x - a.group.position.x, table.z - a.group.position.z)
         a.group.rotation.y += Math.atan2(Math.sin(face - a.group.rotation.y), Math.cos(face - a.group.rotation.y)) * Math.min(1, dt * 6)
         // The mug arm rests forward, with a sip now and then.
-        const sip = Math.sin((now - a.onBreak) * 1.3) > 0.85
+        const sip = !still && Math.sin((now - a.onBreak) * 1.3) > 0.85
         a.char.arms[1].rotation.x = sip ? -1.3 : -0.5
         a.char.arms[1].rotation.z = 0.35
       }
       if (a.leaving) {
-        const k = Math.min(1, (now - a.leaving) / 1.6)
+        const k = still ? 1 : Math.min(1, (now - a.leaving) / 1.6)
         a.group.scale.setScalar(Math.max(0.01, 1 - k))
         if (k >= 1) {
           a.gone = true
@@ -1015,16 +1403,30 @@ export function animate() {
       continue
     }
 
+    // 💭 what a helper is on, for the thread you're looking at.
+    const shown = selected && (selected === s.id || nodes.get(selected)?.session === nodes.get(s.id)?.session)
+    talk.hold(a.id, 'think', shown && n.status === 'active' && n.description ? { key: n.description, text: n.description, thread: s.id } : null, now)
     const [sx, sz] = slotAt(a.slot)
-    const target = new THREE.Vector3(s.group.position.x + sx, FLOOR_TOP, s.group.position.z + sz)
-    const grow = Math.min(1, (now - a.born) / 0.6)
-    a.group.rotation.y = Math.atan2(s.group.position.x - a.group.position.x, s.group.position.z - a.group.position.z) * 0.45
-    pose(a.char, now + a.slot, {
-      busy: n.status === 'active' && (running.has(a.id) || now - (a.lastAt ?? -9) < 1.5) ? 1 : 0,
-      hop: a.hopAt ? (now - a.hopAt) / 0.3 : 1,
+    const target = spot.set(s.group.position.x + sx, FLOOR_TOP, s.group.position.z + sz)
+    const g = gathering(a, now)
+    if (g > 0) target.lerp(a.gatherTo, g)
+    const grow = still ? 1 : Math.min(1, (now - a.born) / 0.6)
+    a.group.rotation.y = g > 0.05
+      ? Math.atan2(a.gatherTo.x - a.group.position.x, a.gatherTo.z - a.group.position.z) * g
+      : Math.atan2(s.group.position.x - a.group.position.x, s.group.position.z - a.group.position.z) * 0.45
+    pose(a.char, idle + a.slot, {
+      busy: n.status === 'active' && (running.has(a.id) || now - (a.lastAt ?? -9) < 1.5 || g > 0.05) ? 1 : 0,
+      hop: a.hopAt && !still ? (now - a.hopAt) / 0.3 : 1,
       alarm: n.status === 'active' && fill(n) >= WARN_AT,
     })
-    waving(a, a.char, now)
+    // A teammate between turns waits, and yawns; an active one between
+    // tools thinks.
+    const agentThinks = n.status === 'active' && !running.has(a.id) && now - (a.lastAt ?? a.born) > 1.5 && !n.asks?.length
+    emote(a.char, now, feel(a, false, agentThinks, n.status === 'idle' ? (now - (a.lastAt ?? a.born)) : 0), lessMotion.matches || still)
+    if (!still) waving(a, a.char, now)
+    // Name tags show for the room you're in, or the thread you're on.
+    const host = nodes.get(s.id)
+    a.tag.el.classList.toggle('on', Boolean(shown || hovered === s.id || (host && focusedProject === `p:${host.project}`)))
     a.group.scale.setScalar(Math.max(0.01, grow < 1 ? grow * (1 + 0.2 * Math.sin(grow * Math.PI)) : 1))
     // New helpers drop in from above.
     target.y = FLOOR_TOP + (1 - grow) * (1 - grow) * 40
@@ -1037,14 +1439,15 @@ export function animate() {
 
   for (let i = beads.length - 1; i >= 0; i--) {
     const b = beads[i], k = (now - b.born) / 1.6
-    if (k >= 1) { scene.remove(b.m); b.m.geometry.dispose(); b.m.material.dispose(); beads.splice(i, 1); continue }
-    b.m.position.copy(b.from).addScaledVector(b.drift, k).add(v.set(0, k * 16, 0))
+    if (k >= 1) { scene.remove(b.m); b.m.material.dispose(); beads.splice(i, 1); continue }
+    if (still) b.m.position.copy(b.from)
+    else b.m.position.copy(b.from).addScaledVector(b.drift, k).add(v.set(0, k * 16, 0))
     b.m.material.opacity = 1 - k * k
   }
   for (let i = ripples.length - 1; i >= 0; i--) {
     const r = ripples[i], k = (now - r.born) / 1.8
     if (k >= 1) { scene.remove(r.r); ripples.splice(i, 1); continue }
-    r.r.scale.setScalar(1 + k * 2.2)
+    r.r.scale.setScalar(still ? 1.6 : 1 + k * 2.2)
     r.r.material.opacity = 1 - k
   }
   for (let i = confetti.length - 1; i >= 0; i--) {
@@ -1071,12 +1474,120 @@ export function animate() {
   controls.update()
   if (!camGoal) keepInOffice()
   fitDepth()
-  if (tick % 2 === 0) renderer.shadowMap.needsUpdate = true
+  if (tick % budget().shadowEvery === 0) renderer.shadowMap.needsUpdate = true
   sharpness(now, dt)
   renderer.render(scene, camera)
   labels.render(scene, camera)
+  talk.tick(now, { selected: selected && (nodes.get(selected)?.kind === 'agent' ? sid(nodes.get(selected).session) : selected) })
   placeBubble(tick % 10 === 1)
   if ((tick++ % 6) === 0) declutter()
+}
+
+// ---------------------------------------------------------------------------
+// What the work asks and makes, in the office: a sign held up while Claude
+// Code waits on your answer (and the monitor shows it too), the checklist
+// on an easel by the desk, the latest picture in a frame on the desk (and
+// on the monitor a moment when it lands), and an outbox tray stacking what
+// it delivered.
+
+const pictures = new Map() // src -> Image, loaded once
+function picture(src, then) {
+  let img = pictures.get(src)
+  if (!img) {
+    img = new Image()
+    img.decoding = 'async'
+    img.src = src
+    pictures.set(src, img)
+  }
+  if (img.complete && img.naturalWidth) then(img)
+  else img.addEventListener('load', () => then(img), { once: true })
+}
+const SHEET = { pr: 'leaf', artifact: 'lilac', plan: 'sky', link: 'teal' }
+const ICON = { pr: '⇡', artifact: '◈', plan: '✎', link: '↗', file: '▤' }
+
+// What a waiting question says over the critter: its header for the room,
+// the question itself for the thread you've selected.
+function askWords(ask) {
+  if (ask.type === 'question') {
+    const q = ask.questions?.[0]
+    return { text: `${q?.header ?? 'Question'}?`, long: q?.question }
+  }
+  if (ask.type === 'permission') return { text: `May I run ${toolName(ask.tool)}?`, long: `May I run ${toolName(ask.tool)} ${ask.summary ?? ''}?` }
+  return { text: 'Plan ready. Approve?', long: `Plan ready: ${(ask.plan ?? '').replace(/^#+\s*/, '').split('\n')[0]}. Approve?` }
+}
+
+// Once a frame rather than once per session: each thread's oldest open ask
+// (what openAsks(n)[0] gives), from one pass over the nodes, and each
+// thread's outputs, regrouped only when the list changes.
+const firstAsk = new Map()
+function gatherAsks() {
+  firstAsk.clear()
+  for (const x of nodes.values()) {
+    if (!x.asks?.length || (x.kind !== 'session' && x.kind !== 'agent')) continue
+    for (const a of x.asks) {
+      const had = firstAsk.get(x.session)
+      if (!had || a.t < had.t) firstAsk.set(x.session, { ...a, who: x })
+    }
+  }
+}
+let outKey = ''
+const outBy = new Map()
+const NONE = []
+function outputsBy(session) {
+  const key = `${outputs.length}|${outputs[0]?.session}|${outputs[0]?.id}|${outputs[0]?.t}`
+  if (key !== outKey) {
+    outKey = key
+    outBy.clear()
+    for (const o of outputs) {
+      if (!outBy.has(o.session)) outBy.set(o.session, [])
+      outBy.get(o.session).push(o)
+    }
+  }
+  return outBy.get(session) ?? NONE
+}
+
+function showWork(s, n, now, asleep) {
+  // 💬 a question it's holding the turn for, and the monitor turns into it.
+  const ask = asleep ? null : firstAsk.get(n.session)
+  // Its choices too, when the office can answer it: tap one on the bubble.
+  const choices = ask && answering.canAnswer(ask) ? answering.bubbleOptions(ask) : undefined
+  if (choices) answering.remember(ask)
+  talk.hold(s.id, 'ask', ask && { key: ask.id, type: ask.type, ...askWords(ask), thread: s.id, ...(choices && { options: choices, answerKey: answering.keyOf(ask) }) }, now)
+  s.desk.showAsk(ask?.type, ask?.type === 'permission' ? `#${palette.mustard.getHexString()}` : ask?.type === 'plan' ? `#${palette.sky.getHexString()}` : `#${palette.clay.getHexString()}`)
+
+  // 💭 the item in hand, while it works.
+  const doing = !asleep && n.turnOpen && n.todos?.find(i => i.status === 'in_progress')
+  talk.hold(s.id, 'think', doing && { key: doing.text, text: doing.active ?? doing.text }, now)
+
+  // The easel.
+  const todos = n.todos
+  s.easel.group.visible = Boolean(todos?.length) && !asleep
+  if (s.easel.group.visible) s.easel.draw(todos, `#${palette[s.tint].getHexString()}`, reduced() ? 0.5 : now)
+
+  // 💬 "look": something new it made.
+  const mine = outputsBy(n.session)
+  if (mine.length !== s.seen) {
+    const fresh = mine.slice(0, Math.max(0, mine.length - (s.seen ?? 0)))
+    s.seen = mine.length
+    const pic = fresh.find(o => o.type === 'image')
+    if (pic) {
+      picture(srcOf(pic), img => {
+        s.desk.showImage(img, clock() + 6)
+        s.desk.setPhoto(img)
+      })
+    }
+    const note = pic ?? fresh.find(o => o.type !== 'file')
+    if (note) {
+      const who = note.agent ? aid(n.session, note.agent) : s.id
+      const lead = { image: 'Look: ', pr: 'Opened a PR: ', artifact: 'Published ', plan: 'Wrote a plan: ', link: '' }[note.type] ?? ''
+      talk.say(agentViews.get(who) && !agentViews.get(who).gone ? who : s.id, 'made', {
+        type: note.type, text: `${lead}${note.title}`, src: note.type === 'image' ? srcOf(note) : undefined,
+        icon: ICON[note.type], thread: s.id,
+      }, now)
+      s.hopAt = now
+    }
+    s.desk.setTray(mine.filter(o => SHEET[o.type]).reverse().map(o => palette[SHEET[o.type]]))
+  }
 }
 
 // The wheel (or a trackpad pinch) sets where to zoom to, by as much as the
@@ -1094,7 +1605,7 @@ function zoom(dt) {
   if (zoomTo === null) return
   v.subVectors(camera.position, controls.target)
   const d = v.length()
-  const next = Math.abs(zoomTo / d - 1) < 0.001 ? zoomTo : d * Math.pow(zoomTo / d, 1 - Math.pow(ZOOM_EASE, dt))
+  const next = Math.abs(zoomTo / d - 1) < 0.001 || reduced() ? zoomTo : d * Math.pow(zoomTo / d, 1 - Math.pow(ZOOM_EASE, dt))
   camera.position.copy(controls.target).add(v.setLength(next))
   if (next === zoomTo) zoomTo = null
 }
@@ -1166,6 +1677,18 @@ function declutter() {
   }
 }
 
+// Saving battery (or not): the sharpness cap and the shadow map's size.
+export function setPower({ pixelRatio, shadowSize }) {
+  if (!renderer) return
+  renderer.setPixelRatio(Math.min(pixelRatio, devicePixelRatio))
+  if (sun.shadow.mapSize.x !== shadowSize) {
+    sun.shadow.mapSize.set(shadowSize, shadowSize)
+    sun.shadow.map?.dispose()
+    sun.shadow.map = null
+  }
+  renderer.shadowMap.needsUpdate = true
+}
+
 export function setSelected(id) {
   selected = id
 }
@@ -1179,30 +1702,32 @@ function runningTool(id) {
 }
 
 const k = n => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1000)}k`)
-const row = (name, value) => (value ? `<div><dt>${name}</dt><dd>${escapeHtml(value)}</dd></div>` : '')
+const row = (name, value, cls = '') => (value ? `<div><dt>${name}</dt><dd${cls ? ` class="${cls}"` : ''}>${escapeHtml(value)}</dd></div>` : '')
 
 function bubbleFor(pick) {
   const n = nodes.get(pick.id)
   if (!n) return ''
   const tool = runningTool(n.id)
-  const doing = tool ? `${tool.tool}${tool.summary ? ` ${tool.summary}` : ''}` : ''
-  const ctx = n.context?.tokens ? `${pct(fill(n))} · ${k(n.context.tokens)} of ${k(n.context.window)}` : ''
+  // Plain words, or the raw call in Developer view.
+  const doing = doingNow(n.id) ?? ''
+  // Energy in plain words; the numbers in Developer view.
+  const ctx = !n.context?.tokens ? '' : devView() ? `${pct(fill(n))} · ${k(n.context.tokens)} of ${k(n.context.window)}` : energy(fill(n)).word
   if (n.kind === 'agent') {
     const host = nodes.get(sid(n.session))
     const view = agentViews.get(n.id)
     const status = n.status !== 'done' ? (n.status === 'idle' ? 'waiting' : 'working')
       : view?.walk ? 'finished, heading for coffee' : view?.onBreak && !view.leaving ? 'finished, on a coffee break' : 'finished'
-    return `<b><i class="dot ${tintOf(n.type)}"></i>${escapeHtml(n.label)}</b>
+    return `<b><i class="dot ${tintOf(n.type)}"></i>${escapeHtml(who(n).title)}</b>
       ${n.description ? `<p>${escapeHtml(n.description)}</p>` : ''}
-      <dl>${row('status', status)}${row('doing', doing)}${row('context', ctx)}${row('model', n.model)}${row('tool calls', n.history ? String(n.history) : '')}${row('for', host?.label)}</dl>`
+      <dl>${row('status', status)}${row('doing', doing, 'words')}${row(devView() ? 'context' : 'energy', ctx)}${row('model', n.model)}${row('tool calls', n.history ? String(n.history) : '')}${row('for', host?.label)}</dl>`
   }
   const live = !resting(n)
   const helpers = [...nodes.values()].filter(x => x.kind === 'agent' && x.session === n.session && x.status !== 'done').length
   const lastDone = activity.get(n.id)?.actions[0]
-  const status = !live ? `ended ${ago(n.endedAt ?? n.lastAt)}` : tool || Date.now() - (n.lastAt ?? 0) < BUSY_MS ? 'working' : `waiting · last active ${ago(n.lastAt)}`
-  return `<b><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(n.prompts?.[0]?.text ?? n.label)}</b>
-    <p>${escapeHtml([n.projectName, n.gitBranch].filter(Boolean).join(' · '))}</p>
-    <dl>${row('status', status)}${row('doing', doing || (lastDone ? lastDone.text : ''))}${row('context', ctx)}${row('helpers', helpers ? String(helpers) : '')}${row('model', n.model)}${row('cost', n.costUsd !== undefined ? `$${n.costUsd.toFixed(2)}` : '')}</dl>`
+  const status = sessionViews.get(n.id)?.away ? (live ? 'gone home for the night · back when there’s work' : `ended ${ago(n.endedAt ?? n.lastAt)} · gone home`) : !live ? `ended ${ago(n.endedAt ?? n.lastAt)}` : tool || Date.now() - (n.lastAt ?? 0) < BUSY_MS ? 'working' : `waiting · last active ${ago(n.lastAt)}`
+  return `<b><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(goalTitle(n.prompts?.[0]?.text) || n.label)}</b>
+    <p>${escapeHtml([n.project ? projectName(n.project, n.projectName) : n.projectName, n.gitBranch].filter(Boolean).join(' · '))}</p>
+    <dl>${row('who', who(n).title)}${row('status', status)}${row('doing', doing || (lastDone ? say(lastDone) : ''), 'words')}${row(devView() ? 'context' : 'energy', ctx)}${row('helpers', helpers ? String(helpers) : '')}${row('model', n.model)}${row('cost', n.costUsd !== undefined ? `$${n.costUsd.toFixed(2)}` : '')}</dl>`
 }
 
 function placeBubble(refresh) {
@@ -1232,16 +1757,94 @@ function bindPointer() {
   renderer.domElement.addEventListener('pointerdown', e => { downAt = [e.clientX, e.clientY] })
   renderer.domElement.addEventListener('pointerup', e => {
     if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return
-    onPick(hit(e)?.id ?? null)
+    const p = hit(e)
+    if (p?.kind === 'frontdesk') return void document.dispatchEvent(new CustomEvent('office:frontdesk'))
+    onPick(p?.id ?? null)
   })
   renderer.domElement.addEventListener('pointermove', e => {
     if (e.buttons) { hoverPick = null; return }
     const p = hit(e)
-    hoverPick = p ?? null
+    hoverPick = p?.id ? p : null
     hovered = !p ? null : p.kind === 'session' ? p.id : agentViews.get(p.id)?.session ?? null
     renderer.domElement.style.cursor = p ? 'pointer' : ''
   })
   renderer.domElement.addEventListener('pointerleave', () => { hoverPick = null; hovered = null })
 }
+// Where things are on screen, for the help overlay (help.js): page
+// pixels, or null for what's out of sight. Picks a live thread in view,
+// one of its helpers, its rug, a room's sign and the coffee corner.
+export function landmarks() {
+  const box = stage.getBoundingClientRect()
+  const onScreen = p => {
+    const q = p.clone().project(camera)
+    if (q.z > 1) return null
+    const x = ((q.x + 1) / 2) * stage.clientWidth, y = ((1 - q.y) / 2) * stage.clientHeight
+    return x < 0 || y < 0 || x > stage.clientWidth || y > stage.clientHeight ? null : { x: x + box.left, y: y + box.top }
+  }
+  const centre = el => {
+    const r = el?.getBoundingClientRect()
+    return r?.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height } : null
+  }
+  // A live critter at its desk with helpers, if there is one, rather
+  // than one still walking in.
+  const views = [...sessionViews.values()].filter(s => nodes.get(s.id) && onScreen(s.group.position.clone().add(s.body.position)))
+    .sort((a, b) => Boolean(a.walk) - Boolean(b.walk))
+  const s = views.find(x => !resting(nodes.get(x.id)) && [...agentViews.values()].some(a => a.session === x.id && !a.gone)) ??
+    views.find(x => !resting(nodes.get(x.id))) ?? views[0]
+  const head = s && headOf(s.id)
+  const helper = s && [...agentViews.values()].find(a => a.session === s.id && !a.gone && onScreen(a.group.position))
+  const sign = [...rooms.values()].map(t => centre(t.label.el)).find(Boolean)
+  return {
+    critter: s && onScreen(s.group.position.clone().add(s.body.position).add(v.set(0, FLOOR_TOP + SS * s.char.height * 0.5, 0))),
+    beads: head && onScreen(head.add(v.set(0, 12, 0))),
+    ring: s && !s.walk ? onScreen(s.group.position.clone().add(v.set(0, FLOOR_TOP, 22))) : null,
+    helper: helper && onScreen(helper.group.position.clone().add(v.set(0, AG * helper.char.height * 0.6, 0))),
+    sign,
+    coffee: coffee && centre(coffee.label.el),
+  }
+}
+
+// The critter under a point on the page (a drop, say), or null.
+const dropRay = new THREE.Raycaster()
+export function critterAt(clientX, clientY) {
+  if (!renderer) return null
+  const r = renderer.domElement.getBoundingClientRect()
+  dropRay.setFromCamera(new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1), camera)
+  return dropRay.intersectObjects(scene.children, true).find(h => h.object.userData.pick && h.object.visible)?.object.userData.pick?.id ?? null
+}
+
+// ---------------------------------------------------------------------------
+// A snapshot: the office as drawn right now, cropped to what the panels
+// leave free, with the room signs and names where the page shows them. The
+// canvas doesn't keep its picture once it's on screen (keeping it,
+// preserveDrawingBuffer, would slow every frame), so this draws a frame and
+// copies it in the same task, before the browser clears it.
+
+export function capture() {
+  renderer.render(scene, camera)
+  const src = renderer.domElement
+  const ratio = renderer.getPixelRatio()
+  const crop = cropOf(src.width, src.height, insets, ratio)
+  const shot = document.createElement('canvas')
+  shot.width = crop.w
+  shot.height = crop.h
+  shot.getContext('2d').drawImage(src, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h)
+  const tags = []
+  const place = (obj, text, kind) => {
+    if (!text || !obj.visible) return
+    const p = obj.getWorldPosition(new THREE.Vector3()).project(camera)
+    const x = ((p.x + 1) / 2) * src.width - crop.x
+    const y = ((1 - p.y) / 2) * src.height - crop.y
+    if (p.z > 1 || x < 0 || y < 0 || x > crop.w || y > crop.h) return
+    tags.push({ x, y, text, kind })
+  }
+  for (const [id, t] of rooms) place(t.label.obj, t.label.el.querySelector('.pname')?.textContent || nodes.get(id)?.label, 'room')
+  for (const s of sessionViews.values()) {
+    const n = nodes.get(s.id)
+    if (n) place(s.label.obj, `${who(n).name}${s.away ? ' · home' : ''}`, 'name')
+  }
+  return { shot, tags, ratio }
+}
+
 // ?debug reaches these through window.cluster.table.debug.
-export const debug = { get renderer() { return renderer }, get size() { return size }, sessionViews, agentViews, rooms, get camera() { return camera }, get stage() { return stage }, get controls() { return controls }, get coffee() { return coffee }, greeted }
+export const debug = { setHour(h) { hourOverride = h; daylightAt = -1 }, get renderer() { return renderer }, get size() { return size }, sessionViews, agentViews, rooms, get camera() { return camera }, get stage() { return stage }, get controls() { return controls }, get coffee() { return coffee }, greeted }

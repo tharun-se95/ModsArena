@@ -15,23 +15,19 @@ A live office of everything Claude Code is doing on your machine. Each project g
 
 ### Quick start
 
-You need Claude Code and [Node](https://nodejs.org) 18 or newer. In Claude Code:
+You need Claude Code and [Node](https://nodejs.org) 18 or newer. Two steps, in Claude Code:
 
-```
-/plugin marketplace add tharun-se95/ModsArena
-/plugin install agent-office@modsarena
-```
+1. **Install:** `/plugin install agent-office --marketplace tharun-se95/ModsArena`
+2. **Open it:** type **`/office`**. It starts the office's bridge if it isn't running and opens the office in your browser. Every Claude Code session on your machine, in any project, joins the same office.
 
-On Claude Code 2.1.275 or newer, one command does both: `/plugin install agent-office --marketplace tharun-se95/ModsArena`.
+That's all. The first time, Agent Office offers to keep itself up to date: type **`/office auto-update`** and new versions arrive on their own from the next time Claude Code starts (`/office auto-update off` turns that off again). You can also flip **Updates: automatic** in the office's Settings menu.
 
-**Turn on updates.** Claude Code doesn't update plugins from a marketplace like this one unless you ask it to. Type `/plugin`, open **Marketplaces**, pick **modsarena** and choose **Enable auto-update**, and new versions arrive on their own after a session starts.
-
-Then type **`/office`**. It starts the office's bridge if it isn't running and opens the office in your browser. Every Claude Code session on your machine, in any project, joins the same office. That's all.
+On Claude Code older than 2.1.275, install in two commands instead: `/plugin marketplace add tharun-se95/ModsArena`, then `/plugin install agent-office@modsarena`. To turn on updates by hand: type `/plugin`, open **Marketplaces**, pick **modsarena** and choose **Enable auto-update**.
 
 - Click a critter, then **Transcript**, to follow its conversation and message it. See [Talk to your agents](#talk-to-your-agents).
-- `/office status` says whether the bridge is running, what it has seen, and what this session is doing.
+- `/office status` says whether the bridge is running, what it has seen, what this session is doing, and whether updates are automatic.
 - `/office` appears once a session has started and the plugin's hooks are running. Where it isn't listed (before the first message in the desktop app, or anywhere the hooks don't run), the `agent-office:office` skill opens the office instead.
-- Without auto-update, `claude plugin update agent-office@modsarena` fetches a new version. After an update, the next session (or `/office`) swaps the running bridge for the new one, unless the office is open in a browser; then `/office` does it.
+- Without auto-update, `claude plugin update agent-office@modsarena` fetches a new version. Outside Claude Code, `npx github:tharun-se95/ModsArena auto-update` turns auto-update on too (it backs up your settings first and changes only that one switch). After an update, the next session (or `/office`) swaps the running bridge for the new one, unless the office is open in a browser; then `/office` does it.
 - The status line shows `◉ office N agents · M tools` while work is in flight.
 
 <details>
@@ -60,6 +56,7 @@ npx github:tharun-se95/ModsArena demo            # sample activity on http://127
 | You see | Do this |
 | --- | --- |
 | `/office` says Node is missing or too old | Install Node 18 or newer from [nodejs.org](https://nodejs.org), then run `/office` again. |
+| `/office auto-update` says the marketplace isn't in your settings | Agent Office was installed some other way (for one project only, or from a copy). Turn updates on from `/plugin` → **Marketplaces** → **modsarena** instead. |
 | "The bridge didn't answer" | Something else may be using port 7337. Run `/office status`, or pick another port with `/plugin configure agent-office@modsarena` (option `port`). |
 | The page opens but the office is empty | It fills in as sessions work. Sessions that started before the bridge appear from their next event; past sessions from the last 14 days show as sleeping critters (tick **Past sessions**). |
 | The browser didn't open | Open the address `/office` printed, normally http://127.0.0.1:7337. |
@@ -120,12 +117,17 @@ The box at the bottom sends it a message:
 - **To a session:** the message becomes its next prompt, marked as from Agent Office. If the session is mid-turn, it waits until that turn ends.
 - **To a subagent:** the message goes to that subagent directly. A finished one is resumed to answer, which uses tokens.
 - **Past sessions** show their transcript but no message box. Resume one in Claude Code to talk to it again.
+- **Hand it on:** drag a letter from **Waiting on you** (a thread's last answer), or anything a thread made (a picture, pull request, artifact or file card), onto any critter. A note opens with the message worded for it; edit it if you like and send. From the keyboard, focus the card and press **H** to pick who gets it.
+- **@mentions:** in a reply, type **@** to pick one of the thread's agents by name; the message goes to that agent instead of the thread.
+- **Quick actions** under a thread's name: **Explain what you did** and **Wrap up** send a ready-worded message; **Stop** (it asks once more) ends the turn a session is running, as Esc would in Claude Code. A single subagent can't be stopped from the office.
 
 Enter sends and Shift+Enter starts a new line.
 
 ![The Transcript tab: a session's prompts, replies and tool calls, a message from the office, and the session's answer](docs/agent-office-chat.png)
 
 The message stays on the clipboard with its status until it shows up in the transcript, and the reply appears below it. Tool approvals still pop up in Claude Code itself: chat can't do anything your permission settings don't already allow. It needs the plugin; the settings-hooks fallback can't receive messages. In the demo, messages get a sample reply.
+
+**Answering from the office.** When Claude asks you a question (with options to pick from), it shows up as a card in **Waiting on you** and in the critter's speech bubble. Tap an option, or type your own answer, and the thread carries on. Claude Code's own question stays open in the terminal the whole time, so you can answer wherever is handier: whichever answer comes first counts. A plan waiting for approval can be sent back from the office with a note ("keep planning"), but approving one has to happen in Claude Code, since only Claude Code can switch Claude out of planning. This needs the plugin, like messages.
 
 **How it's kept safe.** The bridge only listens on `127.0.0.1`, but any web page you visit can send requests there, so:
 
@@ -154,7 +156,7 @@ Claude Code ──(mod hooks / settings hooks)──► bridge :7337 ──(SSE)
 ```
 
 - **`agent-office/`** is the Claude Code plugin (a mod), listed in this repository's marketplace (`.claude-plugin/marketplace.json`). It hooks `session.start`, `session.measure`, `session.compact`, `turn.step`, `turn.start`, `turn.complete`, `agent.spawn` and `tool.call`. Every tool call is attributed to the agent loop that made it (`agentId`), and every subagent to its parent (`parentAgentId`). Hooks run in a sandbox without Node, so events are queued in memory and flushed to the bridge every 250 ms with `$.http.fetch`. Context readings are coalesced so only the newest is sent, and a tool call never waits on the visualizer. On session start the mod also starts the bridge (`$.process.spawn`) if none is running, and `/office` waits for it before opening the page.
-- **`agent-office/server/`** is the bridge, plus `cli.mjs` (what `npx github:tharun-se95/ModsArena` runs) and `settings-hooks.mjs` (the settings-hooks installer). It uses only Node built-ins and has no dependencies. It accepts events on `POST /event` and keeps the last 8,000, plus the newest context reading per session and agent. It streams them to browsers over Server-Sent Events and replays the backlog when a browser connects. `GET /history` summarizes recent transcripts, cached by file modification time. `GET /transcript` follows one session's or subagent's transcript from a byte offset (`transcript.mjs`). `POST /chat` queues a message from the office, and the session's mod collects it from `GET /inbox` (`chat.mjs`, with the checks in `guard.mjs`). One bridge serves every session on the machine. `GET /healthz` reports its version; a bridge the mod started (`--managed`) steps down on `POST /shutdown` when a newer copy's bridge starts with `--replace`, so an update doesn't leave the old one serving the old page. It strips any credentials from remote URLs before showing them.
+- **`agent-office/server/`** is the bridge, plus `cli.mjs` (what `npx github:tharun-se95/ModsArena` runs) and `settings-hooks.mjs` (the settings-hooks installer). It uses only Node built-ins and has no dependencies. It accepts events on `POST /event` and keeps the last 8,000, plus the newest context reading per session and agent. It streams them to browsers over Server-Sent Events and replays the backlog when a browser connects. `GET /history` summarizes recent transcripts, cached by file modification time. `GET /transcript` follows one session's or subagent's transcript from a byte offset (`transcript.mjs`). `POST /chat` queues a message from the office, and the session's mod collects it from `GET /inbox` (`chat.mjs`, with the checks in `guard.mjs`). `POST /answer` takes an answer to a question a session is holding, under the same checks, and the session's mod waits for it on `GET /answer/wait` (`asks.mjs`). One bridge serves every session on the machine. `GET /healthz` reports its version; a bridge the mod started (`--managed`) steps down on `POST /shutdown` when a newer copy's bridge starts with `--replace`, so an update doesn't leave the old one serving the old page. It strips any credentials from remote URLs before showing them.
 - **`visualizer/`** is the page's source, in plain Three.js: `model.js` turns events into projects, sessions, agents and tools; `words.js` turns the same events into sentences; `table.js` lays out the office and animates the critters (`office.js` builds the rooms, desks, coffee corner and office shell; `character.js` builds each critter); and `panels.js` writes the columns around it. Colors come from CSS tokens on the page, so it follows your light or dark setting. It's built into `agent-office/server/public/app.js`, which is committed, so running it needs only Node; CI checks the committed file matches its source.
 
 ### Options

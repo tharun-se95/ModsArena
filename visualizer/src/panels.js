@@ -9,10 +9,21 @@
 //                          which turns into a clipboard for the thread or
 //                          agent you pick: Conversation, Team, Details
 
-import { nodes, fill, warnings, sid, WARN_AT, threadState, agentState, teamOf, lineage, mailOf } from './model.js'
-import { moments, activity, escapeHtml, quote, ago } from './words.js'
+import { nodes, outputs, fill, warnings, sid, WARN_AT, threadState, agentState, teamOf, lineage, mailOf } from './model.js'
+import { moments, activity, escapeHtml, quote, ago, say, doingNow, momentText } from './words.js'
 import { pct, level, tintOf, sessionTint, roomKey } from './table.js'
 import * as transcript from './transcript.js'
+import * as assets from './assets.js'
+import { progressHtml } from './progress.js'
+import * as deliverables from './deliverables.js'
+import { goalTitle, projectName, projectIcon, energy, energyMeter } from './names.js'
+import { who } from './critters.js'
+import { devView } from './prefs.js'
+import { openProjectEditor } from './project-editor.js'
+import * as actions from './actions.js'
+import * as mentions from './mentions.js'
+import * as milestones from './milestones.js'
+import { projectNote } from './spend.js'
 
 const $ = sel => document.querySelector(sel)
 const k = n => (n === undefined ? '—' : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : `${Math.round(n / 1000)}k`)
@@ -21,12 +32,18 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 const INBOX_KEEP = 4
 const PAST_PER_PROJECT = 3
 
-// Cards and details use the whole first prompt; the table keeps it short.
-const title = n => n.prompts?.[0]?.text ?? n.label
+// Cards and details title a thread by its goal (the first prompt, tidied
+// up); the table keeps it short.
+const title = n => goalTitle(n.prompts?.[0]?.text) || n.label
+// A project as you named it, or prettified: acme/payments-api is "Payments API".
+const where = n => (n.project ? projectName(n.project, n.projectName) : n.projectName ?? 'Elsewhere')
+// How full a window is: an energy meter in plain words, the exact
+// percentage in Developer view.
+const ctxBadge = (f, opts) => (devView() ? `<span class="pct ${level(f)}">${pct(f)}</span>` : energyMeter(f, opts))
 const isLive = n => n.kind === 'session' && !n.past && n.status !== 'done'
 
 const STATE_WORDS = {
-  working: 'Working', waiting: 'Waiting on you', stuck: 'Needs a look', ended: 'Ended',
+  working: 'Working', waiting: 'Waiting on you', asking: 'Needs your answer', stuck: 'Needs a look', ended: 'Ended',
   idle: 'Idle', done: 'Done', failed: 'Stopped',
 }
 const pill = state => `<span class="pill ${state}">${STATE_WORDS[state]}</span>`
@@ -40,14 +57,16 @@ function projectsList() {
   const byProject = new Map()
   for (const n of nodes.values()) {
     if (n.kind !== 'session') continue
-    const key = n.projectName ?? 'Elsewhere'
+    const key = n.project ?? 'Elsewhere'
     if (!byProject.has(key)) byProject.set(key, [])
     byProject.get(key).push(n)
   }
-  return [...byProject].map(([name, list]) => {
+  return [...byProject].map(([id, list]) => {
+    const raw = list[0].projectName ?? 'Elsewhere'
+    const name = where(list[0])
     const live = list.filter(isLive).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0))
     const past = list.filter(n => !isLive(n)).sort((a, b) => (b.endedAt ?? b.lastAt ?? 0) - (a.endedAt ?? a.lastAt ?? 0)).slice(0, PAST_PER_PROJECT)
-    return { name, live, past }
+    return { id, raw, name, live, past }
   }).sort((a, b) => (b.live.length > 0) - (a.live.length > 0) || a.name.localeCompare(b.name))
 }
 
@@ -69,8 +88,10 @@ export function order() {
 
 function inboxThreads(running) {
   return [...nodes.values()]
-    .filter(n => isLive(n) && ['waiting', 'stuck'].includes(threadState(n, running)))
-    .sort((a, b) => (a.answeredAt ?? a.startedAt ?? 0) - (b.answeredAt ?? b.startedAt ?? 0))
+    .filter(n => isLive(n) && ['asking', 'waiting', 'stuck'].includes(threadState(n, running)))
+    // A turn held on a question comes first: nothing moves until you answer.
+    .sort((a, b) => (threadState(b, running) === 'asking') - (threadState(a, running) === 'asking') ||
+      (a.answeredAt ?? a.startedAt ?? 0) - (b.answeredAt ?? b.startedAt ?? 0))
 }
 
 function headline(running) {
@@ -85,17 +106,32 @@ function headline(running) {
   return `${yours} waiting on you, ${working} working${helping}.`
 }
 
+let answerable = () => false // (ask) -> can the office answer it
+
 function cardInfo(n, running) {
   const state = threadState(n, running)
+  if (state === 'asking') {
+    const [first, ...more] = assets.asksFor(n)
+    return `
+    <button class="card-head" data-pick="${escapeHtml(n.id)}" data-hover="${escapeHtml(n.id)}" title="Open the conversation">
+      <span class="card-where"><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(where(n))}${n.thread ? '<span class="badge">thread</span>' : ''}<time>${ago(first.t)}</time></span>
+      <b>${escapeHtml(title(n))}</b>
+    </button>
+    ${assets.askCard(first, { answerable: answerable(first), compact: true })}
+    ${more.length ? `<p class="ask-more">${plural(more.length, 'more question')} after this one</p>` : ''}`
+  }
   const said = n.answer?.text
   const blurb = state === 'stuck'
     ? (n.lastReason === 'aborted' ? 'You stopped its last turn.' : n.lastReason === 'refusal' ? 'Its last turn ended on a refusal.' : 'Its last turn ended on an error.')
     : state === 'working' ? 'Back at work.'
       : said ? quote(said) : n.turns ? 'Done with your last request.' : 'Ready for its first prompt.'
+  // A letter with an answer in it can be passed on: dragged onto a critter, or H.
+  const letter = said && state !== 'working' ? ` draggable="true" data-handoff="letter|${escapeHtml(n.id)}"` : ''
   return `
-    <button class="card-head" data-pick="${escapeHtml(n.id)}" data-hover="${escapeHtml(n.id)}" title="Open the conversation">
-      <span class="card-where"><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(n.projectName ?? 'Elsewhere')}${n.thread ? '<span class="badge">thread</span>' : ''}<time>${ago(n.answeredAt ?? n.startedAt)}</time></span>
+    <button class="card-head" data-pick="${escapeHtml(n.id)}" data-hover="${escapeHtml(n.id)}"${letter} title="${letter ? 'Open the conversation. Drag it onto a critter (or press H) to pass it on' : 'Open the conversation'}">
+      <span class="card-where"><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(where(n))}${n.thread ? '<span class="badge">thread</span>' : ''}<time>${ago(n.answeredAt ?? n.startedAt)}</time></span>
       <b>${escapeHtml(title(n))}</b>
+      ${assets.progress(n)}
       <span class="card-said">${escapeHtml(blurb)}</span>
     </button>`
 }
@@ -110,13 +146,14 @@ function cardElement(n) {
   li.innerHTML = `
     <div class="card-info"></div>
     <form class="card-reply">
-      <textarea rows="1" aria-label="Reply to ${escapeHtml(title(n))}" placeholder="Reply…"></textarea>
-      <button type="submit" aria-label="Send">↵</button>
+      <textarea rows="1" aria-label="Reply to ${escapeHtml(title(n))}" placeholder="Reply… (@ to pick an agent)"></textarea>
+      <button type="submit" aria-label="Send reply">↵</button>
       <p class="card-status" hidden></p>
     </form>`
   const form = li.querySelector('form')
   const field = form.querySelector('textarea')
   field.value = drafts.get(n.id) ?? ''
+  mentions.attach(field, () => nodes.get(n.id))
   field.addEventListener('input', () => drafts.set(n.id, field.value))
   field.addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -133,7 +170,10 @@ function cardElement(n) {
     drafts.delete(n.id)
     sending.set(n.id, { status: 'Sending…' })
     showStatus(li, n.id)
-    const result = await transcript.sendTo(node, text)
+    // @name sends it to that agent of the thread instead.
+    const to = mentions.resolve(node, text)
+    const result = await transcript.sendTo(to.node, to.text)
+    if (result.ok && to.to) result.status = `Sent to ${to.node.label}`
     sending.set(n.id, result)
     showStatus(li, n.id)
     if (!result.ok) {
@@ -174,8 +214,10 @@ function renderInbox(running) {
     if (list.children[i] !== li && !li.contains(document.activeElement)) list.insertBefore(li, list.children[i] ?? null)
     li.classList.remove('gone')
     li.classList.toggle('stuck', threadState(n, running) === 'stuck')
+    li.classList.toggle('asking', threadState(n, running) === 'asking')
     patch(li.querySelector('.card-info'), cardInfo(n, running))
-    li.querySelector('form').hidden = !transcript.canMessage()
+    // A question is answered with its options, not a reply.
+    li.querySelector('form').hidden = !transcript.canMessage() || threadState(n, running) === 'asking'
   })
   // A thread you're still replying to that went back to work keeps its
   // card, dimmed, until you're done with it.
@@ -195,7 +237,9 @@ function fullWindows() {
   return warnings().slice(0, 3).map(n => {
     const host = n.kind === 'agent' ? nodes.get(sid(n.session)) : null
     const name = n.kind === 'agent' ? `${n.label} in ${quote(host?.label ?? '')}` : quote(n.label)
-    return `<li><button data-pick="${escapeHtml(n.id)}"><span class="pct ${level(fill(n))}">${pct(fill(n))}</span> ${escapeHtml(name)} will compact soon</button></li>`
+    return devView()
+      ? `<li><button data-pick="${escapeHtml(n.id)}"><span class="pct ${level(fill(n))}">${pct(fill(n))}</span> ${escapeHtml(name)} will compact soon</button></li>`
+      : `<li><button data-pick="${escapeHtml(n.id)}">${energyMeter(fill(n))} ${escapeHtml(name)} will tidy up its memory soon</button></li>`
   }).join('')
 }
 
@@ -203,13 +247,27 @@ function fullWindows() {
 // Activity: every moment, or only messages, or only problems.
 
 let feed = 'all'
-const FEEDS = { all: () => true, mail: m => m.tone === 'mail', bad: m => m.tone === 'bad' }
+const FEEDS = { all: () => true, mail: m => m.tone === 'mail', bad: m => ['bad', 'block', 'bumps'].includes(m.tone) }
+// What leads each outcome: finished, made something, asked you.
+const MARKS = { done: '✓', made: '✦', ask: '?', block: '!', cleared: '✓' }
+const openBumps = new Set() // the bump lines you've opened, by when they started
+
+function momentRow(m) {
+  const mark = MARKS[m.tone] ? `<i class="mark" aria-hidden="true">${MARKS[m.tone]}</i>` : ''
+  const answered = m.answer ? ` <em>You picked ${escapeHtml(quote(m.answer))}.</em>` : ''
+  if (m.tone === 'bumps') {
+    const key = `${m.target}|${m.bumps.at(-1)?.t}`
+    return `<li class="bumps"><details data-bumps="${escapeHtml(key)}" ${openBumps.has(key) ? 'open' : ''}><summary><span>${escapeHtml(m.text)}</span><time>${ago(m.t)}</time></summary>
+      <ul>${m.bumps.map(b => `<li>${escapeHtml(devView() ? b.raw : b.text)}<time>${ago(b.t)}</time></li>`).join('')}</ul>
+      <button data-pick="${escapeHtml(m.target ?? '')}">Open the thread</button></details></li>`
+  }
+  return `<li class="${m.tone}"><button data-pick="${escapeHtml(m.target ?? '')}"><span>${mark}${escapeHtml(momentText(m))}${answered}</span><time>${ago(m.t)}</time></button></li>`
+}
 
 function activityList() {
   const list = moments.filter(FEEDS[feed]).slice(0, 14)
   const empty = { all: 'Quiet so far.', mail: 'No messages between agents yet.', bad: 'Nothing has gone wrong.' }[feed]
-  return list.map(m => `<li class="${m.tone}"><button data-pick="${escapeHtml(m.target ?? '')}"><span>${escapeHtml(m.text)}</span><time>${ago(m.t)}</time></button></li>`).join('') ||
-    `<li class="muted"><span>${empty}</span></li>`
+  return list.map(momentRow).join('') || `<li class="muted"><span>${empty}</span></li>`
 }
 
 // ---------------------------------------------------------------------------
@@ -221,8 +279,8 @@ function agentRow(a, depth) {
   return `
     <button class="agent-row ${state}" style="--depth:${depth}" data-pick="${escapeHtml(a.id)}" data-hover="${escapeHtml(a.id)}">
       <i class="dot ${tintOf(a.type)}"></i>
-      <span class="aname">${escapeHtml(a.label)}${a.description && a.description !== a.label ? `<span class="muted"> · ${escapeHtml(a.description)}</span>` : ''}</span>
-      <span class="astate">${a.mailAt && Date.now() - a.mailAt < 8000 ? '<i class="env" title="Just got a message">✉</i>' : ''}${state === 'working' && a.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span>` : `<i class="sdot ${state}" title="${STATE_WORDS[state]}"></i>`}</span>
+      <span class="aname">${escapeHtml(who(a).title)}${a.description && a.description !== a.label ? `<span class="muted"> · ${escapeHtml(a.description)}</span>` : ''}</span>
+      <span class="astate">${a.mailAt && Date.now() - a.mailAt < 8000 ? '<i class="env" title="Just got a message">✉</i>' : ''}${state === 'working' && a.context?.tokens ? ctxBadge(f, { bare: true }) : `<i class="sdot ${state}" title="${STATE_WORDS[state]}"></i>`}</span>
     </button>`
 }
 
@@ -252,7 +310,8 @@ function threadRow(n, running, selected) {
   const state = threadState(n, running)
   const f = fill(n)
   const doing = !live ? `ended ${ago(n.endedAt ?? n.lastAt)}`
-    : state === 'working' ? (activity.get(n.id)?.actions[0]?.text ?? 'working')
+    : state === 'asking' ? `asks: ${assets.asksFor(n)[0]?.questions?.[0]?.question ?? assets.asksFor(n)[0]?.summary ?? 'a plan to approve'}`
+    : state === 'working' ? (n.todos?.find(i => i.status === 'in_progress')?.text ?? doingNow(n.id) ?? (activity.get(n.id)?.actions[0] ? say(activity.get(n.id).actions[0]) : 'working'))
       : state === 'stuck' ? 'its last turn didn’t finish'
         : n.answer?.text ? `said ${quote(n.answer.text)}` : 'ready for you'
   return `
@@ -260,8 +319,9 @@ function threadRow(n, running, selected) {
       <button class="entry" data-pick="${escapeHtml(n.id)}" data-hover="${escapeHtml(n.id)}">
         <i class="dot ${sessionTint(n.session)}"></i>
         <span class="ename">${escapeHtml(title(n))}${n.thread ? '<span class="badge" title="A claude.ai project’s coordinator handed this session its work">thread</span>' : ''}</span>
-        ${live ? pill(state) : n.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span>` : '<span></span>'}
-        <span class="estate">${live && n.context?.tokens ? `<span class="pct ${level(f)}">${pct(f)}</span> · ` : ''}${escapeHtml(doing)}</span>
+        ${live ? pill(state) : n.context?.tokens ? ctxBadge(f, { bare: true }) : '<span></span>'}
+        ${live ? assets.progress(n) : ''}
+        <span class="estate">${escapeHtml(who(n).name)} · ${live && n.context?.tokens ? `${ctxBadge(f)} · ` : ''}${escapeHtml(doing)}</span>
       </button>
       ${live ? teamRows(n) : ''}
     </div>`
@@ -275,7 +335,7 @@ function directory(running, selected) {
     <h2 class="sideh">Projects <small>${live.length ? `${working} working · ${live.length - working} with you` : 'none live'}</small></h2>
     ${projects.map(p => `
       <section class="project">
-        <p class="room"><i class="room-${roomKey(p.name)}"></i>${escapeHtml(p.name)}<small>${p.live.length ? plural(p.live.length, 'thread') : 'earlier'}</small></p>
+        <p class="room"><button type="button" class="picon room-${roomKey(p.raw)}" data-edit-project="${escapeHtml(p.id)}" data-raw="${escapeHtml(p.raw)}" title="Rename or change the icon" aria-label="Rename ${escapeHtml(p.name)} or change its icon">${projectIcon(p.id, p.raw)}</button>${escapeHtml(p.name)}<small>${p.live.length ? plural(p.live.length, 'thread') : 'earlier'}</small></p>${projectNote(p.raw)}
         ${p.live.map(n => threadRow(n, running, selected)).join('')}
         ${p.past.length ? `${p.live.length ? '<p class="earlier">Earlier</p>' : ''}${p.past.map(n => threadRow(n, running, selected)).join('')}` : ''}
       </section>`).join('') || '<p class="muted">No sessions yet. Start Claude Code anywhere and it appears here.</p>'}`
@@ -306,9 +366,23 @@ function limits(n) {
   return n.rateLimits.map(r => line(`${escapeHtml(r.kind.replace('_', ' '))} limit`, `${Math.round(r.percentUsed)}% used`)).join('')
 }
 
+// In plain words: how much energy it has left, and what that means.
+const ENERGY_SAYS = {
+  fresh: 'Plenty of room to think.', busy: 'Has a fair bit on its mind.',
+  full: 'Its memory of this conversation is filling up.', tired: 'Nearly out of room. It will tidy up its memory soon, and keep going.',
+}
+
 function gauge(n, live, whose) {
   if (!n.context?.tokens) return ''
   const f = fill(n)
+  if (!devView()) {
+    const e = energy(f)
+    const tip = `${pct(f)} of ${whose} context window ${live ? 'is' : 'was'} in use: ${k(n.context.tokens)} of ${k(n.context.window)} tokens`
+    return `
+    <div class="dgauge" title="${escapeHtml(tip)}"><span class="big energy-word ${e.key}">${e.word}</span><span>${live ? ENERGY_SAYS[e.key] : 'When it ended.'}</span></div>
+    <span class="meter energy-bar" title="${escapeHtml(tip)}"><span class="${e.key}" style="width:${(Math.max(0.04, 1 - f) * 100).toFixed(1)}%"></span></span>
+    ${n.compactions?.length ? `<p class="dmeta">Tidied up its memory ${plural(n.compactions.length, 'time')}</p>` : ''}`
+  }
   return `
     <div class="dgauge"><span class="big ${level(f)}">${pct(f)}</span><span>of ${whose} context window ${live ? 'is' : 'was'} in use${live && f >= WARN_AT ? '. It will compact soon.' : '.'}</span></div>
     <span class="meter"><span class="${level(f)}" style="width:${(f * 100).toFixed(1)}%"></span></span>
@@ -318,8 +392,8 @@ function gauge(n, live, whose) {
 // Project › thread › agent › agent, each a way back up.
 function crumbs(n) {
   const chain = lineage(n)
-  const parts = [`<button data-back>${escapeHtml(chain[0]?.projectName ?? 'Projects')}</button>`]
-  chain.slice(0, -1).forEach(x => parts.push(`<button data-pick="${escapeHtml(x.id)}">${escapeHtml(x.label)}</button>`))
+  const parts = [`<button data-back>${escapeHtml(chain[0] ? where(chain[0]) : 'Projects')}</button>`]
+  chain.slice(0, -1).forEach(x => parts.push(`<button data-pick="${escapeHtml(x.id)}">${escapeHtml(x.kind === 'agent' ? who(x).name : x.label)}</button>`))
   return `<nav class="crumbs" aria-label="Where this is">${parts.join('<span aria-hidden="true">›</span>')}</nav>`
 }
 
@@ -328,7 +402,7 @@ function messagesFor(n) {
   const list = mailOf(host).filter(m => n.kind === 'session' || m.from === n.id || m.to === n.id).slice(0, 5)
   if (!list.length) return ''
   return `<h3>Messages</h3>${list.map(m => `
-    <p class="mail"><b>${escapeHtml(m.fromName ?? 'Someone')} → ${escapeHtml(m.toName ?? 'someone')}</b>${m.text ? `<span>${escapeHtml(m.text)}</span>` : ''}<time>${ago(m.t)}</time></p>`).join('')}`
+    <p class="mail"><b>${escapeHtml(m.fromName ?? 'Someone')} → ${escapeHtml(m.toName ?? 'someone')}</b>${m.text ? `<span>${escapeHtml(momentText(m))}</span>` : ''}<time>${ago(m.t)}</time></p>`).join('')}`
 }
 
 // The Team tab: the lead, then everyone it spawned, nested.
@@ -342,13 +416,13 @@ function teamTab(n, running) {
   const rows = []
   const walk = (branch, d) => branch.forEach(({ node, children }) => {
     const state = agentState(node)
-    const kind = [node.teammate ? 'teammate' : node.fork ? 'fork' : node.background ? 'background' : '', node.type !== node.label ? node.type : ''].filter(Boolean).join(' · ')
+    const kind = [node.teammate ? 'teammate' : node.fork ? 'fork' : node.background ? 'background' : '', node.name ? '' : node.type].filter(Boolean).join(' · ')
     rows.push(`
       <button class="member ${node.id === n.id ? 'on' : ''}" style="--depth:${d}" data-pick="${escapeHtml(node.id)}" data-hover="${escapeHtml(node.id)}">
         <i class="dot ${tintOf(node.type)}"></i>
-        <span class="mname">${escapeHtml(node.label)}${kind ? `<small>${escapeHtml(kind)}</small>` : ''}</span>
+        <span class="mname">${escapeHtml(who(node).title)}${kind ? `<small>${escapeHtml(kind)}</small>` : ''}</span>
         ${pill(state)}
-        <span class="mdesc">${escapeHtml(node.description ?? '')}${node.context?.tokens ? ` · ${pct(fill(node))} of its window` : ''}</span>
+        <span class="mdesc">${escapeHtml(node.description ?? '')}${node.context?.tokens ? (devView() ? ` · ${pct(fill(node))} of its window` : ` · ${energy(fill(node)).word}`) : ''}</span>
       </button>`)
     walk(children, d + 1)
   })
@@ -356,7 +430,7 @@ function teamTab(n, running) {
   return `
     <button class="member lead ${host.id === n.id ? 'on' : ''}" style="--depth:0" data-pick="${escapeHtml(host.id)}">
       <i class="dot ${sessionTint(host.session)}"></i>
-      <span class="mname">Lead<small>the main conversation</small></span>
+      <span class="mname">${escapeHtml(who(host).title)}<small>the main conversation</small></span>
       ${pill(threadState(host, running))}
       <span class="mdesc">${host.model ? escapeHtml(host.model) : ''}</span>
     </button>
@@ -380,8 +454,21 @@ function sessionDetails(n) {
     ${facts ? `<p class="dmeta">${escapeHtml(facts)}</p>` : ''}
     ${live ? breakdown(n) + limits(n) : ''}
     ${files.length ? `<h3>Files it has worked on</h3>${files.map(fileLine).join('')}` : ''}
-    ${act?.actions.length ? `<h3>Recently</h3>${act.actions.slice(0, 8).map(x => line(escapeHtml(x.text), ago(x.t), x.ok ? '' : 'bad')).join('')}` : ''}
-    ${n.prompts?.length ? `<h3>What you asked</h3>${[...n.prompts].reverse().slice(0, 6).map(p => line(asked(p), ago(p.t))).join('')}` : ''}`
+    ${act?.actions.length ? `<h3>Recently</h3>${act.actions.slice(0, 8).map(x => line(escapeHtml(say(x)), ago(x.t), x.ok ? '' : 'bad')).join('')}` : ''}
+    ${n.prompts?.length ? `<h3>What you asked</h3>${[...n.prompts].reverse().slice(0, 6).map(p => line(asked(p), ago(p.t))).join('')}` : ''}
+    ${projectMilestones(n)}`
+}
+
+// What the thread's project has reached so far, and how close the rest are.
+const day = t => new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+function projectMilestones(n) {
+  if (!n.project) return ''
+  const list = milestones.progress(milestones.mine(), n.project)
+  const got = list.filter(m => m.at).length
+  return `<h3>Milestones <small class="muted">${escapeHtml(where(n))} · ${got} of ${list.length}</small></h3>
+    <ul class="milestones">${list.map(m => `
+      <li class="${m.at ? 'got' : ''}"><i aria-hidden="true">${m.at ? '★' : '☆'}</i><span>${escapeHtml(m.title)}${m.note ? `<small>${escapeHtml(m.note)}</small>` : ''}</span><time>${m.at ? day(m.at) : m.goal > 1 ? `${m.have.toLocaleString()} of ${m.goal.toLocaleString()}` : 'not yet'}</time></li>`).join('')}
+    </ul>`
 }
 
 function agentDetails(n) {
@@ -397,11 +484,13 @@ function head(n, running) {
   const state = isAgent ? agentState(n) : threadState(n, running)
   const sub = isAgent
     ? [n.description, n.teammateId ?? (n.teammate ? 'teammate' : ''), n.fork ? 'fork of its parent' : n.background ? 'in the background' : ''].filter(Boolean).join(' · ')
-    : [n.thread ? 'Thread of a claude.ai project' : '', n.gitBranch, isLive(n) ? '' : `ended ${ago(n.endedAt ?? n.lastAt)}`].filter(Boolean).join(' · ')
+    : [who(n).title, n.thread ? 'Thread of a claude.ai project' : '', n.gitBranch, isLive(n) ? '' : `ended ${ago(n.endedAt ?? n.lastAt)}`].filter(Boolean).join(' · ')
   return `
     ${crumbs(n)}
-    <h2 class="dtitle"><i class="dot ${isAgent ? tintOf(n.type) : sessionTint(n.session)}"></i>${escapeHtml(isAgent ? n.label : title(n))}</h2>
-    <p class="dmeta">${pill(state)} ${escapeHtml(sub)}</p>`
+    <h2 class="dtitle"><i class="dot ${isAgent ? tintOf(n.type) : sessionTint(n.session)}"></i>${escapeHtml(isAgent ? who(n).title : title(n))}</h2>
+    <p class="dmeta">${pill(state)} ${escapeHtml(sub)}</p>
+    ${progressHtml(n.todos, { big: true })}
+    ${actions.bar(n, state)}`
 }
 
 // ---------------------------------------------------------------------------
@@ -432,6 +521,9 @@ function morph(from, to) {
 }
 
 function patch(el, html) {
+  // Unchanged since the last refresh: nothing to rebuild or compare.
+  if (el._html === html) return
+  el._html = html
   const fresh = el.cloneNode(false)
   fresh.innerHTML = html
   morph(el, fresh)
@@ -439,7 +531,7 @@ function patch(el, html) {
 
 // The clipboard's tabs. The conversation comes first: talking to a thread
 // is what you open one for.
-const TABS = [['transcript', 'Conversation'], ['team', 'Team'], ['details', 'Details']]
+const TABS = [['transcript', 'Conversation'], ['outputs', 'Outputs'], ['team', 'Team'], ['details', 'Details']]
 let tab = 'transcript'
 let lastArgs = null
 
@@ -452,22 +544,42 @@ export function setTab(name) {
 function clipboard(n, running) {
   const host = n.kind === 'session' ? n : nodes.get(sid(n.session))
   const teamSize = host && isLive(host) ? countAll(teamOf(host)) : (host?.pastAgents?.length ?? 0)
-  const button = ([name, label], i) => `<button type="button" role="tab" class="tab ${tab === name ? 'on' : ''}" aria-selected="${tab === name}" data-tab="${name}" title="${label} (${i + 1})">${label}${name === 'team' && teamSize ? `<small>${teamSize}</small>` : ''}</button>`
-  const body = tab === 'transcript' ? `<div class="transcript" data-keep="${escapeHtml(n.id)}"></div>`
-    : tab === 'team' ? teamTab(n, running)
+  const made = assets.outputCount(n)
+  const count = name => (name === 'team' && teamSize ? `<small>${teamSize}</small>` : name === 'outputs' && made ? `<small>${made}</small>` : '')
+  // The ARIA tabs pattern: only the open tab is in the Tab order, the
+  // arrow keys move between them (a11y.js), and the body is its panel.
+  const button = ([name, label], i) => `<button type="button" role="tab" id="tab-${name}" aria-controls="tabpanel" tabindex="${tab === name ? 0 : -1}" class="tab ${tab === name ? 'on' : ''}" aria-selected="${tab === name}" data-tab="${name}" title="${label} (${i + 1})">${label}${count(name)}</button>`
+  // Above the conversation: what it's holding for you, then where it is in
+  // its checklist.
+  const asks = assets.asksFor(host ?? n).filter(a => n.kind === 'session' || a.who?.id === n.id)
+  const pinned = asks.map(a => assets.askCard(a, { answerable: answerable(a) })).join('') + assets.checklist(n, { open: !asks.length })
+  const body = tab === 'transcript' ? `${pinned ? `<div class="pinned">${pinned}</div>` : ''}<div class="transcript" data-keep="${escapeHtml(n.id)}"></div>`
+    : tab === 'outputs' ? assets.outputsTab(n)
+      : tab === 'team' ? teamTab(n, running)
       : n.kind === 'agent' ? agentDetails(n) : sessionDetails(n)
-  return `${head(n, running)}<div class="tabs" role="tablist">${TABS.map(button).join('')}</div>${body}`
+  return `${head(n, running)}<div class="tabs" role="tablist" aria-label="About this ${n.kind === 'agent' ? 'agent' : 'thread'}">${TABS.map(button).join('')}</div><div class="tabpanel" role="tabpanel" id="tabpanel" aria-labelledby="tab-${tab}">${body}</div>`
 }
 
 // Re-render what changed. `selected` is a node id or null; `hover` shows
 // a critter's bubble while its directory entry is under the pointer.
+let libraryOpen = false
+let zoomed = null
+document.addEventListener('office:answered', () => { if (lastArgs) render(lastArgs) })
+document.addEventListener('office:refresh', () => { if (lastArgs) render(lastArgs) })
+document.addEventListener('office:zoom', e => { zoomed = e.detail; if (lastArgs) render(lastArgs) })
+addEventListener('keydown', e => { if (e.key === 'Escape' && (zoomed || libraryOpen)) { if (zoomed) zoomed = null; else libraryOpen = false; if (lastArgs) render(lastArgs) } })
+
 export function render(args) {
   lastArgs = args
-  const { running, selected, pick, hover } = args
+  const { running, selected, pick, hover, answer } = args
+  answerable = ask => Boolean(answer?.can(ask))
   patch($('#now'), `<p>${escapeHtml(headline(running))}</p>`)
   renderInbox(running)
   patch($('#full'), fullWindows())
-  for (const b of document.querySelectorAll('[data-feed]')) b.classList.toggle('on', b.dataset.feed === feed)
+  for (const b of document.querySelectorAll('[data-feed]')) {
+    b.classList.toggle('on', b.dataset.feed === feed)
+    b.setAttribute('aria-pressed', String(b.dataset.feed === feed))
+  }
   patch($('#moments'), activityList())
   const n = selected && nodes.get(selected)
   const detail = n && (n.kind === 'agent' || n.kind === 'session')
@@ -476,10 +588,25 @@ export function render(args) {
   patch($('#side'), !detail ? directory(running, selected) : clipboard(n, running))
   if (detail && tab === 'transcript') transcript.attach($('#side .transcript'), n)
   else transcript.detach()
+  // The Library drawer and the lightbox.
+  const made = outputs.filter(o => o.type !== 'file').length
+  patch($('#library-count'), String(made || ''))
+  $('#library').hidden = !libraryOpen
+  if (libraryOpen) patch($('#library'), assets.library())
+  $('#lightbox').hidden = !zoomed
+  if (zoomed) patch($('#lightbox'), assets.lightbox(zoomed))
   for (const b of document.querySelectorAll('[data-tab]')) b.onclick = () => setTab(b.dataset.tab)
   for (const b of document.querySelectorAll('[data-feed]')) b.onclick = () => { feed = b.dataset.feed; render(lastArgs) }
+  for (const d of document.querySelectorAll('[data-bumps]')) d.ontoggle = () => { if (d.open) openBumps.add(d.dataset.bumps); else openBumps.delete(d.dataset.bumps) }
   for (const b of document.querySelectorAll('[data-pick]')) b.onclick = () => b.dataset.pick && pick(b.dataset.pick)
   for (const b of document.querySelectorAll('[data-back]')) b.onclick = () => pick(null)
+  for (const b of document.querySelectorAll('[data-edit-project]')) b.onclick = e => { e.stopPropagation(); openProjectEditor(b.dataset.editProject, b.dataset.raw, b) }
+  $('#library-open').onclick = () => { libraryOpen = !libraryOpen; render(lastArgs) }
+  $('#lightbox').onclick = () => { zoomed = null; render(lastArgs) }
+  for (const b of document.querySelectorAll('[data-library]')) b.onclick = () => { libraryOpen = false; render(lastArgs) }
+  for (const b of document.querySelectorAll('[data-shelf]')) b.onclick = () => { assets.setShelf(b.dataset.shelf); render(lastArgs) }
+  for (const b of document.querySelectorAll('[data-zoom]')) b.onclick = e => { e.preventDefault(); zoomed = b.dataset.zoom; render(lastArgs) }
+  deliverables.bind(document, { find: key => outputs.find(o => `${o.session}|${o.id}` === key), redraw: () => render(lastArgs) })
   for (const b of document.querySelectorAll('[data-hover]')) {
     b.onpointerenter = () => hover(b.dataset.hover)
     b.onpointerleave = () => hover(null)

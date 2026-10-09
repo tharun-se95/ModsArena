@@ -2,10 +2,12 @@ import type { EngineInterface, Register } from 'claude-code'
 
 // Streams this session's projects, agents, tool calls and context to the
 // Agent Office bridge (server/server.mjs), which fans it out to the office
-// page. `/office` opens the page (starting the bridge first if need be) and
-// `/office status` says what's running. Messages you send from the office
-// come back through the bridge's inbox: to the session as its next prompt,
-// to a subagent as a message (see deliver()).
+// page. `/office` opens the page (starting the bridge first if need be),
+// `/office status` says what's running, and `/office auto-update` lets new
+// versions arrive on their own (server/autoupdate.mjs does the writing).
+// Messages you send from the office come back through the bridge's inbox:
+// to the session as its next prompt, to a subagent as a message, or Stop,
+// which ends the running turn (see deliver()).
 //
 // Hooks run in a sandbox with no Node, so events are queued here and flushed
 // over `$.http.fetch` on a timer: a tool call never waits on the bridge.
@@ -20,6 +22,10 @@ const RESPAWN_MS = 15000
 const BRIDGE_WAIT_MS = 8000
 const MIN_NODE = 18
 const WELCOMED = 'welcomed'
+// When the toast last offered auto-update, and whether you said no to it.
+const UPDATES_OFFERED = 'updatesOfferedAt'
+const UPDATES_DECLINED = 'updatesDeclined'
+const OFFER_EVERY_MS = 7 * 24 * 60 * 60 * 1000
 // Gauges: only the newest reading per loop matters, so a queued one is replaced.
 const GAUGES = new Set(['context.measure', 'agent.context'])
 
@@ -37,6 +43,8 @@ const link = {
   activeTools: 0,
   isCheckingInbox: false,
   version: undefined as string | undefined,
+  // The main loop's running turn, which Stop in the office ends.
+  turnId: undefined as string | undefined,
 }
 
 const bridgeUrl = () => `http://127.0.0.1:${link.port}`
@@ -153,9 +161,10 @@ export function isStale(found: Health | undefined, mine: string | undefined) {
 
 // The bridge runs on Node; say plainly when it's missing or too old.
 export function nodeProblem(version: string | undefined): string | undefined {
-  if (!version) return `Agent Office needs Node ${MIN_NODE} or newer to run its bridge, and \`node\` wasn't found. Install it from https://nodejs.org, then run /office again.`
+  const fix = 'Install the LTS version from https://nodejs.org, then restart Claude Code and run /office again.'
+  if (!version) return `Agent Office needs Node ${MIN_NODE} or newer, a free program it runs on, and this computer doesn't have it. ${fix}`
   const major = Number(/^v?(\d+)/.exec(version.trim())?.[1] ?? 0)
-  if (major < MIN_NODE) return `Agent Office needs Node ${MIN_NODE} or newer to run its bridge; this machine has ${version.trim()}. Update it from https://nodejs.org, then run /office again.`
+  if (major < MIN_NODE) return `Agent Office needs Node ${MIN_NODE} or newer, a free program it runs on; this computer has an older one (${version.trim()}). ${fix}`
   return undefined
 }
 
@@ -203,6 +212,53 @@ async function flush($: EngineInterface) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Auto-update. Claude Code keeps the switch in your user settings; the
+// bridge's server/autoupdate.mjs reads and writes it (backing the file up
+// first and changing that one key), run here with Node like the bridge.
+
+export type Updates = { state: 'on' | 'off' | 'missing'; pending?: boolean; text: string; summary: string; error?: string }
+
+async function updates($: EngineInterface, verb: 'status' | 'on' | 'off'): Promise<Updates | undefined> {
+  const ran = await $.process.run(['node', `${$.plugin.root}/server/autoupdate.mjs`, verb, '--json'], { timeoutMs: 10000 }).catch(() => undefined)
+  try {
+    return ran ? (JSON.parse(ran.stdout) as Updates) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+// `/office <words>`: what to do, or undefined for words it doesn't know.
+export function parseOffice(args: string | undefined): { verb: 'open' | 'status' | 'auto-update'; on?: boolean } | undefined {
+  const [verb = 'open', value, ...rest] = (args ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean)
+  if ((verb === 'open' || verb === 'status') && value === undefined) return { verb }
+  if (verb !== 'auto-update' && verb !== 'autoupdate') return undefined
+  if (rest.length || (value !== undefined && value !== 'on' && value !== 'off')) return undefined
+  return { verb: 'auto-update', on: value !== 'off' }
+}
+
+export const OFFICE_USAGE = 'Usage: /office (open the office), /office status, or /office auto-update [on | off]'
+
+// The once-per-machine welcome, offering auto-update while it's off.
+export function welcomeText(state: Updates['state'] | undefined) {
+  return `Agent Office is on. Type /office to watch your sessions at work.${state === 'off' ? ' To get new versions on their own, type /office auto-update.' : ''}`
+}
+export const OFFER_TEXT = 'Agent Office: new versions don\'t arrive on their own yet. Type /office auto-update to turn that on (or /office auto-update off to stop this reminder).'
+
+// The welcome, once per machine; after that the offer at most once a week,
+// while auto-update is off and you haven't said no to it.
+async function offerUpdates($: EngineInterface, isWelcome: boolean) {
+  const now = await $.clock.now()
+  const isDeclined = Boolean(await $.store.get(UPDATES_DECLINED).catch(() => true))
+  const offeredAt = Number((await $.store.get(UPDATES_OFFERED).catch(() => now)) ?? 0)
+  const isDue = !isDeclined && now - offeredAt >= OFFER_EVERY_MS
+  const found = isWelcome || isDue ? await updates($, 'status') : undefined
+  const isOffered = found?.state === 'off' && (isWelcome ? !isDeclined : isDue)
+  if (isWelcome) $.ui.toast(welcomeText(isOffered ? 'off' : undefined), { timeoutMs: 12000 })
+  else if (isOffered) $.ui.toast(OFFER_TEXT, { timeoutMs: 12000 })
+  if (isOffered) await $.store.set(UPDATES_OFFERED, now).catch(() => undefined)
+}
+
 // What `/office status` reports: the bridge, what it has seen, this session.
 async function status($: EngineInterface) {
   const url = bridgeUrl()
@@ -217,8 +273,177 @@ async function status($: EngineInterface) {
     const problem = nodeProblem(await nodeVersion($))
     lines.push(`Bridge: not running on ${url}.${problem ? ` ${problem}` : link.autoStart ? ' /office starts it.' : ` Start one with: node ${$.plugin.root}/server/server.mjs --port ${link.port}`}`)
   }
+  const now = await updates($, 'status')
+  if (now) lines.push(now.summary)
   lines.push(`This session: ${link.queue.length} event${link.queue.length === 1 ? '' : 's'} waiting to send, ${link.activeAgents.size} subagent${link.activeAgents.size === 1 ? '' : 's'} and ${link.activeTools} tool call${link.activeTools === 1 ? '' : 's'} in flight.`)
   return lines.join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// What the work asks and makes: the checklist (TodoWrite, or the Task tools'
+// list), questions Claude Code holds a turn for (AskUserQuestion, a plan to
+// approve), and outputs (pictures, files, artifacts, pull requests).
+
+type Todo = { text: string; status: string; active?: string }
+const tasks = new Map<string, Map<string, Todo>>() // loop ('' for main) -> task id -> task
+const PICTURE = /\.(png|jpe?g|gif|webp|svg)$/i
+const FILE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
+const PR_URL = /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/
+
+const str = (v: unknown) => (typeof v === 'string' ? v : undefined)
+const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path
+
+// Additions and deletions from a file tool's patch.
+export function diffStats(result: Record<string, unknown> | undefined) {
+  const git = result?.gitDiff as { additions?: number; deletions?: number } | undefined
+  if (git?.additions !== undefined) return { additions: git.additions, deletions: git.deletions ?? 0 }
+  const hunks = result?.structuredPatch as { lines?: string[] }[] | undefined
+  if (!Array.isArray(hunks)) return undefined
+  let additions = 0
+  let deletions = 0
+  for (const h of hunks) for (const l of h.lines ?? []) {
+    if (l.startsWith('+')) additions++
+    else if (l.startsWith('-')) deletions++
+  }
+  return { additions, deletions }
+}
+
+// What a question was answered with, as one line.
+export function answerOf(result: Record<string, unknown> | undefined) {
+  const answers = result?.answers
+  if (!answers || typeof answers !== 'object') return undefined
+  return clip(Object.values(answers as Record<string, unknown>).map(a => (Array.isArray(a) ? a.join(', ') : String(a))).join(' · '), 120)
+}
+
+// Before the tool runs: a checklist written, a question or plan put to you.
+export function beforeTool(e: Record<string, unknown>): ClusterEvent[] {
+  const agent = str(e.agentId)
+  const id = str(e.tool_use_id) ?? `${e.tool}-${Date.now()}`
+  if (e.tool === 'TodoWrite' && Array.isArray(e.todos)) {
+    const items = (e.todos as { content?: string; status?: string; activeForm?: string }[])
+      .map(t => ({ text: clip(t.content, 120) ?? '', status: t.status ?? 'pending', active: clip(t.activeForm, 120) }))
+    return [{ kind: 'todo.update', agent, items }]
+  }
+  if (e.tool === 'AskUserQuestion' && Array.isArray(e.questions)) {
+    const questions = (e.questions as Record<string, unknown>[]).map(q => ({
+      header: clip(str(q.header), 24), question: clip(str(q.question), 300), multiSelect: q.multiSelect === true,
+      options: (Array.isArray(q.options) ? q.options as Record<string, unknown>[] : []).map(o => ({ label: clip(str(o.label), 60), description: clip(str(o.description), 160) })),
+    }))
+    return [{ kind: 'ask.open', agent, id, type: 'question', questions }]
+  }
+  if (e.tool === 'ExitPlanMode') return [{ kind: 'ask.open', agent, id, type: 'plan', plan: str(e.plan)?.slice(0, 4000) }]
+  return []
+}
+
+// After it ran: the question answered, the list's new state, what was made.
+export function afterTool(e: Record<string, unknown>, ran: { result?: unknown; text?: string; deny?: string; isError?: boolean } | undefined): ClusterEvent[] {
+  const agent = str(e.agentId)
+  const id = str(e.tool_use_id) ?? `${e.tool}-${Date.now()}`
+  const ok = ran !== undefined && ran.deny === undefined && ran.isError !== true
+  const result = (ran?.result && typeof ran.result === 'object' ? ran.result : undefined) as Record<string, unknown> | undefined
+  const out: ClusterEvent[] = []
+  if (e.tool === 'AskUserQuestion') out.push({ kind: 'ask.close', agent, id, answer: ok ? answerOf(result) : 'Not answered' })
+  if (e.tool === 'ExitPlanMode') {
+    out.push({ kind: 'ask.close', agent, id, answer: ok ? 'Approved' : 'Kept planning' })
+    const plan = str(result?.plan) ?? str(e.plan)
+    if (ok && plan) out.push({ kind: 'asset.add', agent, id: `plan-${id}`, type: 'plan', title: clip(plan.replace(/^#+\s*/gm, '').split('\n').find(l => l.trim()), 80) ?? 'Plan', text: plan.slice(0, 4000) })
+  }
+  if (!ok) return out
+  // The Task tools keep a list per loop; the office gets it whole.
+  if (e.tool === 'TaskCreate' || e.tool === 'TaskUpdate') {
+    const loop = agent ?? ''
+    if (!tasks.has(loop)) tasks.set(loop, new Map())
+    const list = tasks.get(loop)!
+    if (e.tool === 'TaskCreate') {
+      const task = result?.task as { id?: string } | undefined
+      if (task?.id) list.set(task.id, { text: clip(str(e.subject), 120) ?? '', status: 'pending', active: clip(str(e.activeForm), 120) })
+    } else {
+      const taskId = str(e.taskId) ?? ''
+      const had = list.get(taskId)
+      if (e.status === 'deleted') list.delete(taskId)
+      else if (had || e.subject) list.set(taskId, { ...(had ?? { text: '', status: 'pending' }), ...(str(e.subject) && { text: clip(str(e.subject), 120)! }), ...(str(e.status) && { status: str(e.status)! }) })
+    }
+    out.push({ kind: 'todo.update', agent, items: [...list.values()] })
+  }
+  const path = str(e.file_path) ?? str(e.notebook_path)
+  if (FILE_TOOLS.has(String(e.tool)) && path) {
+    out.push(PICTURE.test(path)
+      ? { kind: 'asset.add', agent, id: `img-${path}`, type: 'image', title: fileName(path), path }
+      : { kind: 'asset.add', agent, id: `file-${path}`, type: 'file', title: fileName(path), path, meta: diffStats(result) })
+  }
+  if (e.tool === 'Read' && path && result?.type === 'image') out.push({ kind: 'asset.add', agent, id: `img-${path}`, type: 'image', title: fileName(path), path })
+  if (e.tool === 'SendUserFile' && Array.isArray(result?.attachments)) {
+    for (const a of result!.attachments as { path?: string; isImage?: boolean }[]) {
+      if (a.path) out.push({ kind: 'asset.add', agent, id: `${a.isImage ? 'img' : 'file'}-${a.path}`, type: a.isImage ? 'image' : 'file', title: str(e.caption) ?? fileName(a.path), path: a.path })
+    }
+  }
+  if (e.tool === 'Artifact' && str(result?.url)) out.push({ kind: 'asset.add', agent, id: `artifact-${result!.url}`, type: 'artifact', title: str(result?.title) ?? str(e.title) ?? 'Artifact', url: result!.url })
+  if (/create_pull_request$/.test(String(e.tool))) {
+    const url = PR_URL.exec(ran?.text ?? '')?.[0]
+    if (url) out.push({ kind: 'asset.add', agent, id: `pr-${url}`, type: 'pr', title: clip(str(e.title), 120) ?? url, url, meta: { state: e.draft ? 'draft' : 'open' } })
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// Answering from the office. Claude Code's own dialog stays up the whole
+// time; meanwhile the hook asks the bridge, a long poll at a time, whether
+// you answered on the office page. Whichever answer comes first is the
+// tool's: an office answer returned while the dialog is pending makes the
+// engine take the dialog down. Approving a plan also switches Claude Code
+// out of plan mode, which a plugin can't do, so the office can only send a
+// plan back ("keep planning"); approving stays in the terminal.
+
+const ANSWERABLE = new Set(['AskUserQuestion', 'ExitPlanMode'])
+// How long the office keeps offering to answer one ask; after that only the
+// terminal can, as before.
+const OFFICE_ANSWER_MS = 30 * 60 * 1000
+const WAIT_FAILURES = 3
+
+type OfficeAnswer = { answers?: Record<string, string>; note?: string; choice?: string }
+
+// The tool's result for an answer given in the office: a question's
+// answers, keyed by question as Claude Code's dialog keys them; a plan sent
+// back as a refusal that says why. A note fills any question left open, or
+// reaches the model after the result.
+export function officeResult(e: Record<string, unknown>, answer: OfficeAnswer) {
+  const note = clip(answer.note, 2000)
+  if (e.tool === 'ExitPlanMode') {
+    return { deny: `The user read your plan in Agent Office and wants you to keep planning before you start.${note ? ` Their note: ${note}` : ''}` }
+  }
+  const questions = (Array.isArray(e.questions) ? e.questions : []) as { question: string }[]
+  const answers: Record<string, string> = {}
+  for (const q of questions) {
+    const given = answer.answers?.[q.question] ?? note
+    if (given) answers[q.question] = given
+  }
+  const isNoteUsed = note !== undefined && questions.some(q => answer.answers?.[q.question] === undefined)
+  return {
+    result: { questions, answers },
+    ...(note && !isNoteUsed && { context: [`The user also wrote, answering from Agent Office: ${note}`] }),
+  }
+}
+
+// Wait for the office's answer: undefined when the terminal answered first
+// (`settled`), the ask closed, the bridge stopped answering or time ran out.
+async function officeAnswer($: EngineInterface, id: string, settled: { isDone: boolean }) {
+  const until = Date.now() + OFFICE_ANSWER_MS
+  let failures = 0
+  while (!settled.isDone && Date.now() < until) {
+    try {
+      const res = await $.http.fetch(`${bridgeUrl()}/answer/wait?${new URLSearchParams({ session: link.session, id })}`, {
+        headers: { 'x-agent-office-inbox': '1' },
+      })
+      if (!res.ok) return undefined // a bridge from before answers existed
+      const got = JSON.parse(res.text) as { answer?: OfficeAnswer; closed?: boolean }
+      if (got.closed) return undefined
+      if (got.answer) return got.answer
+      failures = 0
+    } catch {
+      if (++failures >= WAIT_FAILURES) return undefined
+    }
+  }
+  return undefined
 }
 
 const ENDED = new Set(['completed', 'failed', 'killed'])
@@ -236,7 +461,7 @@ async function settleAgent($: EngineInterface, agent: string) {
   showStatus($)
 }
 
-type ChatMessage = { id: string; agent?: string; text: string }
+type ChatMessage = { id: string; agent?: string; text: string; action?: string }
 
 // Messages from the office for this session. A session's message becomes
 // its next prompt (the engine queues it until the session is free), framed
@@ -244,7 +469,13 @@ type ChatMessage = { id: string; agent?: string; text: string }
 // finished one is resumed to answer. Either way the office hears back.
 export async function deliver($: EngineInterface, message: ChatMessage) {
   try {
-    if (message.agent) {
+    if (message.action === 'stop') {
+      // Stop from the office: end the running turn, as Esc would.
+      const turnId = link.turnId
+      if (!turnId) return emit({ kind: 'chat.delivered', id: message.id, ok: false, how: 'nothing was running' })
+      await $.turn.abort({ turnId })
+      emit({ kind: 'chat.delivered', id: message.id, ok: true, how: 'stopped its turn' })
+    } else if (message.agent) {
       const sent = await $.session.send({ to: { agentId: message.agent }, text: message.text })
       emit({
         kind: 'chat.delivered', id: message.id, agent: message.agent, ok: sent.isDelivered,
@@ -327,24 +558,33 @@ export const register: Register = (on, options) => {
 
     await $.command.register({
       name: 'office',
-      description: 'Open Agent Office, the live view of your sessions and subagents (`/office status` to check on it).',
+      description: 'Open Agent Office, the live view of your sessions and subagents (`/office status` to check on it, `/office auto-update` for new versions on their own).',
     })
     $.clock.every(FLUSH_MS, () => void flush($))
     $.clock.every(INBOX_MS, () => void checkInbox($))
 
-    // Once per machine: say how to open it.
-    if (!(await $.store.get(WELCOMED).catch(() => true))) {
-      await $.store.set(WELCOMED, true).catch(() => undefined)
-      $.ui.toast('Agent Office is on. Type /office to watch your sessions at work. For updates, turn on auto-update for modsarena under /plugin → Marketplaces.', { timeoutMs: 12000 })
-    }
+    // Once per machine: say how to open it, and offer auto-update while
+    // it's off (then now and again, until it's on or you say no).
+    const isWelcome = !(await $.store.get(WELCOMED).catch(() => true))
+    if (isWelcome) await $.store.set(WELCOMED, true).catch(() => undefined)
+    void offerUpdates($, isWelcome)
     return started
   })
 
   on('command.run', { command: 'office' }, async ($, e) => {
     const url = bridgeUrl()
-    const arg = (e.args ?? '').trim().toLowerCase()
-    if (arg === 'status') return { text: await status($) }
-    if (arg && arg !== 'open') return { text: 'Usage: /office (open the office) or /office status' }
+    const asked = parseOffice(e.args)
+    if (!asked) return { text: OFFICE_USAGE }
+    if (asked.verb === 'status') return { text: await status($) }
+    if (asked.verb === 'auto-update') {
+      const problem = nodeProblem(await nodeVersion($))
+      if (problem) return { text: problem }
+      const result = await updates($, asked.on ? 'on' : 'off')
+      if (!result) return { text: `Couldn't change auto-update. Try it from /plugin → Marketplaces → modsarena.` }
+      // Saying off on purpose stops the reminder; on makes it moot.
+      if (result.state !== 'missing') await $.store.set(UPDATES_DECLINED, !asked.on).catch(() => undefined)
+      return { text: result.text }
+    }
 
     const found = await health($)
     const mine = await ownVersion($)
@@ -418,6 +658,7 @@ export const register: Register = (on, options) => {
   })
 
   on('turn.start', async ($, e, next) => {
+    link.turnId = e.turnId
     emit({ kind: 'turn.start', turnId: e.turnId, text: summarize({ prompt: e.text }) })
     return next(e)
   })
@@ -426,6 +667,7 @@ export const register: Register = (on, options) => {
     const agent = e.agentId
     emit({ kind: 'turn.complete', agent, turnId: e.turnId, durationMs: e.durationMs, reason: e.reason, answer: clip(e.answer) })
     if (agent === undefined) {
+      if (link.turnId === e.turnId) link.turnId = undefined
       await sendBreakdown($)
     } else if (link.teammates.has(agent)) {
       // A teammate waits for its next message rather than ending.
@@ -503,17 +745,35 @@ export const register: Register = (on, options) => {
     if (SPAWN_TOOLS.has(String(e.tool))) return next(e)
 
     const base = { agent: e.agentId, id: e.tool_use_id, tool: e.tool }
-    emit({ kind: 'tool.start', ...base, summary: summarize(e as unknown as Record<string, unknown>) })
+    const fields = e as unknown as Record<string, unknown>
+    emit({ kind: 'tool.start', ...base, summary: summarize(fields) })
+    // A question or plan the office may answer, while the bridge is there to carry it.
+    const isAnswerable = ANSWERABLE.has(String(e.tool)) && link.isBridgeUp && link.session !== 'unknown' && typeof e.tool_use_id === 'string'
+    for (const ev of beforeTool(fields)) emit(ev.kind === 'ask.open' && isAnswerable ? { ...ev, answerable: true } : ev)
     link.activeTools++
     showStatus($)
     let ok = false
+    let ran: Awaited<ReturnType<typeof next>> | undefined
     try {
-      const ran = await next(e)
-      ok = ran.deny === undefined && ran.isError !== true
-      return ran
+      let answer: NonNullable<typeof ran>
+      if (isAnswerable) {
+        // The terminal's dialog and the office, side by side.
+        const settled = { isDone: false }
+        const core = next(e)
+        core.then(() => { settled.isDone = true }, () => { settled.isDone = true })
+        const office = officeAnswer($, e.tool_use_id, settled).then(a => (a ? officeResult(fields, a) as typeof answer : core))
+        answer = await Promise.race([core, office])
+        settled.isDone = true
+      } else {
+        answer = await next(e)
+      }
+      ran = answer
+      ok = answer.deny === undefined && answer.isError !== true
+      return answer
     } finally {
       link.activeTools--
       emit({ kind: 'tool.end', ...base, ok })
+      for (const ev of afterTool(fields, ran as Parameters<typeof afterTool>[1])) emit(ev)
       showStatus($)
     }
   })

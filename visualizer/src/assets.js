@@ -1,0 +1,225 @@
+// What the work asks and makes, drawn for the panels: the questions Claude
+// Code is holding a turn for (AskUserQuestion, a plan to approve, a tool to
+// allow), a thread's checklist (TodoWrite or its tasks), and its outputs
+// (images, artifacts, pull requests, files, plans), plus the Library: every
+// output in the office in one drawer, and a lightbox for pictures.
+//
+// The shapes mirror how Claude shows them elsewhere: a question with its
+// header chip and options, like Claude Code's dialog and a claude.ai
+// project's decision card; a checklist of ✓ ✱ ○ rows, like a project
+// thread's status; outputs as cards, like a project's Library.
+
+import { nodes, sid, outputs, openAsks, toolName } from './model.js'
+
+export { toolName }
+import { escapeHtml, ago } from './words.js'
+import { progressHtml } from './progress.js'
+import * as deliverables from './deliverables.js'
+import { projectName } from './names.js'
+import * as answer from './answer.js'
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
+
+// How a picture gets to the page: the demo carries its own; a real one is
+// served by the bridge from the path the session wrote or read.
+export const srcOf = o => o.src ?? (o.path ? `/asset?${new URLSearchParams({ session: o.session, id: o.id })}` : '')
+
+// ---------------------------------------------------------------------------
+// Questions
+
+
+const ASK_EYEBROW = { question: 'Asks you', permission: 'Wants to run', plan: 'Plan to approve' }
+
+// One open ask as a card. `answerable` says whether its buttons answer it
+// from here (answer.js does the answering); when they can't, they say
+// where to answer.
+export function askCard(ask, { answerable, compact = false } = {}) {
+  const who = ask.who?.kind === 'agent' ? `<span class="ask-who">${escapeHtml(ask.who.label)}</span>` : ''
+  const key = answer.keyOf(ask)
+  if (answerable) answer.remember(ask)
+  const sent = answerable ? answer.statusOf(key) : undefined
+  const isBusy = sent?.status === 'Sending…' || sent?.ok === true
+  const attrs = (act, label, qi = 0) => `data-ans="${act}" data-key="${escapeHtml(key)}" data-q="${qi}" data-label="${escapeHtml(label)}"${isBusy ? ' disabled' : ''}`
+  const option = (label, sub, cls, qi) => {
+    if (!answerable) return `<span class="ask-opt ${cls}"><b>${escapeHtml(label)}</b>${sub ? `<span>${escapeHtml(sub)}</span>` : ''}</span>`
+    const on = answer.isPicked(key, qi, label)
+    return `<button type="button" class="ask-opt ${cls} ${on ? 'picked' : ''}" aria-pressed="${on}" ${attrs('pick', label, qi)}><b>${escapeHtml(label)}</b>${sub ? `<span>${escapeHtml(sub)}</span>` : ''}</button>`
+  }
+  // Demo-only: the sample sessions' permission asks and plan approvals.
+  const say = (label, cls = '') => answerable
+    ? `<button type="button" class="ask-opt ${cls}" ${attrs('say', label)}><b>${escapeHtml(label)}</b></button>`
+    : `<span class="ask-opt ${cls}"><b>${escapeHtml(label)}</b></span>`
+  const note = placeholder => `<input class="ask-note" type="text" data-ans-note="${escapeHtml(key)}" placeholder="${escapeHtml(placeholder)}" aria-label="${escapeHtml(placeholder)}" maxlength="2000"${isBusy ? ' disabled' : ''}>`
+  let body = ''
+  let foot = ''
+  if (ask.type === 'question') {
+    const qs = ask.questions ?? []
+    body = qs.map((q, qi) => {
+      const previews = q.options.some(o => o.preview)
+      return `
+      <div class="ask-q">
+        <p class="ask-text"><span class="chip">${escapeHtml(q.header)}</span>${escapeHtml(q.question)}${q.multiSelect ? '<small class="ask-multi">pick any</small>' : ''}</p>
+        <div class="ask-opts ${previews && !compact ? 'previews' : ''}">${q.options.map((o, i) => previews && !compact
+          ? (answerable
+            ? `<button type="button" class="ask-opt pic ${i === 0 ? 'rec' : ''} ${answer.isPicked(key, qi, o.label) ? 'picked' : ''}" aria-pressed="${answer.isPicked(key, qi, o.label)}" ${attrs('pick', o.label, qi)}><img alt="" src="${escapeHtml(o.preview ?? '')}"><b>${escapeHtml(o.label)}</b></button>`
+            : `<span class="ask-opt pic ${i === 0 ? 'rec' : ''}"><img alt="" src="${escapeHtml(o.preview ?? '')}"><b>${escapeHtml(o.label)}</b></span>`)
+          : option(o.label, compact ? '' : o.description, i === 0 ? 'rec' : '', qi)).join('')}</div>
+      </div>`
+    }).join('')
+    // Several questions, or several picks: say when you're done.
+    const needsSend = qs.length > 1 || qs.some(q => q.multiSelect)
+    if (answerable) foot = `<div class="ask-own">${note(needsSend ? 'Or your own words…' : 'Or type your own answer…')}${needsSend ? `<button type="button" class="ask-send" ${attrs('send', '')}>Send</button>` : ''}</div>`
+  } else if (ask.type === 'permission') {
+    body = `<p class="ask-text"><code>${escapeHtml(toolName(ask.tool))}</code> ${escapeHtml(ask.summary ?? '')}</p>
+      <div class="ask-opts row">${say('Allow', 'rec')}${say('Deny', 'no')}</div>`
+  } else if (ask.type === 'plan') {
+    const lines = (ask.plan ?? '').split('\n').filter(l => l.trim()).slice(0, compact ? 3 : 8)
+    body = `<div class="ask-plan">${lines.map(l => /^#/.test(l) ? `<b>${escapeHtml(l.replace(/^#+\s*/, ''))}</b>` : `<span>${escapeHtml(l)}</span>`).join('')}</div>`
+    if (!answerable) body += `<div class="ask-opts row">${say('Approve', 'rec')}${say('Keep planning', 'no')}</div>`
+    else if (answer.canApprove(ask)) body += `<div class="ask-opts row">${say('Approve', 'rec')}<button type="button" class="ask-opt no" ${attrs('keep', '')}><b>Keep planning</b></button></div>${note('What should change? (optional)')}`
+    else {
+      body += `<div class="ask-own">${note('What should change? (optional)')}<button type="button" class="ask-send" ${attrs('keep', '')}>Keep planning</button></div>`
+      foot = '<p class="ask-where">To approve, use Claude Code: approving lets Claude start changing things, and only Claude Code can switch that on.</p>'
+    }
+  }
+  const status = sent?.status ? `<p class="ask-status ${sent.ok === false ? 'bad' : ''}" role="status">${escapeHtml(sent.status)}</p>` : ''
+  return `
+    <div class="ask ${ask.type} ${answerable ? 'live' : ''}">
+      <p class="ask-eyebrow"><i class="ask-icon">${ask.type === 'permission' ? '>_' : ask.type === 'plan' ? '✎' : '?'}</i>${ASK_EYEBROW[ask.type] ?? 'Asks you'}${who}<time>${ago(ask.t)}</time></p>
+      ${body}
+      ${foot}
+      ${status}
+      ${answerable ? (ask.type === 'question' && !sent ? '<p class="ask-where">Answer here or in Claude Code, whichever is handier.</p>' : '') : '<p class="ask-where">Answer it in Claude Code; the office shows it so you know it’s waiting.</p>'}
+    </div>`
+}
+
+export function asksFor(sessionNode) {
+  return openAsks(sessionNode)
+}
+
+// ---------------------------------------------------------------------------
+// The checklist: ✓ done, ✱ in progress, ○ not started.
+
+const MARK = { completed: '✓', in_progress: '✱', pending: '○' }
+
+export function checklist(n, { open = true } = {}) {
+  const items = n.todos
+  if (!items?.length) return ''
+  const done = items.filter(i => i.status === 'completed').length
+  return `
+    <details class="todo" ${open ? 'open' : ''} data-todo="${escapeHtml(n.id)}">
+      <summary>
+        <span class="todo-ring" style="--f:${(done / items.length).toFixed(3)}"></span>
+        <b>Checklist</b><span class="todo-count">${items.length} steps</span>
+      </summary>
+      <ol>${items.map(i => `<li class="${i.status}"><i>${MARK[i.status] ?? '○'}</i>${escapeHtml(i.text)}</li>`).join('')}</ol>
+    </details>`
+}
+
+// "3 of 7 done" and its bar, for cards and the directory.
+export const progress = n => progressHtml(n.todos)
+
+// ---------------------------------------------------------------------------
+// Outputs
+
+const KIND = {
+  image: ['Image', '▣'], artifact: ['Artifact', '◈'], pr: ['Pull request', '⇡'], link: ['Link', '↗'],
+  file: ['File', '▤'], plan: ['Plan', '✎'],
+}
+
+const hostOf = url => { try { return new URL(url).host.replace(/^www\./, '') } catch { return '' } }
+
+export function outputCard(o, { withThread = false } = {}) {
+  const [kind, icon] = KIND[o.type] ?? ['Output', '•']
+  const thread = withThread ? nodes.get(sid(o.session)) : null
+  const where = [thread?.label, o.agent ? nodes.get(`a:${o.session}:${o.agent}`)?.label : ''].filter(Boolean).join(' · ')
+  // Every output can be handed to a critter: dragged there, or H.
+  const pass = `draggable="true" data-handoff="output|${escapeHtml(o.session)}|${escapeHtml(o.id)}"`
+  if (o.type === 'image') {
+    return `<button type="button" class="out pic" ${pass} data-zoom="${escapeHtml(o.session)}|${escapeHtml(o.id)}" title="${escapeHtml(o.title)}">
+      <img alt="${escapeHtml(o.title)}" src="${escapeHtml(srcOf(o))}" loading="lazy">
+      <span>${escapeHtml(o.title)}</span>${where ? `<small>${escapeHtml(where)}</small>` : ''}</button>`
+  }
+  const stats = o.meta?.additions !== undefined ? `<span class="diff"><ins>+${o.meta.additions}</ins> <del>−${o.meta.deletions ?? 0}</del></span>` : ''
+  const sub = [o.type === 'file' ? o.path : o.url ? hostOf(o.url) : '', where].filter(Boolean).join(' · ')
+  const tag = o.url ? 'a' : o.type === 'plan' ? 'button' : 'div'
+  const attrs = o.url ? `href="${escapeHtml(o.url)}" target="_blank" rel="noopener"` : o.type === 'plan' ? `type="button" data-zoom="${escapeHtml(o.session)}|${escapeHtml(o.id)}"` : ''
+  return `<${tag} class="out ${o.type}" ${attrs} ${pass}${tag === 'div' ? ' tabindex="0"' : ''} title="${escapeHtml(o.title)}. Drag it onto a critter (or press H) to hand it over">
+    <i class="out-icon">${icon}</i>
+    <span class="out-main"><b>${escapeHtml(o.title)}</b><small>${escapeHtml(kind)}${o.meta?.state ? ` · ${escapeHtml(o.meta.state)}` : ''}${sub ? ` · ${escapeHtml(sub)}` : ''}</small></span>
+    ${stats || `<time>${ago(o.t)}</time>`}
+  </${tag}>`
+}
+
+// The clipboard's Outputs tab: pictures first, then what was delivered,
+// then the files it changed.
+export function outputsTab(n) {
+  const host = n.kind === 'session' ? n : nodes.get(sid(n.session))
+  const mine = outputs.filter(o => o.session === host?.session && (n.kind === 'session' || o.agent === n.agent))
+  if (!mine.length && !n.todos?.length) return '<p class="muted">Nothing made yet. Pictures, artifacts, pull requests and changed files land here as they happen.</p>'
+  const images = mine.filter(o => o.type === 'image')
+  const shipped = mine.filter(deliverables.isDeliverable)
+  const maker = o => (o.agent ? nodes.get(`a:${o.session}:${o.agent}`)?.label ?? 'a helper' : '')
+  const files = mine.filter(o => o.type === 'file')
+  const adds = files.reduce((s, f) => s + (f.meta?.additions ?? 0), 0)
+  const dels = files.reduce((s, f) => s + (f.meta?.deletions ?? 0), 0)
+  return `
+    ${checklist(n, { open: true })}
+    ${shipped.length ? `<h3>Delivered <small>${shipped.length}</small></h3><div class="dvs">${shipped.map(o => deliverables.card(o, { where: maker(o), copied: deliverables.copiedKey() })).join('')}</div>` : ''}
+    ${images.length ? `<h3>Pictures <small>${images.length}</small></h3><div class="gallery">${images.slice(0, 9).map(o => outputCard(o)).join('')}</div>` : ''}
+    ${files.length ? `<h3>Files changed <small><ins>+${adds}</ins> <del>−${dels}</del></small></h3><div class="outs files">${files.slice(0, 8).map(o => outputCard(o)).join('')}</div>` : ''}`
+}
+
+export const outputCount = n => outputs.filter(o => o.session === n.session && (n.kind === 'session' || o.agent === n.agent) && o.type !== 'file').length
+
+// ---------------------------------------------------------------------------
+// The Library: everything every thread has made, by kind.
+
+let shelf = 'all'
+const SHELVES = [['all', 'All'], ['image', 'Pictures'], ['shipped', 'Artifacts & PRs'], ['file', 'Files'], ['plan', 'Plans']]
+const onShelf = o => shelf === 'all' ? o.type !== 'file'
+  : shelf === 'shipped' ? ['artifact', 'pr', 'link'].includes(o.type) : o.type === shelf
+
+export function library() {
+  const list = outputs.filter(onShelf)
+  // A folder per thread, its name on the tab.
+  const groups = deliverables.byThread(list).map(({ session, items }) => {
+    const n = nodes.get(sid(session))
+    const pics = items.filter(o => o.type === 'image')
+    const cards = items.filter(deliverables.isDeliverable)
+    const rest = items.filter(o => o.type !== 'image' && !deliverables.isDeliverable(o))
+    return `<section class="lib-group folder">
+      <p class="lib-thread"><span>${escapeHtml(n?.project ? projectName(n.project, n.projectName) : n?.projectName ?? '')}</span><button type="button" data-pick="${escapeHtml(sid(session))}">${escapeHtml(n?.label ?? session)}</button><small>${plural(items.length, 'thing')}</small></p>
+      ${cards.length ? `<div class="dvs">${cards.slice(0, 8).map(o => deliverables.card(o, { where: o.agent ? nodes.get(`a:${o.session}:${o.agent}`)?.label : '', copied: deliverables.copiedKey() })).join('')}</div>` : ''}
+      ${pics.length ? `<div class="gallery">${pics.slice(0, 6).map(o => outputCard(o)).join('')}</div>` : ''}
+      ${rest.length ? `<div class="outs files">${rest.slice(0, 8).map(o => outputCard(o)).join('')}</div>` : ''}
+    </section>`
+  }).join('')
+  return `
+    <header class="lib-head">
+      <h2>Library <small>${plural(outputs.filter(o => o.type !== 'file').length, 'output')}</small></h2>
+      <button type="button" class="lib-close" data-library="close" aria-label="Close the library">×</button>
+    </header>
+    <div class="feeds lib-shelves" role="group" aria-label="Show">${SHELVES.map(([k, label]) => `<button type="button" data-shelf="${k}" class="${shelf === k ? 'on' : ''}">${label}</button>`).join('')}</div>
+    <div class="lib-body">${groups || '<p class="muted">Nothing on this shelf yet.</p>'}</div>`
+}
+
+export function setShelf(name) {
+  shelf = name
+}
+
+// ---------------------------------------------------------------------------
+// The lightbox: a picture (or a plan) full size.
+
+export function lightbox(key) {
+  const [session, id] = key.split('|')
+  const o = outputs.find(x => x.session === session && x.id === id)
+  if (!o) return ''
+  const n = nodes.get(sid(session))
+  const body = o.type === 'plan'
+    ? `<article class="lb-plan">${(o.text ?? '').split('\n').map(l => /^#/.test(l) ? `<h3>${escapeHtml(l.replace(/^#+\s*/, ''))}</h3>` : l.trim() ? `<p>${escapeHtml(l)}</p>` : '').join('')}</article>`
+    : `<img alt="${escapeHtml(o.title)}" src="${escapeHtml(srcOf(o))}">`
+  const copy = deliverables.copyOf(o)
+  const isCopied = deliverables.copiedKey() === `${o.session}|${o.id}`
+  return `<figure class="lb-frame paper">${body}<figcaption><b>${escapeHtml(o.title)}</b><span>${escapeHtml([n?.label, o.path, ago(o.t)].filter(Boolean).join(' · '))}</span>${copy ? `<button type="button" class="dv-btn ${isCopied ? 'done' : ''}" data-copy="${escapeHtml(`${o.session}|${o.id}`)}">${isCopied ? 'Copied ✓' : copy.label}</button>` : ''}</figcaption></figure>`
+}

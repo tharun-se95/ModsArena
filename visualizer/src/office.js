@@ -497,7 +497,8 @@ export function buildRoom({ w, d, name, colors }) {
     obj.position.set(x, y, z)
     room.add(obj)
   }
-  place(bookshelf(colors, rand), -w / 2 + 48 + rand() * 10, FLOOR_TOP, back + 9.5)
+  const shelfAt = { x: -w / 2 + 48 + rand() * 10, z: back + 9.5 }
+  place(bookshelf(colors, rand), shelfAt.x, FLOOR_TOP, shelfAt.z)
   place(windowPane(colors, Math.min(46, w * 0.12)), w * 0.02, -8, back)
   if (w > 300) place(picture(colors, rand), w * 0.24, -6, back)
   place(plant(colors, rand), w / 2 - 18, FLOOR_TOP, back + 16)
@@ -507,7 +508,151 @@ export function buildRoom({ w, d, name, colors }) {
 
   const plants = plantsIn(room)
   bake(room, plants)
-  return { group: room, floor, wallMat, plants }
+  return { group: room, floor, wallMat, plants, shelfAt }
+}
+
+// ---------------------------------------------------------------------------
+// What a room earns as its project reaches milestones (milestones.js): a row
+// of trophies along the top of its bookshelf, a neon sign over the window, a
+// poster beside it, and its front plant growing. Built hidden with the room;
+// set() shows what's been earned. Geometry, materials and the drawn signs
+// are shared by every room.
+
+const TROPHY_SLOTS = 8
+let decorParts = null
+
+function sheetTexture(w, h, draw) {
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  draw(c.getContext('2d'), w, h)
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  t.anisotropy = ANISO
+  return t
+}
+
+function decorShared() {
+  if (decorParts) return decorParts
+  const neon = sheetTexture(512, 128, (g, w, h) => {
+    g.textAlign = 'center'
+    g.textBaseline = 'middle'
+    g.font = 'italic 700 92px Georgia, "Times New Roman", serif'
+    g.lineJoin = 'round'
+    // A tube of light: a wide soft glow, then the bright core.
+    for (const [blur, width, color] of [[28, 10, 'rgba(255,92,170,0.85)'], [12, 6, '#ff7cc0'], [0, 2.6, '#fff1f8']]) {
+      g.shadowColor = '#ff4fa3'
+      g.shadowBlur = blur
+      g.lineWidth = width
+      g.strokeStyle = color
+      g.strokeText('ship it!', w / 2, h / 2 + 4)
+    }
+  })
+  const poster = sheetTexture(200, 260, (g, w, h) => {
+    // A little travel poster: sun, hills and a few words.
+    g.fillStyle = '#fbe9d3'
+    g.fillRect(0, 0, w, h)
+    g.fillStyle = '#f2a65a'
+    g.beginPath(); g.arc(w * 0.5, h * 0.36, w * 0.2, 0, Math.PI * 2); g.fill()
+    g.fillStyle = '#5fb35a'
+    g.beginPath(); g.moveTo(0, h * 0.56); g.quadraticCurveTo(w * 0.3, h * 0.38, w * 0.6, h * 0.54); g.quadraticCurveTo(w * 0.8, h * 0.46, w, h * 0.52); g.lineTo(w, h * 0.7); g.lineTo(0, h * 0.7); g.fill()
+    g.fillStyle = '#2fa59a'
+    g.fillRect(0, h * 0.66, w, h * 0.34)
+    g.fillStyle = '#fbf6ec'
+    g.textAlign = 'center'
+    g.font = '700 27px Georgia, serif'
+    g.fillText('MAKE GOOD', w / 2, h * 0.8)
+    g.fillText('THINGS', w / 2, h * 0.92)
+  })
+  decorParts = {
+    gold: new THREE.MeshStandardMaterial({ color: '#e7b743', metalness: 0.65, roughness: 0.28 }),
+    neonMat: new THREE.MeshBasicMaterial({ map: neon, transparent: true, depthWrite: false, toneMapped: false }),
+    posterMat: new THREE.MeshStandardMaterial({ map: poster, roughness: 0.8 }),
+    cup: new THREE.CylinderGeometry(1.35, 0.7, 2.6, 16),
+    stem: new THREE.CylinderGeometry(0.28, 0.28, 1.4, 8),
+    base: rounded(2.4, 0.8, 1.8, 0.2),
+    handle: new THREE.TorusGeometry(0.6, 0.16, 6, 12),
+    sign: new THREE.PlaneGeometry(1, 1),
+  }
+  return decorParts
+}
+
+function trophy(parts, wood) {
+  const t = new THREE.Group()
+  const base = new THREE.Mesh(parts.base, wood)
+  base.position.y = 0.4
+  const stem = new THREE.Mesh(parts.stem, parts.gold)
+  stem.position.y = 1.5
+  const cup = new THREE.Mesh(parts.cup, parts.gold)
+  cup.position.y = 3.4
+  t.add(base, stem, cup)
+  for (const side of [-1, 1]) {
+    const handle = new THREE.Mesh(parts.handle, parts.gold)
+    handle.position.set(side * 1.3, 3.6, 0)
+    t.add(handle)
+  }
+  return t
+}
+
+// `shelfAt` is where buildRoom() put the bookshelf.
+export function roomDecor({ w, d, colors, shelfAt }) {
+  const parts = decorShared()
+  const g = new THREE.Group()
+  const back = -d / 2 + 1
+  const wood = woodMat(colors.woodDark)
+
+  // Trophies along the top of the bookshelf, filling in left to right.
+  const trophies = []
+  for (let i = 0; i < TROPHY_SLOTS; i++) {
+    const t = trophy(parts, wood)
+    // Every other one a little smaller, so the row looks collected.
+    t.scale.setScalar(PROP * (i % 2 ? 1.05 : 1.25))
+    t.position.set(shelfAt.x + (i - (TROPHY_SLOTS - 1) / 2) * 9.2, FLOOR_TOP + 30 * PROP, shelfAt.z + 2)
+    t.visible = false
+    g.add(shadowed(t))
+    trophies.push(t)
+  }
+
+  // The neon sign, over the window.
+  const neon = new THREE.Mesh(parts.sign, parts.neonMat)
+  neon.scale.set(42, 10.5, 1)
+  neon.position.set(w * 0.02, WALL_H - 5, back + 0.6)
+  neon.visible = false
+
+  // The poster, beside the window: on its left where the room is wide
+  // enough, else on its right.
+  const beside = Math.min(46, w * 0.12) * PROP / 2 + 18
+  const poster = new THREE.Group()
+  const frame = new THREE.Mesh(rounded(21, 27, 1, 0.4), wood)
+  const sheet = new THREE.Mesh(parts.sign, parts.posterMat)
+  sheet.scale.set(19, 24.7, 1)
+  sheet.position.z = 0.55
+  poster.add(frame, sheet)
+  poster.position.set(w * 0.02 + (w > 300 ? -beside : beside), 26, back + 0.6)
+  poster.visible = false
+
+  g.add(neon, poster)
+
+  let plantBase = null
+  return {
+    group: g,
+    // `state` is milestones.js decorOf(); `plant` the room's front plant.
+    set(state, plant) {
+      trophies.forEach((t, i) => { t.visible = i < state.trophies })
+      neon.visible = state.neon
+      poster.visible = state.poster
+      if (plant) {
+        plantBase ??= plant.scale.x
+        plant.scale.setScalar(plantBase * [1, 1.45, 1.85][Math.min(2, state.plant)])
+      }
+    },
+    // The neon hums: a steady glow with a rare flicker.
+    animate(now) {
+      if (!neon.visible) return
+      const flick = Math.sin(now * 0.7) > 0.995 ? 0.55 : 1
+      parts.neonMat.opacity = flick * (0.92 + Math.sin(now * 2.3) * 0.04)
+    },
+  }
 }
 
 const plantsIn = group => {
@@ -579,10 +724,51 @@ export function desk(colors, tint) {
   let scroll = 0
   let lastDraw = -1
   let lastState = ''
-  // `state` is 'busy', 'idle' or 'off'; busy screens scroll.
-  function draw(t, state, accent) {
+  // What the screen shows instead of code for a while: a picture the
+  // session just made, or a big "?" while it waits on your answer.
+  let shown = null // { img, until } or { ask, color }
+  function showImage(img, until) {
+    shown = { img, until }
+    lastState = ''
+  }
+  function showAsk(kind, color) {
+    const key = kind ? `${kind}|${color}` : null
+    if ((shown?.askKey ?? null) === key && !(shown?.img)) return
+    if (shown?.img && !kind) return
+    shown = kind ? { ask: kind, color, askKey: key } : null
+    lastState = ''
+  }
+  function drawShown(t, still) {
+    if (shown.img) {
+      ctx.fillStyle = '#1f2433'
+      ctx.fillRect(0, 0, 160, 96)
+      const { img } = shown
+      const k = Math.min(160 / img.width, 96 / img.height)
+      ctx.drawImage(img, (160 - img.width * k) / 2, (96 - img.height * k) / 2, img.width * k, img.height * k)
+    } else {
+      ctx.fillStyle = shown.color
+      ctx.fillRect(0, 0, 160, 96)
+      ctx.fillStyle = '#ffffff'
+      ctx.font = '700 64px Georgia, serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      const wobble = still ? 0 : Math.sin(t * 3) * 3
+      ctx.fillText(shown.ask === 'permission' ? '>_' : shown.ask === 'plan' ? '✎' : '?', 80, 50 + wobble)
+    }
+    texture.needsUpdate = true
+  }
+  // `state` is 'busy', 'idle' or 'off'; busy screens scroll, unless `still`
+  // (less motion), when a busy screen stays bright and doesn't move.
+  function draw(t, state, accent, still = false) {
+    if (shown?.img && t > shown.until) { shown = null; lastState = '' }
+    if (shown && state !== 'off') {
+      if (t - lastDraw < 0.1) return
+      lastDraw = t
+      drawShown(t, still)
+      return
+    }
     if (state !== 'busy' && state === lastState) return
-    if (state === 'busy' && t - lastDraw < 0.12) return
+    if (state === 'busy' && (t - lastDraw < 0.12 || (still && state === lastState))) return
     lastDraw = t
     lastState = state
     ctx.fillStyle = state === 'off' ? '#141416' : '#1f2433'
@@ -591,7 +777,7 @@ export function desk(colors, tint) {
     ctx.fillStyle = accent
     ctx.fillRect(0, 0, 160, 7)
     ctx.globalAlpha = state === 'busy' ? 1 : 0.55
-    if (state === 'busy') scroll = (scroll + 1) % lines.length
+    if (state === 'busy' && !still) scroll = (scroll + 1) % lines.length
     for (let row = 0; row < 9; row++) {
       const line = lines[(row + scroll) % lines.length]
       let x = 8 + line.indent
@@ -601,7 +787,7 @@ export function desk(colors, tint) {
         x += part.w + 4
       }
     }
-    if (state === 'busy' && Math.floor(t * 3) % 2) {
+    if (state === 'busy' && !still && Math.floor(t * 3) % 2) {
       ctx.fillStyle = '#ffffff'
       ctx.fillRect(8, 13 + 8 * 9, 5, 5)
     }
@@ -623,8 +809,191 @@ export function desk(colors, tint) {
       p.material.opacity = on ? 0.5 * (1 - k) * Math.min(1, k * 5) : 0
     }
   }
-  bake(g, [screen, mug, ...wisps])
-  return { group: g, draw, steam, mug }
+  // A picture frame by the monitor holds the latest picture the session
+  // made; an outbox tray on the other side stacks what it delivered.
+  const photoCanvas = document.createElement('canvas')
+  photoCanvas.width = 128
+  photoCanvas.height = 84
+  const photoTex = new THREE.CanvasTexture(photoCanvas)
+  photoTex.colorSpace = THREE.SRGBColorSpace
+  const photo = new THREE.Group()
+  const photoBack = new THREE.Mesh(rounded(13, 9.4, 1, 0.4), mat(colors.trim, { roughness: 0.5 }))
+  const photoFace = new THREE.Mesh(new THREE.PlaneGeometry(11.6, 8), new THREE.MeshBasicMaterial({ map: photoTex, toneMapped: false }))
+  photoFace.position.z = 0.55
+  photo.add(photoBack, photoFace)
+  photo.position.set(-22, 23.6, 1)
+  photo.rotation.set(-0.18, 0.3, 0)
+  photo.visible = false
+  g.add(photo)
+  function setPhoto(img) {
+    const pc = photoCanvas.getContext('2d')
+    const k = Math.max(128 / img.width, 84 / img.height)
+    pc.drawImage(img, (128 - img.width * k) / 2, (84 - img.height * k) / 2, img.width * k, img.height * k)
+    photoTex.needsUpdate = true
+    photo.visible = true
+  }
+  const tray = new THREE.Group()
+  const trayBase = new THREE.Mesh(rounded(11, 1.6, 8, 0.4), mat(colors.woodDark, { roughness: 0.6 }))
+  trayBase.position.y = 0.8
+  tray.add(trayBase)
+  tray.position.set(21, 18.3, -5)
+  tray.visible = false
+  g.add(tray)
+  const sheets = []
+  const paperMat = new THREE.MeshStandardMaterial({ color: '#fbf8f1', roughness: 0.85 })
+  const sheetGeo = new THREE.BoxGeometry(9, 0.45, 6.4)
+  const tabGeo = new THREE.BoxGeometry(3.2, 0.5, 1.6)
+  let delivered = 0
+  let dropping = null // the sheet that just landed: { m, at, rest }
+  const calm = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+  // `colors` of what was delivered, newest last: a sheet of paper each,
+  // with a tab in its kind's color, up to six. A new one drops in.
+  function setTray(list) {
+    const grew = list.length > delivered
+    delivered = list.length
+    for (const m of sheets) { tray.remove(m); m.children[0]?.material.dispose() }
+    sheets.length = 0
+    dropping = null
+    list.slice(-6).forEach((color, i) => {
+      const m = new THREE.Mesh(sheetGeo, paperMat)
+      const tab = new THREE.Mesh(tabGeo, new THREE.MeshStandardMaterial({ color, roughness: 0.7 }))
+      tab.position.set(-2.4, 0.05, -3.4)
+      m.add(tab)
+      m.position.set((i % 2 ? 0.4 : -0.3), 1.9 + i * 0.5, (i % 3) * 0.2)
+      m.rotation.y = ((i * 37) % 9 - 4) * 0.03
+      m.castShadow = true
+      tray.add(m)
+      sheets.push(m)
+    })
+    tray.visible = list.length > 0
+    const top = sheets.at(-1)
+    if (grew && top && !calm) dropping = { m: top, at: -1, rest: top.position.clone(), turn: top.rotation.y }
+  }
+  // Each frame: the newest sheet floats down into the tray, rocking like
+  // paper does, and settles with a little bounce.
+  const DROP_S = 1.4
+  function animateTray(t) {
+    if (!dropping) return
+    if (dropping.at < 0) dropping.at = t
+    const k = Math.min(1, (t - dropping.at) / DROP_S)
+    const { m, rest, turn } = dropping
+    const fall = 1 - k * k
+    const bounce = k > 0.75 ? Math.sin((k - 0.75) / 0.25 * Math.PI) * 0.6 : 0
+    m.position.set(rest.x + Math.sin(k * 9) * 3 * fall, rest.y + 34 * fall + bounce, rest.z + Math.cos(k * 7) * 1.2 * fall)
+    m.rotation.set(Math.sin(k * 11) * 0.35 * fall, turn + fall * 1.4, Math.cos(k * 9) * 0.3 * fall)
+    // Big enough to catch your eye on the way down.
+    m.scale.setScalar(1 + 0.8 * fall)
+    if (k >= 1) {
+      m.position.copy(rest)
+      m.rotation.set(0, turn, 0)
+      m.scale.setScalar(1)
+      dropping = null
+    }
+  }
+  shadowed(photo)
+  photoFace.castShadow = photoFace.receiveShadow = false
+  bake(g, [screen, mug, ...wisps, photo, tray])
+  return { group: g, draw, steam, mug, showImage, showAsk, setPhoto, setTray, animateTray }
+}
+
+// ---------------------------------------------------------------------------
+// The checklist easel: a small whiteboard on a stand beside a session's
+// desk, its rows ticked off as the session works through them.
+
+export function easel(colors) {
+  const g = new THREE.Group()
+  const wood = mat(colors.woodDark, { roughness: 0.6 })
+  for (const x of [-9, 9]) {
+    const leg = new THREE.Mesh(rounded(1.6, 44, 1.6, 0.5), wood)
+    leg.position.set(x, 22, 0)
+    leg.rotation.z = x < 0 ? 0.06 : -0.06
+    g.add(leg)
+  }
+  const back = new THREE.Mesh(rounded(1.4, 40, 1.4, 0.5), wood)
+  back.position.set(0, 20, -6)
+  back.rotation.x = -0.28
+  g.add(back)
+  const frame = new THREE.Mesh(rounded(26, 30, 1.6, 0.8), mat(colors.trim, { roughness: 0.4 }))
+  frame.position.set(0, 30, 0.6)
+  g.add(frame)
+  const ledge = new THREE.Mesh(rounded(24, 1.2, 3, 0.4), wood)
+  ledge.position.set(0, 14.6, 1.6)
+  const marker = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 5, 10), mat('#b85c3c'))
+  marker.rotation.z = Math.PI / 2
+  marker.position.set(5, 15.6, 1.8)
+  g.add(ledge, marker)
+  const canvas = document.createElement('canvas')
+  canvas.width = 192
+  canvas.height = 224
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  texture.anisotropy = 8
+  const board = new THREE.Mesh(new THREE.PlaneGeometry(24, 28), new THREE.MeshBasicMaterial({ map: texture, toneMapped: false }))
+  board.position.set(0, 30, 1.45)
+  g.add(board)
+  shadowed(g)
+  board.castShadow = board.receiveShadow = false
+  const ctx = canvas.getContext('2d')
+  let key = ''
+  // `items` as TodoWrite gives them; `accent` the session's own color.
+  function draw(items, accent, t) {
+    const now = items.findIndex(i => i.status === 'in_progress')
+    const blink = now >= 0 && Math.floor(t * 2) % 2
+    const k = `${items.map(i => i.status + i.text).join('|')}|${accent}|${blink}`
+    if (k === key) return
+    key = k
+    ctx.fillStyle = '#fdfcf8'
+    ctx.fillRect(0, 0, 192, 224)
+    const done = items.filter(i => i.status === 'completed').length
+    // "3 of 7 done" across the top, big enough to read from across the
+    // room, the way the directory says it.
+    ctx.fillStyle = done === items.length ? '#5f8a68' : '#2b2a2e'
+    ctx.font = '600 23px Georgia, serif'
+    ctx.textBaseline = 'alphabetic'
+    ctx.textAlign = 'left'
+    ctx.fillText(done === items.length ? 'All done ✓' : `${done} of ${items.length} done`, 12, 28)
+    const bar = (w, color) => {
+      ctx.fillStyle = color
+      ctx.beginPath()
+      ctx.roundRect(12, 37, Math.max(w, 9), 9, 4.5)
+      ctx.fill()
+    }
+    bar(168, '#e6dfd3')
+    if (done) bar(168 * (done / items.length), '#5f8a68')
+    // Six rows fit: a long list shows the ones around the item in hand.
+    const from = Math.max(0, Math.min(now - 1, items.length - 6))
+    items.slice(from, from + 6).forEach((item, i) => {
+      const y = 70 + i * 26
+      const isDone = item.status === 'completed'
+      const isNow = item.status === 'in_progress'
+      ctx.strokeStyle = isDone ? '#5f8a68' : isNow ? accent : '#b8afa2'
+      ctx.lineWidth = 2.5
+      ctx.strokeRect(12, y - 13, 15, 15)
+      if (isDone) {
+        ctx.beginPath()
+        ctx.moveTo(14, y - 6); ctx.lineTo(19, y - 1); ctx.lineTo(27, y - 14)
+        ctx.stroke()
+      } else if (isNow && blink) {
+        ctx.fillStyle = accent
+        ctx.fillRect(16, y - 9, 7, 7)
+      }
+      ctx.font = `${isNow ? 600 : 400} 15px -apple-system, "Segoe UI", sans-serif`
+      ctx.fillStyle = isDone ? '#a39b90' : '#2b2a2e'
+      let text = item.text
+      while (ctx.measureText(text).width > 146 && text.length > 4) text = `${text.slice(0, -2)}…`.replace(/……$/, '…')
+      ctx.fillText(text, 34, y)
+      if (isDone) {
+        ctx.strokeStyle = '#a39b90'
+        ctx.lineWidth = 1.5
+        ctx.beginPath()
+        ctx.moveTo(34, y - 5); ctx.lineTo(34 + ctx.measureText(text).width, y - 5)
+        ctx.stroke()
+      }
+    })
+    texture.needsUpdate = true
+  }
+  bake(g, [board])
+  return { group: g, draw }
 }
 
 // ---------------------------------------------------------------------------
@@ -838,4 +1207,72 @@ export function officeShell({ W, D, colors }) {
   const plants = plantsIn(g)
   bake(g, [...plants, hour, minute, second])
   return { group: g, plants, clock: { hour, minute, second } }
+}
+
+// ---------------------------------------------------------------------------
+// The front desk: a reception counter by the office's front door, where
+// new work comes in. A curved counter with a service bell, a stack of job
+// tickets and a little lamp, and a doormat where newcomers step in. Built
+// around its own origin, the counter's front facing +z; `bell` rings.
+
+export const FRONT_W = 96
+
+export function frontDesk(colors) {
+  const g = new THREE.Group()
+  const rand = seeded('front desk')
+  // The counter: a low body and a worktop, its ends turned back a little.
+  const body = mat(colors.counter, { roughness: 0.45 })
+  const top = woodMat(colors.woodDark)
+  const pieces = [[0, 0, 64, 0], [-40, -9, 22, -0.55], [40, -9, 22, 0.55]]
+  for (const [x, z, w, turn] of pieces) {
+    const part = new THREE.Mesh(rounded(w, 24, 16, 1.2), body)
+    part.position.set(x, 12, z)
+    part.rotation.y = turn
+    const slab = new THREE.Mesh(rounded(w + 3, 2.4, 19, 0.6), top)
+    slab.position.set(x, 25.2, z - 1)
+    slab.rotation.y = turn
+    g.add(part, slab)
+  }
+  // A trim stripe along the front, in the office's accent.
+  const stripe = new THREE.Mesh(rounded(60, 3, 1, 0.4), mat(colors.accent, { roughness: 0.5 }))
+  stripe.position.set(0, 17, 8.2)
+  g.add(stripe)
+  // The bell, a stack of tickets and a lamp.
+  const bell = new THREE.Group()
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(3.2, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2), mat('#d9b25a', { roughness: 0.2, metalness: 0.85 }))
+  const plate = new THREE.Mesh(new THREE.CylinderGeometry(4, 4.2, 0.8, 20), mat('#2b2a2e', { roughness: 0.4 }))
+  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.8, 10, 10), mat('#d9b25a', { roughness: 0.2, metalness: 0.85 }))
+  plate.position.y = 0.4
+  dome.position.y = 0.8
+  knob.position.y = 4.2
+  bell.add(plate, dome, knob)
+  bell.position.set(16, 26.4, 0)
+  g.add(bell)
+  colors.mugs.slice(0, 4).forEach((c, i) => {
+    const card = new THREE.Mesh(rounded(9, 0.5, 6, 0.2), mat(i % 2 ? colors.trim : c, { roughness: 0.8 }))
+    card.position.set(-8 + (rand() - 0.5), 26.6 + i * 0.6, 1 + (rand() - 0.5))
+    card.rotation.y = (rand() - 0.5) * 0.5
+    g.add(card)
+  })
+  const lamp = new THREE.Group()
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 10, 8), mat('#2b2a2e'))
+  stem.position.y = 5
+  const shade = new THREE.Mesh(new THREE.ConeGeometry(4, 4.4, 20, 1, true), lampMat)
+  shade.position.y = 11
+  lamp.add(stem, shade)
+  lamp.position.set(-28, 26.4, -4)
+  g.add(lamp)
+  const leafy = plant(colors, rand)
+  leafy.scale.setScalar(PROP * 0.9)
+  leafy.position.set(-62, 0.4, -6)
+  g.add(leafy)
+  shadowed(g)
+  // The doormat by the door, to the counter's right, where newcomers step in.
+  const mat_ = new THREE.Mesh(rounded(26, 0.6, 16, 0.4), fabricMat(colors.woodDark))
+  mat_.position.set(FRONT_W / 2 + 26, 0.8, 14)
+  mat_.receiveShadow = true
+  g.add(mat_)
+  const plants = plantsIn(g)
+  bake(g, [bell, ...plants])
+  return { group: g, bell, plants }
 }

@@ -8,31 +8,45 @@
 //   --replace   take over the port from a managed bridge already holding it
 //
 //   POST /event    one event or an array (mod schema or classic hook stdin)
-//   GET  /stream   SSE: replays the recent log and gauges, then every new event
+//   GET  /stream   SSE: replays what places each thread, the recent log and
+//                  gauges, then every new event
 //   GET  /history  past sessions read from ~/.claude/projects transcripts
 //   GET  /healthz  liveness probe the mod uses before spawning a bridge, with
 //                  this bridge's version, so a newer mod can replace it
 //   POST /shutdown a newer bridge taking over the port (managed bridges only)
 //   GET  /transcript?session=&agent=&after=   a conversation, read from its transcript
+//   GET  /asset?session=&id=   a picture a session made or read, by the path its event named
 //   POST /chat     a message for a session or subagent (the office page only)
+//   POST /jobs     start a job from the front desk, in a project the office
+//                  knows (the office page only; see jobs.mjs)
+//   POST /jobs/stop   stop a job the front desk started (the office page only)
 //   GET  /inbox?session=   a session's mod picking up its messages
+//   POST /stop     stop the turn a session is running (the office page only; its mod does it)
+//   POST /answer   an answer to a question or plan a session is holding (the office page only)
+//   GET  /answer/wait?session=&id=   that session's mod waiting for one (asks.mjs)
+//   POST /auto-update   turn the plugin's auto-update on or off (the office
+//                  page only; see autoupdate.mjs). /healthz says where it stands.
 //   GET  /         the office
 //
 // Every request must be addressed to the bridge itself, and chat needs the
-// token only the office page gets (guard.mjs says why).
+// token only the office page gets (guard.mjs says why), and so do jobs.
 
 import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
-import { extname, join, dirname } from 'node:path'
+import { readFile, stat } from 'node:fs/promises'
+import { extname, join, dirname, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { normalize, GAUGES, gaugeKey } from './normalize.mjs'
 import { findProject } from './projects.mjs'
 import { readHistory, tailContext } from './history.mjs'
-import { startDemo } from './demo.mjs'
+import { startDemo, demoJob, answerDemo, stopDemo } from './demo.mjs'
 import { refusal, newToken, tokenMatches, TOKEN_HEADER, INBOX_HEADER, CONTROL_HEADER } from './guard.mjs'
 import * as chat from './chat.mjs'
+import { createJobs } from './jobs.mjs'
+import * as asks from './asks.mjs'
 import { findTranscript, readTranscript } from './transcript.mjs'
+import { isEngineNote } from './prompts.mjs'
+import * as autoUpdate from './autoupdate.mjs'
 
 const args = process.argv.slice(2)
 const flag = name => args.includes(`--${name}`)
@@ -69,11 +83,79 @@ const TYPES = {
   '.svg': 'image/svg+xml',
 }
 
+// Pictures sessions made or read: `${session}|${id}` -> the file. Only
+// these paths are ever served, and only as images (see /asset).
+const pictures = new Map()
+const PICTURE_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml' }
+const PICTURE_LIMIT = 20 * 1024 * 1024
+const PICTURES_KEEP = 500
+
 // Events in order, plus the newest reading of each gauge, which would
 // otherwise crowd everything else out of the log.
 const log = []
 const gauges = new Map()
 const clients = new Set()
+
+// What places each thread in the office: its start (project, so its room),
+// its first prompt (its name), the coordinator's marker, its end, and the
+// agents and questions still open. Kept outside the log like the gauges, so
+// a page opened on a long-running bridge still finds every thread in its
+// room once the log has moved on. session -> { events: Map, endedAt? }
+const anchors = new Map()
+const ANCHOR_SESSIONS = 500
+const ANCHORS_PER_SESSION = 64
+const ANCHOR_ENDED_MS = 6 * 60 * 60 * 1000 // /history has it after that
+
+function anchorKey(ev) {
+  switch (ev.kind) {
+    case 'session.start': return 'start'
+    case 'session.thread': return 'thread'
+    case 'session.end': return 'end'
+    case 'turn.start': return !ev.agent && typeof ev.text === 'string' && !isEngineNote(ev.text) ? 'prompt' : undefined
+    case 'agent.spawn': return `agent|${ev.agent}`
+    case 'ask.open': return `ask|${ev.id}`
+  }
+}
+
+function anchor(ev) {
+  if (typeof ev.session !== 'string') return
+  if (ev.kind === 'agent.end') return void anchors.get(ev.session)?.events.delete(`agent|${ev.agent}`)
+  if (ev.kind === 'ask.close') return void anchors.get(ev.session)?.events.delete(`ask|${ev.id}`)
+  const key = anchorKey(ev)
+  if (!key) return
+  let a = anchors.get(ev.session)
+  if (!a) anchors.set(ev.session, (a = { events: new Map() }))
+  // Only the first prompt names a thread.
+  if (key === 'prompt' && a.events.has('prompt')) return
+  if (key === 'start') {
+    // Resumed: it is live again.
+    a.events.delete('end')
+    a.endedAt = undefined
+  }
+  if (key === 'end') a.endedAt = Date.now()
+  a.events.set(key, ev)
+  if (a.events.size > ANCHORS_PER_SESSION) {
+    const oldest = [...a.events.keys()].find(k => k.includes('|'))
+    if (oldest) a.events.delete(oldest)
+  }
+}
+
+function pruneAnchors(now = Date.now()) {
+  for (const [session, a] of anchors) if (a.endedAt && now - a.endedAt > ANCHOR_ENDED_MS) anchors.delete(session)
+  // Too many: ended threads go first, then the longest-known ones.
+  while (anchors.size > ANCHOR_SESSIONS) {
+    const ended = [...anchors].find(([, a]) => a.endedAt)
+    anchors.delete(ended ? ended[0] : anchors.keys().next().value)
+  }
+}
+
+// What a fresh page is sent: the anchors the log no longer holds, oldest
+// first, then the log, then the gauges.
+function replay() {
+  const inLog = new Set(log)
+  const kept = [...anchors.values()].flatMap(a => [...a.events.values()]).filter(ev => !inLog.has(ev)).sort((a, b) => a.t - b.t)
+  return [...kept, ...log, ...gauges.values()]
+}
 
 // The bridge names projects itself, so live and past sessions of one
 // repository land in one room whatever the producer called it.
@@ -85,18 +167,45 @@ function enrich(ev) {
   return ev
 }
 
+// Folders the office has seen sessions in: the only places the front desk
+// starts jobs.
+const knownDirs = new Set()
+const know = (...dirs) => dirs.forEach(d => typeof d === 'string' && isAbsolute(d) && knownDirs.add(d))
+async function isKnown(dir) {
+  if (knownDirs.has(dir)) return true
+  // Past sessions count too; read them once, on demand.
+  try {
+    for (const s of await readHistory({ days: HISTORY_DAYS })) know(s.cwd, s.project?.id)
+  } catch {}
+  return knownDirs.has(dir)
+}
+// Demo-only: the sample office keeps its auto-update switch in memory, so
+// trying the toggle never writes to your Claude Code settings.
+let demoAutoUpdate = { state: 'off', pending: false }
+const updates = () => (flag('demo') ? demoAutoUpdate : autoUpdate.brief(autoUpdate.read()))
+
+const jobs = createJobs({ publish: events => publish(events), isKnown, demo: flag('demo') ? demoJob() : undefined })
+
 function publish(events) {
   for (const raw of events) {
     const ev = enrich(raw)
+    if (ev.kind === 'session.start') know(ev.cwd, ev.project?.id)
     if (ev.kind === 'chat.delivered') chat.settle(ev.id, ev.ok !== false)
+    if (ev.kind === 'ask.open' || ev.kind === 'ask.close') asks.track(ev)
+    if (ev.kind === 'asset.add' && ev.type === 'image' && typeof ev.path === 'string' && isAbsolute(ev.path)) {
+      pictures.set(`${ev.session}|${ev.id}`, ev.path)
+      if (pictures.size > PICTURES_KEEP) pictures.delete(pictures.keys().next().value)
+    }
     if (GAUGES.has(ev.kind)) gauges.set(gaugeKey(ev), ev)
     else log.push(ev)
+    anchor(ev)
     // A finished agent's last reading has nothing left to show.
     if (ev.kind === 'agent.end') gauges.delete(gaugeKey({ kind: 'agent.context', session: ev.session, agent: ev.agent }))
     const frame = `data: ${JSON.stringify(ev)}\n\n`
     for (const res of clients) res.write(frame)
   }
   if (log.length > LOG_LIMIT) log.splice(0, log.length - LOG_LIMIT)
+  pruneAnchors()
 }
 
 // Settings hooks carry no context figures, but they name the transcript.
@@ -163,10 +272,84 @@ const server = createServer(async (req, res) => {
     return
   }
 
+  if (req.method === 'POST' && (pathname === '/jobs' || pathname === '/jobs/stop')) {
+    if (!tokenMatches(req.headers[TOKEN_HEADER], TOKEN)) return json(res, 403, { error: 'missing or wrong token' })
+    try {
+      const body = JSON.parse(await readBody(req))
+      const { status, error, job } = await (pathname === '/jobs' ? jobs.start(body) : jobs.stop(body))
+      json(res, status, error ? { error } : { ok: true, ...(job && { job }) })
+    } catch (err) {
+      json(res, 400, { error: String(err.message ?? err) })
+    }
+    return
+  }
+
   if (req.method === 'GET' && pathname === '/inbox') {
     // A custom header: a web page can't send it to another origin unasked.
     if (req.headers[INBOX_HEADER] !== '1') return json(res, 403, { error: 'missing inbox header' })
     json(res, 200, { messages: chat.take(searchParams.get('session') ?? '') })
+    return
+  }
+
+  // Stopping a turn: a message of its own kind, through the same inbox.
+  if (req.method === 'POST' && pathname === '/stop') {
+    if (!tokenMatches(req.headers[TOKEN_HEADER], TOKEN)) return json(res, 403, { error: 'missing or wrong token' })
+    try {
+      const body = JSON.parse(await readBody(req))
+      const sent = chat.send({ session: body?.session, action: 'stop' })
+      if (sent.error) return json(res, 400, { error: sent.error })
+      const { id, session, t } = sent.message
+      publish([{ t, kind: 'stop.sent', session, id }])
+      // Demo-only: the sample session stops itself.
+      if (flag('demo')) stopDemo(session)
+      json(res, 200, { id })
+    } catch (err) {
+      json(res, 400, { error: String(err.message ?? err) })
+    }
+    return
+  }
+
+  // Answering from the office: guarded like chat, since it speaks for you.
+  if (req.method === 'POST' && pathname === '/answer') {
+    if (!tokenMatches(req.headers[TOKEN_HEADER], TOKEN)) return json(res, 403, { error: 'missing or wrong token' })
+    try {
+      const body = JSON.parse(await readBody(req))
+      // Demo-only: the sample sessions also take a permission or a plan
+      // approval, which a real session's mod can't.
+      if (flag('demo') && typeof body?.say === 'string') {
+        const isTaken = answerDemo(body.session, body.id, body.say.slice(0, 200))
+        return json(res, isTaken ? 200 : 404, isTaken ? { ok: true } : { error: 'that question has moved on' })
+      }
+      const { status, error, answer } = asks.answer(body)
+      if (flag('demo') && answer) answerDemo(body.session, body.id, asks.line(answer))
+      json(res, status, error ? { error } : { ok: true, answer })
+    } catch (err) {
+      json(res, 400, { error: String(err.message ?? err) })
+    }
+    return
+  }
+
+  // Auto-update: guarded like chat, since it writes to your settings.
+  if (req.method === 'POST' && pathname === '/auto-update') {
+    if (!tokenMatches(req.headers[TOKEN_HEADER], TOKEN)) return json(res, 403, { error: 'missing or wrong token' })
+    try {
+      const body = JSON.parse(await readBody(req))
+      if (typeof body?.on !== 'boolean') return json(res, 400, { error: 'say on: true or false' })
+      if (flag('demo')) {
+        demoAutoUpdate = { state: body.on ? 'on' : 'off', pending: true }
+        return json(res, 200, { ok: true, autoUpdate: demoAutoUpdate })
+      }
+      const result = autoUpdate.set(body.on)
+      json(res, result.state === 'missing' ? 409 : 200, { ok: result.state !== 'missing', autoUpdate: autoUpdate.brief(result), text: autoUpdate.describe(result) })
+    } catch (err) {
+      json(res, 400, { error: String(err.message ?? err) })
+    }
+    return
+  }
+
+  if (req.method === 'GET' && pathname === '/answer/wait') {
+    if (req.headers[INBOX_HEADER] !== '1') return json(res, 403, { error: 'missing inbox header' })
+    json(res, 200, await asks.wait(searchParams.get('session') ?? '', searchParams.get('id') ?? ''))
     return
   }
 
@@ -178,6 +361,27 @@ const server = createServer(async (req, res) => {
       json(res, 200, await readTranscript(path, after))
     } catch (err) {
       json(res, 500, { error: String(err.message ?? err) })
+    }
+    return
+  }
+
+  if (req.method === 'GET' && pathname === '/asset') {
+    const path = pictures.get(`${searchParams.get('session')}|${searchParams.get('id')}`)
+    const type = path && PICTURE_TYPES[extname(path).toLowerCase()]
+    if (!type) return json(res, 404, { error: 'no such picture' })
+    try {
+      const info = await stat(path)
+      if (!info.isFile() || info.size > PICTURE_LIMIT) return json(res, 404, { error: 'no such picture' })
+      // Shown in an <img> only: an SVG opened on its own runs nothing here.
+      res.writeHead(200, {
+        'content-type': type,
+        'cache-control': 'private, max-age=60',
+        'x-content-type-options': 'nosniff',
+        'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+      })
+      res.end(await readFile(path))
+    } catch {
+      json(res, 404, { error: 'no such picture' })
     }
     return
   }
@@ -201,7 +405,7 @@ const server = createServer(async (req, res) => {
       'cache-control': 'no-cache',
       connection: 'keep-alive',
     })
-    res.write(`event: replay\ndata: ${JSON.stringify([...log, ...gauges.values()])}\n\n`)
+    res.write(`event: replay\ndata: ${JSON.stringify(replay())}\n\n`)
     clients.add(res)
     const ping = setInterval(() => res.write(': ping\n\n'), 15000)
     req.on('close', () => {
@@ -222,7 +426,7 @@ const server = createServer(async (req, res) => {
   }
 
   if (pathname === '/healthz') {
-    json(res, 200, { ok: true, name: 'agent-office', version: VERSION, managed: MANAGED, demo: flag('demo'), chat: true, events: log.length, viewers: clients.size })
+    json(res, 200, { ok: true, name: 'agent-office', version: VERSION, managed: MANAGED, demo: flag('demo'), chat: true, jobs: true, answers: true, autoUpdate: updates(), events: log.length, viewers: clients.size })
     return
   }
 
