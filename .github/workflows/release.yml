@@ -46,7 +46,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           node scripts/version.mjs notes "$TAG" > notes.md
-          printf '\n\n**Install:** `/plugin marketplace add tharun-se95/ModsArena`, then `/plugin install agent-office@modsarena`. **Update:** `claude plugin update agent-office@modsarena`, or turn on auto-update once under `/plugin` → Marketplaces → modsarena. **Try it:** https://tharun-se95.github.io/ModsArena/\n' >> notes.md
+          printf '\n\n**Install:** `/plugin marketplace add tharun-se95/ModsArena`, then `/plugin install agent-office@modsarena`. **Update:** run `/office auto-update` once and new versions arrive on their own (or turn it on under `/plugin` → Marketplaces → modsarena); to update by hand, `claude plugin update agent-office@modsarena`. **Try it:** https://tharun-se95.github.io/ModsArena/\n' >> notes.md
           # A pushed tag must already exist; a manual run creates it on this commit.
           if [ "$GITHUB_EVENT_NAME" = push ]; then where=--verify-tag
           else where="--target=$GITHUB_SHA"; fi
