@@ -134,9 +134,12 @@ let runSession = null
 export function startDemo(publish) {
   let seq = 0
 
-  // `job`, for a session the front desk started: it stops once for your OK
-  // (job.onAsk says when), and ends after its first turn.
-  runSession = function (session, project, pace, asThread = false, first = pick(PROMPTS), job = null, firstAsk = undefined) {
+  // Options: `job`, for a session the front desk started: it stops once for
+  // your OK (job.onAsk says when), and ends after its first turn.
+  // `firstAsk`: it asks early in its first turn, this roll picking what
+  // (below 0.6 a question, below 0.85 a permission, else a plan).
+  // `turnsLeft`: a thread that does that many turns and then ends.
+  runSession = function (session, project, pace, { asThread = false, first = pick(PROMPTS), job = null, firstAsk = undefined, turnsLeft = Infinity } = {}) {
     const emit = ev => publish([{ t: Date.now(), session, ...ev }])
     let messages = rand(8000, 40000)
     let turns = 0
@@ -286,7 +289,10 @@ export function startDemo(publish) {
         if (Math.random() < 0.6) {
           const [type, title, url] = pick(DELIVERABLES)
           const n = rand(12, 240)
-          emit({ kind: 'asset.add', id: `${type}-${n}`, type, title, url: `${url}${n}`, ...(type === 'pr' && { meta: { state: 'open', additions: rand(20, 300), deletions: rand(2, 80) } }) })
+          const pr = { kind: 'asset.add', id: `${type}-${n}`, type, title, url: `${url}${n}`, ...(type === 'pr' && { meta: { state: 'open', additions: rand(20, 300), deletions: rand(2, 80) } }) }
+          emit(pr)
+          // A while later the pull request is merged (the office rings a bell).
+          if (type === 'pr') setTimeout(() => emit({ ...pr, meta: { ...pr.meta, state: 'merged' } }), rand(12000, 25000) * pace)
         }
         messages += rand(4000, 14000)
         if (used() > WINDOW - 33000) {
@@ -304,15 +310,21 @@ export function startDemo(publish) {
         }
         // Then it waits on you: sometimes briefly, sometimes a while.
         await sleep((Math.random() < 0.5 ? rand(1500, 5000) : rand(9000, 20000)) * pace)
+        if (turns >= turnsLeft) {
+          emit({ kind: 'session.end', reason: 'prompt_input_exit' })
+          return
+        }
       }
     }
 
     void loop()
   }
 
-  runSession('demo-payments-1', PROJECTS[0], 1, false, 'Harden the session handling', null, 0)
-  setTimeout(() => runSession('demo-payments-2', PROJECTS[0], 1.6, false, 'Why is the build flaky?'), 2500)
-  setTimeout(() => runSession('demo-dashboard-1', PROJECTS[1], 1.3, true, 'Migrate charts to the new tokens', null, 0.9), 5000)
+  runSession('demo-payments-1', PROJECTS[0], 1, { first: 'Harden the session handling', firstAsk: 0 })
+  setTimeout(() => runSession('demo-payments-2', PROJECTS[0], 1.6, { first: 'Why is the build flaky?' }), 2500)
+  setTimeout(() => runSession('demo-dashboard-1', PROJECTS[1], 1.3, { asThread: true, first: 'Migrate charts to the new tokens', firstAsk: 0.9 }), 5000)
+  // A quick one that finishes and ends: the office rings a bell for it.
+  setTimeout(() => runSession('demo-dashboard-2', PROJECTS[1], 0.8, { first: 'Review the open PR', turnsLeft: 1 }), 8000)
 }
 
 // Demo only: a front-desk job taken by a sample session instead of a real
@@ -326,10 +338,10 @@ export function demoJob() {
     const project = PROJECTS.find(p => p.id === job.dir) ?? PROJECTS[0]
     setTimeout(() => {
       update({ state: 'working', short, session: `${short}-demo-job-${n}` })
-      runSession?.(`${short}-demo-job-${n}`, project, 0.7, false, prompt, {
+      runSession?.(`${short}-demo-job-${n}`, project, 0.7, { first: prompt, job: {
         onAsk: open => update({ state: open ? 'blocked' : 'working', ...(open && { waitingFor: 'permission prompt' }) }),
         onDone: () => update({ state: 'done' }),
-      })
+      } })
     }, 1200)
   }
 }

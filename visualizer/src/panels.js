@@ -17,10 +17,12 @@ import * as assets from './assets.js'
 import { progressHtml } from './progress.js'
 import * as deliverables from './deliverables.js'
 import { goalTitle, projectName, projectIcon, energy, energyMeter } from './names.js'
+import { who } from './critters.js'
 import { devView } from './prefs.js'
 import { openProjectEditor } from './project-editor.js'
 import * as actions from './actions.js'
 import * as mentions from './mentions.js'
+import * as milestones from './milestones.js'
 
 const $ = sel => document.querySelector(sel)
 const k = n => (n === undefined ? '—' : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : `${Math.round(n / 1000)}k`)
@@ -276,7 +278,7 @@ function agentRow(a, depth) {
   return `
     <button class="agent-row ${state}" style="--depth:${depth}" data-pick="${escapeHtml(a.id)}" data-hover="${escapeHtml(a.id)}">
       <i class="dot ${tintOf(a.type)}"></i>
-      <span class="aname">${escapeHtml(a.label)}${a.description && a.description !== a.label ? `<span class="muted"> · ${escapeHtml(a.description)}</span>` : ''}</span>
+      <span class="aname">${escapeHtml(who(a).title)}${a.description && a.description !== a.label ? `<span class="muted"> · ${escapeHtml(a.description)}</span>` : ''}</span>
       <span class="astate">${a.mailAt && Date.now() - a.mailAt < 8000 ? '<i class="env" title="Just got a message">✉</i>' : ''}${state === 'working' && a.context?.tokens ? ctxBadge(f, { bare: true }) : `<i class="sdot ${state}" title="${STATE_WORDS[state]}"></i>`}</span>
     </button>`
 }
@@ -318,7 +320,7 @@ function threadRow(n, running, selected) {
         <span class="ename">${escapeHtml(title(n))}${n.thread ? '<span class="badge" title="A claude.ai project’s coordinator handed this session its work">thread</span>' : ''}</span>
         ${live ? pill(state) : n.context?.tokens ? ctxBadge(f, { bare: true }) : '<span></span>'}
         ${live ? assets.progress(n) : ''}
-        <span class="estate">${live && n.context?.tokens ? `${ctxBadge(f)} · ` : ''}${escapeHtml(doing)}</span>
+        <span class="estate">${escapeHtml(who(n).name)} · ${live && n.context?.tokens ? `${ctxBadge(f)} · ` : ''}${escapeHtml(doing)}</span>
       </button>
       ${live ? teamRows(n) : ''}
     </div>`
@@ -390,7 +392,7 @@ function gauge(n, live, whose) {
 function crumbs(n) {
   const chain = lineage(n)
   const parts = [`<button data-back>${escapeHtml(chain[0] ? where(chain[0]) : 'Projects')}</button>`]
-  chain.slice(0, -1).forEach(x => parts.push(`<button data-pick="${escapeHtml(x.id)}">${escapeHtml(x.label)}</button>`))
+  chain.slice(0, -1).forEach(x => parts.push(`<button data-pick="${escapeHtml(x.id)}">${escapeHtml(x.kind === 'agent' ? who(x).name : x.label)}</button>`))
   return `<nav class="crumbs" aria-label="Where this is">${parts.join('<span aria-hidden="true">›</span>')}</nav>`
 }
 
@@ -413,11 +415,11 @@ function teamTab(n, running) {
   const rows = []
   const walk = (branch, d) => branch.forEach(({ node, children }) => {
     const state = agentState(node)
-    const kind = [node.teammate ? 'teammate' : node.fork ? 'fork' : node.background ? 'background' : '', node.type !== node.label ? node.type : ''].filter(Boolean).join(' · ')
+    const kind = [node.teammate ? 'teammate' : node.fork ? 'fork' : node.background ? 'background' : '', node.name ? '' : node.type].filter(Boolean).join(' · ')
     rows.push(`
       <button class="member ${node.id === n.id ? 'on' : ''}" style="--depth:${d}" data-pick="${escapeHtml(node.id)}" data-hover="${escapeHtml(node.id)}">
         <i class="dot ${tintOf(node.type)}"></i>
-        <span class="mname">${escapeHtml(node.label)}${kind ? `<small>${escapeHtml(kind)}</small>` : ''}</span>
+        <span class="mname">${escapeHtml(who(node).title)}${kind ? `<small>${escapeHtml(kind)}</small>` : ''}</span>
         ${pill(state)}
         <span class="mdesc">${escapeHtml(node.description ?? '')}${node.context?.tokens ? (devView() ? ` · ${pct(fill(node))} of its window` : ` · ${energy(fill(node)).word}`) : ''}</span>
       </button>`)
@@ -427,7 +429,7 @@ function teamTab(n, running) {
   return `
     <button class="member lead ${host.id === n.id ? 'on' : ''}" style="--depth:0" data-pick="${escapeHtml(host.id)}">
       <i class="dot ${sessionTint(host.session)}"></i>
-      <span class="mname">Lead<small>the main conversation</small></span>
+      <span class="mname">${escapeHtml(who(host).title)}<small>the main conversation</small></span>
       ${pill(threadState(host, running))}
       <span class="mdesc">${host.model ? escapeHtml(host.model) : ''}</span>
     </button>
@@ -452,7 +454,20 @@ function sessionDetails(n) {
     ${live ? breakdown(n) + limits(n) : ''}
     ${files.length ? `<h3>Files it has worked on</h3>${files.map(fileLine).join('')}` : ''}
     ${act?.actions.length ? `<h3>Recently</h3>${act.actions.slice(0, 8).map(x => line(escapeHtml(say(x)), ago(x.t), x.ok ? '' : 'bad')).join('')}` : ''}
-    ${n.prompts?.length ? `<h3>What you asked</h3>${[...n.prompts].reverse().slice(0, 6).map(p => line(asked(p), ago(p.t))).join('')}` : ''}`
+    ${n.prompts?.length ? `<h3>What you asked</h3>${[...n.prompts].reverse().slice(0, 6).map(p => line(asked(p), ago(p.t))).join('')}` : ''}
+    ${projectMilestones(n)}`
+}
+
+// What the thread's project has reached so far, and how close the rest are.
+const day = t => new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+function projectMilestones(n) {
+  if (!n.project) return ''
+  const list = milestones.progress(milestones.mine(), n.project)
+  const got = list.filter(m => m.at).length
+  return `<h3>Milestones <small class="muted">${escapeHtml(where(n))} · ${got} of ${list.length}</small></h3>
+    <ul class="milestones">${list.map(m => `
+      <li class="${m.at ? 'got' : ''}"><i aria-hidden="true">${m.at ? '★' : '☆'}</i><span>${escapeHtml(m.title)}${m.note ? `<small>${escapeHtml(m.note)}</small>` : ''}</span><time>${m.at ? day(m.at) : m.goal > 1 ? `${m.have.toLocaleString()} of ${m.goal.toLocaleString()}` : 'not yet'}</time></li>`).join('')}
+    </ul>`
 }
 
 function agentDetails(n) {
@@ -468,10 +483,10 @@ function head(n, running) {
   const state = isAgent ? agentState(n) : threadState(n, running)
   const sub = isAgent
     ? [n.description, n.teammateId ?? (n.teammate ? 'teammate' : ''), n.fork ? 'fork of its parent' : n.background ? 'in the background' : ''].filter(Boolean).join(' · ')
-    : [n.thread ? 'Thread of a claude.ai project' : '', n.gitBranch, isLive(n) ? '' : `ended ${ago(n.endedAt ?? n.lastAt)}`].filter(Boolean).join(' · ')
+    : [who(n).title, n.thread ? 'Thread of a claude.ai project' : '', n.gitBranch, isLive(n) ? '' : `ended ${ago(n.endedAt ?? n.lastAt)}`].filter(Boolean).join(' · ')
   return `
     ${crumbs(n)}
-    <h2 class="dtitle"><i class="dot ${isAgent ? tintOf(n.type) : sessionTint(n.session)}"></i>${escapeHtml(isAgent ? n.label : title(n))}</h2>
+    <h2 class="dtitle"><i class="dot ${isAgent ? tintOf(n.type) : sessionTint(n.session)}"></i>${escapeHtml(isAgent ? who(n).title : title(n))}</h2>
     <p class="dmeta">${pill(state)} ${escapeHtml(sub)}</p>
     ${progressHtml(n.todos, { big: true })}
     ${actions.bar(n, state)}`

@@ -497,7 +497,8 @@ export function buildRoom({ w, d, name, colors }) {
     obj.position.set(x, y, z)
     room.add(obj)
   }
-  place(bookshelf(colors, rand), -w / 2 + 48 + rand() * 10, FLOOR_TOP, back + 9.5)
+  const shelfAt = { x: -w / 2 + 48 + rand() * 10, z: back + 9.5 }
+  place(bookshelf(colors, rand), shelfAt.x, FLOOR_TOP, shelfAt.z)
   place(windowPane(colors, Math.min(46, w * 0.12)), w * 0.02, -8, back)
   if (w > 300) place(picture(colors, rand), w * 0.24, -6, back)
   place(plant(colors, rand), w / 2 - 18, FLOOR_TOP, back + 16)
@@ -507,7 +508,151 @@ export function buildRoom({ w, d, name, colors }) {
 
   const plants = plantsIn(room)
   bake(room, plants)
-  return { group: room, floor, wallMat, plants }
+  return { group: room, floor, wallMat, plants, shelfAt }
+}
+
+// ---------------------------------------------------------------------------
+// What a room earns as its project reaches milestones (milestones.js): a row
+// of trophies along the top of its bookshelf, a neon sign over the window, a
+// poster beside it, and its front plant growing. Built hidden with the room;
+// set() shows what's been earned. Geometry, materials and the drawn signs
+// are shared by every room.
+
+const TROPHY_SLOTS = 8
+let decorParts = null
+
+function sheetTexture(w, h, draw) {
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  draw(c.getContext('2d'), w, h)
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  t.anisotropy = ANISO
+  return t
+}
+
+function decorShared() {
+  if (decorParts) return decorParts
+  const neon = sheetTexture(512, 128, (g, w, h) => {
+    g.textAlign = 'center'
+    g.textBaseline = 'middle'
+    g.font = 'italic 700 92px Georgia, "Times New Roman", serif'
+    g.lineJoin = 'round'
+    // A tube of light: a wide soft glow, then the bright core.
+    for (const [blur, width, color] of [[28, 10, 'rgba(255,92,170,0.85)'], [12, 6, '#ff7cc0'], [0, 2.6, '#fff1f8']]) {
+      g.shadowColor = '#ff4fa3'
+      g.shadowBlur = blur
+      g.lineWidth = width
+      g.strokeStyle = color
+      g.strokeText('ship it!', w / 2, h / 2 + 4)
+    }
+  })
+  const poster = sheetTexture(200, 260, (g, w, h) => {
+    // A little travel poster: sun, hills and a few words.
+    g.fillStyle = '#fbe9d3'
+    g.fillRect(0, 0, w, h)
+    g.fillStyle = '#f2a65a'
+    g.beginPath(); g.arc(w * 0.5, h * 0.36, w * 0.2, 0, Math.PI * 2); g.fill()
+    g.fillStyle = '#5fb35a'
+    g.beginPath(); g.moveTo(0, h * 0.56); g.quadraticCurveTo(w * 0.3, h * 0.38, w * 0.6, h * 0.54); g.quadraticCurveTo(w * 0.8, h * 0.46, w, h * 0.52); g.lineTo(w, h * 0.7); g.lineTo(0, h * 0.7); g.fill()
+    g.fillStyle = '#2fa59a'
+    g.fillRect(0, h * 0.66, w, h * 0.34)
+    g.fillStyle = '#fbf6ec'
+    g.textAlign = 'center'
+    g.font = '700 27px Georgia, serif'
+    g.fillText('MAKE GOOD', w / 2, h * 0.8)
+    g.fillText('THINGS', w / 2, h * 0.92)
+  })
+  decorParts = {
+    gold: new THREE.MeshStandardMaterial({ color: '#e7b743', metalness: 0.65, roughness: 0.28 }),
+    neonMat: new THREE.MeshBasicMaterial({ map: neon, transparent: true, depthWrite: false, toneMapped: false }),
+    posterMat: new THREE.MeshStandardMaterial({ map: poster, roughness: 0.8 }),
+    cup: new THREE.CylinderGeometry(1.35, 0.7, 2.6, 16),
+    stem: new THREE.CylinderGeometry(0.28, 0.28, 1.4, 8),
+    base: rounded(2.4, 0.8, 1.8, 0.2),
+    handle: new THREE.TorusGeometry(0.6, 0.16, 6, 12),
+    sign: new THREE.PlaneGeometry(1, 1),
+  }
+  return decorParts
+}
+
+function trophy(parts, wood) {
+  const t = new THREE.Group()
+  const base = new THREE.Mesh(parts.base, wood)
+  base.position.y = 0.4
+  const stem = new THREE.Mesh(parts.stem, parts.gold)
+  stem.position.y = 1.5
+  const cup = new THREE.Mesh(parts.cup, parts.gold)
+  cup.position.y = 3.4
+  t.add(base, stem, cup)
+  for (const side of [-1, 1]) {
+    const handle = new THREE.Mesh(parts.handle, parts.gold)
+    handle.position.set(side * 1.3, 3.6, 0)
+    t.add(handle)
+  }
+  return t
+}
+
+// `shelfAt` is where buildRoom() put the bookshelf.
+export function roomDecor({ w, d, colors, shelfAt }) {
+  const parts = decorShared()
+  const g = new THREE.Group()
+  const back = -d / 2 + 1
+  const wood = woodMat(colors.woodDark)
+
+  // Trophies along the top of the bookshelf, filling in left to right.
+  const trophies = []
+  for (let i = 0; i < TROPHY_SLOTS; i++) {
+    const t = trophy(parts, wood)
+    // Every other one a little smaller, so the row looks collected.
+    t.scale.setScalar(PROP * (i % 2 ? 1.05 : 1.25))
+    t.position.set(shelfAt.x + (i - (TROPHY_SLOTS - 1) / 2) * 9.2, FLOOR_TOP + 30 * PROP, shelfAt.z + 2)
+    t.visible = false
+    g.add(shadowed(t))
+    trophies.push(t)
+  }
+
+  // The neon sign, over the window.
+  const neon = new THREE.Mesh(parts.sign, parts.neonMat)
+  neon.scale.set(42, 10.5, 1)
+  neon.position.set(w * 0.02, WALL_H - 5, back + 0.6)
+  neon.visible = false
+
+  // The poster, beside the window: on its left where the room is wide
+  // enough, else on its right.
+  const beside = Math.min(46, w * 0.12) * PROP / 2 + 18
+  const poster = new THREE.Group()
+  const frame = new THREE.Mesh(rounded(21, 27, 1, 0.4), wood)
+  const sheet = new THREE.Mesh(parts.sign, parts.posterMat)
+  sheet.scale.set(19, 24.7, 1)
+  sheet.position.z = 0.55
+  poster.add(frame, sheet)
+  poster.position.set(w * 0.02 + (w > 300 ? -beside : beside), 26, back + 0.6)
+  poster.visible = false
+
+  g.add(neon, poster)
+
+  let plantBase = null
+  return {
+    group: g,
+    // `state` is milestones.js decorOf(); `plant` the room's front plant.
+    set(state, plant) {
+      trophies.forEach((t, i) => { t.visible = i < state.trophies })
+      neon.visible = state.neon
+      poster.visible = state.poster
+      if (plant) {
+        plantBase ??= plant.scale.x
+        plant.scale.setScalar(plantBase * [1, 1.45, 1.85][Math.min(2, state.plant)])
+      }
+    },
+    // The neon hums: a steady glow with a rare flicker.
+    animate(now) {
+      if (!neon.visible) return
+      const flick = Math.sin(now * 0.7) > 0.995 ? 0.55 : 1
+      parts.neonMat.opacity = flick * (0.92 + Math.sin(now * 2.3) * 0.04)
+    },
+  }
 }
 
 const plantsIn = group => {

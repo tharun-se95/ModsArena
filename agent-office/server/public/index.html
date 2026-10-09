@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="agent-office-token" content="">
 <title>Agent Office</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 22 22'%3E%3Ccircle cx='11' cy='11' r='4.2' fill='%23b85c3c'/%3E%3Ccircle cx='11' cy='11' r='8.6' fill='none' stroke='%23d8cfc2' stroke-width='1.6'/%3E%3Ccircle cx='18.2' cy='6.4' r='2' fill='%232b2622'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
@@ -188,6 +189,31 @@
   .tag.session.crowded .sname { display: none; }
   .tag.session.covered, .tag.project.covered { visibility: hidden; }
   .tag.session.past .sname { font-weight: 400; }
+  /* Names: "Mika" on a session's tag, and a small tag at each helper's feet
+     for the room you're looking at. */
+  .tag .who { font-weight: 600; color: var(--ink); }
+  .tag.session.crowded .who { font-weight: 500; }
+  .tag.agent { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px 0 4px; border-radius: 999px; font: 500 9.5px/1.6 var(--sans); background: color-mix(in srgb, var(--paper) 78%, transparent); color: color-mix(in srgb, var(--ink) 80%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--line) 70%, transparent); opacity: 0; pointer-events: none; transition: opacity 0.25s; }
+  .tag.agent.on { opacity: 1; pointer-events: auto; }
+  .tag.agent .dot { width: 6px; height: 6px; margin: 0; }
+
+  /* Toasts: a milestone reached, a snapshot saved. */
+  .toasts { position: absolute; z-index: 20; left: 50%; bottom: 52px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; width: max-content; max-width: calc(100% - 32px); }
+  .toast { display: flex; align-items: center; gap: 10px; padding: 9px 16px 9px 12px; border-radius: 999px; font-size: 13px; line-height: 1.35; pointer-events: auto; opacity: 0; transform: translateY(10px) scale(0.96); transition: opacity 0.25s, transform 0.3s cubic-bezier(.3, 1.4, .5, 1); text-align: left; }
+  .toast.on { opacity: 1; transform: none; }
+  .toast i { display: grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: 50%; background: color-mix(in srgb, var(--mustard) 28%, var(--paper)); color: color-mix(in srgb, var(--mustard) 70%, var(--ink)); font-style: normal; font-size: 14px; }
+  .toast b { font-weight: 600; }
+  button.toast:hover b { color: var(--accent); }
+  @media (prefers-reduced-motion: reduce) { .toast { transition: opacity 0.2s; transform: none; } }
+
+  /* Milestones in a thread's Details. */
+  .milestones li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: baseline; padding: 4px 0; border-top: 1px dashed var(--line); font-size: 12.5px; color: var(--muted); }
+  .milestones li:first-child { border-top: 0; }
+  .milestones li i { font-style: normal; color: var(--line); }
+  .milestones li.got { color: var(--ink); }
+  .milestones li.got i { color: var(--mustard); }
+  .milestones li small { display: block; font-size: 11px; color: var(--muted); }
+  .milestones time { font: 11px var(--mono); color: var(--muted); white-space: nowrap; }
 
   /* The hover bubble over a critter, and the flags that float over one.
      The bubble sits above every label (the label layer is one stacking
@@ -211,6 +237,12 @@
   .flag.oops { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--crit); color: #fff; font: 700 11px var(--sans); transform: scale(0.6); transition: opacity 0.2s, transform 0.2s; }
   .flag.oops.on { transform: scale(1); }
   .flag.oops.small { width: 13px; height: 13px; font-size: 9px; }
+  /* The desk bell over a critter whose pull request just landed. */
+  .flag.bell { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--paper); color: var(--mustard); box-shadow: 0 2px 8px rgba(40, 30, 20, 0.2), 0 0 0 1.5px var(--mustard); }
+  .flag.bell svg { width: 15px; height: 15px; transform-origin: 50% 15%; }
+  .flag.bell.on svg { animation: bell-ring 0.5s ease-in-out 4; }
+  @keyframes bell-ring { 25% { transform: rotate(18deg); } 75% { transform: rotate(-18deg); } }
+  @media (prefers-reduced-motion: reduce) { .flag.bell.on svg { animation: none; } }
 
   /* The clipboard's tabs, and its Transcript tab: the conversation and a
      box to message the session or subagent (transcript.js). */
@@ -930,6 +962,10 @@
         <button class="libbtn" id="library-open" type="button" title="Everything the office has made">
           <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="3" height="14" rx="1" fill="currentColor"/><rect x="7.5" y="5" width="3" height="12" rx="1" fill="currentColor" opacity=".7"/><rect x="12" y="4" width="3" height="13" rx="1" transform="rotate(-12 13.5 10.5)" fill="currentColor" opacity=".85"/></svg>
           <span>Library</span><span class="count" id="library-count"></span>
+        </button>
+        <button class="libbtn" id="snapshot" type="button" title="Save a picture of your office">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.2 4.5h5.6l1.2 1.8h2a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5H4a1.5 1.5 0 0 1-1.5-1.5v-7A1.5 1.5 0 0 1 4 6.3h2z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="10" cy="11" r="2.8" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+          <span aria-live="polite">Snapshot</span>
         </button>
         <button class="sound" id="sound" type="button" aria-pressed="true" title="Office sounds">
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8h3l4-3.5v11L6 12H3z" fill="currentColor"/><path class="waves" d="M13 7.5a3.5 3.5 0 0 1 0 5M15 5.5a6.4 6.4 0 0 1 0 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path class="cross" d="M13.5 8l4 4m0-4l-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
