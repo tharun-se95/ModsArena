@@ -14,9 +14,10 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
 import { makeCharacter, pose } from './character.js'
 import {
-  buildRoom, rug, desk, easel, coffeeCorner, officeShell, glassMat, lampMat,
-  FLOOR_TOP, WALL_H, COFFEE_W, COFFEE_D,
+  buildRoom, rug, desk, easel, coffeeCorner, officeShell, frontDesk, glassMat, lampMat,
+  FLOOR_TOP, WALL_H, COFFEE_W, COFFEE_D, FRONT_W,
 } from './office.js'
+import { jobFor } from './desk.js'
 import { nodes, fill, sid, aid, WARN_AT, outputs, openAsks, mail } from './model.js'
 import { srcOf, toolName } from './assets.js'
 import { createBubbles } from './bubbles.js'
@@ -294,7 +295,33 @@ function ensureShell(W, D) {
   shell = officeShell({ W, D, colors: roomColors('a') })
   shellKey = key
   scene.add(shell.group)
+  placeFrontDesk(W, D)
   ensureVacuum(W, D)
+}
+
+// The front desk stands by the front door, just left of the aisle new
+// critters walk in along, its doormat at the door. Click it (or its sign)
+// to start a new job. Part of the office shell, so it moves with the walls.
+let front = null
+let frontSign = null
+function placeFrontDesk(W, D) {
+  if (!frontSign) {
+    frontSign = label('<button type="button" class="pname" title="Start a new job (n)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 14h10l-1.4-2V8.5a3.6 3.6 0 0 0-7.2 0V12zM8.5 16.5a1.6 1.6 0 0 0 3 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Front desk<small>New job</small></button>', 'project frontdesk')
+    frontSign.el.addEventListener('click', () => document.dispatchEvent(new CustomEvent('office:frontdesk')))
+  }
+  front = frontDesk({ ...roomColors('a'), accent: palette.clay })
+  front.group.traverse(o => { if (o.isMesh) o.userData.pick = { kind: 'frontdesk' } })
+  front.group.position.set(W / 2 - OFFICE_MARGIN / 2 - FRONT_W / 2 - 26, 0.4, D / 2 - 18)
+  frontSign.obj.position.set(0, 50, 0)
+  front.group.add(frontSign.obj)
+  shell.group.add(front.group)
+}
+
+// The bell on the front desk, rung when a new job comes in.
+function ringBell(now) {
+  if (!front) return
+  front.ringAt = now
+  sound.chime()
 }
 
 // A robot vacuum doing laps of the open floor around the rooms.
@@ -314,7 +341,9 @@ function ensureVacuum(W, D) {
   }
   const x = W / 2 - 34
   const z = D / 2 - 34
-  vacuum.loop = [new THREE.Vector3(-x, 0, z), new THREE.Vector3(x, 0, z), new THREE.Vector3(x, 0, -z + 30), new THREE.Vector3(-x, 0, -z + 30)]
+  // Its front lane passes behind the front desk.
+  const zf = D / 2 - 50
+  vacuum.loop = [new THREE.Vector3(-x, 0, zf), new THREE.Vector3(x, 0, zf), new THREE.Vector3(x, 0, -z + 30), new THREE.Vector3(-x, 0, -z + 30)]
   vacuum.group.position.copy(vacuum.loop[0])
   vacuum.i = 1
 }
@@ -606,7 +635,7 @@ const aisleX = () => size.W / 2 - OFFICE_MARGIN / 2
 const aisleZ = room => (room?.rowFront ?? room?.target.z ?? 0) + ROOM_GAP / 2
 
 function walk(view, group, path, then) {
-  view.walk = { group, path: path.map(p => p.clone()), then }
+  view.walk = { group, path: path.map(p => (p.clone ? p.clone() : p)), then }
 }
 
 // Move along the path; true while still walking.
@@ -616,6 +645,15 @@ function stepWalk(view, dt) {
   let step = WALK_SPEED * dt
   while (step > 0 && w.path.length) {
     const to = w.path[0]
+    // A stop on the way: a callback, or a pause of `wait` seconds.
+    if (typeof to === 'function') { w.path.shift(); to(); continue }
+    if (to.wait !== undefined) {
+      w.until ??= clock() + to.wait
+      if (clock() < w.until) return true
+      w.until = null
+      w.path.shift()
+      continue
+    }
     const pos = w.group.position
     const dx = to.x - pos.x
     const dz = to.z - pos.z
@@ -724,7 +762,15 @@ export function sync(showPast) {
             const lane = aisleZ(t)
             const local = p => p.sub(s.home)
             s.body.position.copy(local(new THREE.Vector3(x, 0, size.D / 2 + 20)))
-            walk(s, s.body, [local(new THREE.Vector3(x, 0, lane)), local(new THREE.Vector3(s.home.x, 0, lane)), new THREE.Vector3(0, 0, 0)], () => { s.body.rotation.y = 0 })
+            // One the front desk sent stops at the counter first: the bell
+            // rings, it picks up its ticket, then heads for its desk.
+            const job = jobFor(n) && front
+            const atDesk = job && [
+              local(new THREE.Vector3(x, 0, front.group.position.z + 8)),
+              () => { s.body.rotation.y = -Math.PI / 2; ringBell(clock()); s.waveAt = clock() + 0.3 },
+              { wait: 1.1 },
+            ]
+            walk(s, s.body, [...(atDesk || []), local(new THREE.Vector3(x, 0, lane)), local(new THREE.Vector3(s.home.x, 0, lane)), new THREE.Vector3(0, 0, 0)], () => { s.body.rotation.y = 0 })
           }
         }
       })
@@ -786,8 +832,11 @@ function fly(from, to, tint, t) {
   talk.fly(from, to, tint, t)
 }
 
+const calm = matchMedia('(prefers-reduced-motion: reduce)')
+
 export function pulse(ev) {
   const t = clock()
+  if (ev.kind === 'job.start') ringBell(t)
   const owner = ev.agent ? aid(ev.session, ev.agent) : sid(ev.session)
   const session = sessionViews.get(sid(ev.session))
   if (ev.kind === 'tool.start' || (ev.kind === 'tool.end' && !ev.ok)) {
@@ -954,6 +1003,10 @@ export function animate() {
     t.center.lerp(t.target, 0.12)
     t.mesh.position.copy(t.center)
     for (const p of t.plants ?? []) p.rotation.z = Math.sin(now * 0.8 + p.userData.plant) * 0.035
+  }
+  if (front?.ringAt !== undefined) {
+    const k = (now - front.ringAt) / 0.9
+    front.bell.rotation.z = k < 1 && !calm.matches ? Math.sin(now * 42) * 0.25 * (1 - k) : 0
   }
   if (coffee) {
     coffee.center.lerp(coffee.target, 0.12)
@@ -1360,12 +1413,14 @@ function bindPointer() {
   renderer.domElement.addEventListener('pointerdown', e => { downAt = [e.clientX, e.clientY] })
   renderer.domElement.addEventListener('pointerup', e => {
     if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return
-    onPick(hit(e)?.id ?? null)
+    const p = hit(e)
+    if (p?.kind === 'frontdesk') return void document.dispatchEvent(new CustomEvent('office:frontdesk'))
+    onPick(p?.id ?? null)
   })
   renderer.domElement.addEventListener('pointermove', e => {
     if (e.buttons) { hoverPick = null; return }
     const p = hit(e)
-    hoverPick = p ?? null
+    hoverPick = p?.id ? p : null
     hovered = !p ? null : p.kind === 'session' ? p.id : agentViews.get(p.id)?.session ?? null
     renderer.domElement.style.cursor = p ? 'pointer' : ''
   })

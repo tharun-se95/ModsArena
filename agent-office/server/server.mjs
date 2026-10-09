@@ -16,11 +16,14 @@
 //   GET  /transcript?session=&agent=&after=   a conversation, read from its transcript
 //   GET  /asset?session=&id=   a picture a session made or read, by the path its event named
 //   POST /chat     a message for a session or subagent (the office page only)
+//   POST /jobs     start a job from the front desk, in a project the office
+//                  knows (the office page only; see jobs.mjs)
+//   POST /jobs/stop   stop a job the front desk started (the office page only)
 //   GET  /inbox?session=   a session's mod picking up its messages
 //   GET  /         the office
 //
 // Every request must be addressed to the bridge itself, and chat needs the
-// token only the office page gets (guard.mjs says why).
+// token only the office page gets (guard.mjs says why), and so do jobs.
 
 import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
@@ -30,9 +33,10 @@ import { fileURLToPath } from 'node:url'
 import { normalize, GAUGES, gaugeKey } from './normalize.mjs'
 import { findProject } from './projects.mjs'
 import { readHistory, tailContext } from './history.mjs'
-import { startDemo } from './demo.mjs'
+import { startDemo, demoJob } from './demo.mjs'
 import { refusal, newToken, tokenMatches, TOKEN_HEADER, INBOX_HEADER, CONTROL_HEADER } from './guard.mjs'
 import * as chat from './chat.mjs'
+import { createJobs } from './jobs.mjs'
 import { findTranscript, readTranscript } from './transcript.mjs'
 
 const args = process.argv.slice(2)
@@ -93,9 +97,24 @@ function enrich(ev) {
   return ev
 }
 
+// Folders the office has seen sessions in: the only places the front desk
+// starts jobs.
+const knownDirs = new Set()
+const know = (...dirs) => dirs.forEach(d => typeof d === 'string' && isAbsolute(d) && knownDirs.add(d))
+async function isKnown(dir) {
+  if (knownDirs.has(dir)) return true
+  // Past sessions count too; read them once, on demand.
+  try {
+    for (const s of await readHistory({ days: HISTORY_DAYS })) know(s.cwd, s.project?.id)
+  } catch {}
+  return knownDirs.has(dir)
+}
+const jobs = createJobs({ publish: events => publish(events), isKnown, demo: flag('demo') ? demoJob() : undefined })
+
 function publish(events) {
   for (const raw of events) {
     const ev = enrich(raw)
+    if (ev.kind === 'session.start') know(ev.cwd, ev.project?.id)
     if (ev.kind === 'chat.delivered') chat.settle(ev.id, ev.ok !== false)
     if (ev.kind === 'asset.add' && ev.type === 'image' && typeof ev.path === 'string' && isAbsolute(ev.path)) {
       pictures.set(`${ev.session}|${ev.id}`, ev.path)
@@ -169,6 +188,18 @@ const server = createServer(async (req, res) => {
       const { id, session, agent, text, t } = sent.message
       publish([{ t, kind: 'chat.sent', session, ...(agent ? { agent } : {}), id, text }])
       json(res, 200, { id })
+    } catch (err) {
+      json(res, 400, { error: String(err.message ?? err) })
+    }
+    return
+  }
+
+  if (req.method === 'POST' && (pathname === '/jobs' || pathname === '/jobs/stop')) {
+    if (!tokenMatches(req.headers[TOKEN_HEADER], TOKEN)) return json(res, 403, { error: 'missing or wrong token' })
+    try {
+      const body = JSON.parse(await readBody(req))
+      const { status, error, job } = await (pathname === '/jobs' ? jobs.start(body) : jobs.stop(body))
+      json(res, status, error ? { error } : { ok: true, ...(job && { job }) })
     } catch (err) {
       json(res, 400, { error: String(err.message ?? err) })
     }
@@ -255,7 +286,7 @@ const server = createServer(async (req, res) => {
   }
 
   if (pathname === '/healthz') {
-    json(res, 200, { ok: true, name: 'agent-office', version: VERSION, managed: MANAGED, demo: flag('demo'), chat: true, events: log.length, viewers: clients.size })
+    json(res, 200, { ok: true, name: 'agent-office', version: VERSION, managed: MANAGED, demo: flag('demo'), chat: true, jobs: true, events: log.length, viewers: clients.size })
     return
   }
 
