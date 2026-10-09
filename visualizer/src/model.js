@@ -185,9 +185,16 @@ const handlers = {
       const { text, from } = unwrapPrompt(ev.text)
       // A session the page first met in /history already has this prompt.
       if (node.prompts.some(p => !p.live && Math.abs(p.t - ev.t) < SAME_PROMPT_MS && samePrompt(p.text, text))) return
+      // The front desk announced this job's prompt before the session did.
+      const desk = node.prompts.at(-1)
+      if (desk?.desk && desk.text === text && ev.via !== 'front-desk') {
+        desk.desk = false
+        node.turns--
+        return
+      }
       // Sessions are named by what they were first asked, as /resume lists them.
       if (!node.prompts.length) node.label = promptLabel(text)
-      node.prompts.push({ t: ev.t, text, from, live: true })
+      node.prompts.push({ t: ev.t, text, from, live: true, ...(ev.via === 'front-desk' && { desk: true }) })
       if (node.prompts.length > PROMPT_KEEP) node.prompts.shift()
     }
   },

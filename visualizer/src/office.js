@@ -1062,3 +1062,71 @@ export function officeShell({ W, D, colors }) {
   bake(g, [...plants, hour, minute, second])
   return { group: g, plants, clock: { hour, minute, second } }
 }
+
+// ---------------------------------------------------------------------------
+// The front desk: a reception counter by the office's front door, where
+// new work comes in. A curved counter with a service bell, a stack of job
+// tickets and a little lamp, and a doormat where newcomers step in. Built
+// around its own origin, the counter's front facing +z; `bell` rings.
+
+export const FRONT_W = 96
+
+export function frontDesk(colors) {
+  const g = new THREE.Group()
+  const rand = seeded('front desk')
+  // The counter: a low body and a worktop, its ends turned back a little.
+  const body = mat(colors.counter, { roughness: 0.45 })
+  const top = woodMat(colors.woodDark)
+  const pieces = [[0, 0, 64, 0], [-40, -9, 22, -0.55], [40, -9, 22, 0.55]]
+  for (const [x, z, w, turn] of pieces) {
+    const part = new THREE.Mesh(rounded(w, 24, 16, 1.2), body)
+    part.position.set(x, 12, z)
+    part.rotation.y = turn
+    const slab = new THREE.Mesh(rounded(w + 3, 2.4, 19, 0.6), top)
+    slab.position.set(x, 25.2, z - 1)
+    slab.rotation.y = turn
+    g.add(part, slab)
+  }
+  // A trim stripe along the front, in the office's accent.
+  const stripe = new THREE.Mesh(rounded(60, 3, 1, 0.4), mat(colors.accent, { roughness: 0.5 }))
+  stripe.position.set(0, 17, 8.2)
+  g.add(stripe)
+  // The bell, a stack of tickets and a lamp.
+  const bell = new THREE.Group()
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(3.2, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2), mat('#d9b25a', { roughness: 0.2, metalness: 0.85 }))
+  const plate = new THREE.Mesh(new THREE.CylinderGeometry(4, 4.2, 0.8, 20), mat('#2b2a2e', { roughness: 0.4 }))
+  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.8, 10, 10), mat('#d9b25a', { roughness: 0.2, metalness: 0.85 }))
+  plate.position.y = 0.4
+  dome.position.y = 0.8
+  knob.position.y = 4.2
+  bell.add(plate, dome, knob)
+  bell.position.set(16, 26.4, 0)
+  g.add(bell)
+  colors.mugs.slice(0, 4).forEach((c, i) => {
+    const card = new THREE.Mesh(rounded(9, 0.5, 6, 0.2), mat(i % 2 ? colors.trim : c, { roughness: 0.8 }))
+    card.position.set(-8 + (rand() - 0.5), 26.6 + i * 0.6, 1 + (rand() - 0.5))
+    card.rotation.y = (rand() - 0.5) * 0.5
+    g.add(card)
+  })
+  const lamp = new THREE.Group()
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 10, 8), mat('#2b2a2e'))
+  stem.position.y = 5
+  const shade = new THREE.Mesh(new THREE.ConeGeometry(4, 4.4, 20, 1, true), lampMat)
+  shade.position.y = 11
+  lamp.add(stem, shade)
+  lamp.position.set(-28, 26.4, -4)
+  g.add(lamp)
+  const leafy = plant(colors, rand)
+  leafy.scale.setScalar(PROP * 0.9)
+  leafy.position.set(-62, 0.4, -6)
+  g.add(leafy)
+  shadowed(g)
+  // The doormat by the door, to the counter's right, where newcomers step in.
+  const mat_ = new THREE.Mesh(rounded(26, 0.6, 16, 0.4), fabricMat(colors.woodDark))
+  mat_.position.set(FRONT_W / 2 + 26, 0.8, 14)
+  mat_.receiveShadow = true
+  g.add(mat_)
+  const plants = plantsIn(g)
+  bake(g, [bell, ...plants])
+  return { group: g, bell, plants }
+}

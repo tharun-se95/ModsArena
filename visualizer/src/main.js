@@ -11,6 +11,7 @@ import * as panels from './panels.js'
 import { unlock, isMuted, setMuted } from './sound.js'
 import * as transcript from './transcript.js'
 import * as recap from './recap.js'
+import * as desk from './desk.js'
 
 const HISTORY_REFRESH_MS = 60000
 const PANEL_REFRESH_MS = 700
@@ -66,7 +67,7 @@ for (const el of document.querySelectorAll('.hud.left > *, #side, .topbar, #stag
 // and agent by agent; 1-3 switch tabs; r replies; Esc goes up a level.
 const isTyping = el => el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' || el.isContentEditable)
 addEventListener('keydown', e => {
-  if (e.metaKey || e.ctrlKey || e.altKey) return
+  if (e.metaKey || e.ctrlKey || e.altKey || document.querySelector('dialog[open]')) return
   if (isTyping(document.activeElement)) {
     if (e.key === 'Escape') document.activeElement.blur()
     return
@@ -151,6 +152,7 @@ function ingest(ev) {
   words.ingest(ev)
   table.pulse(ev)
   transcript.onEvent(ev)
+  desk.onEvent(ev)
 }
 
 document.addEventListener('office:event', e => ingest(e.detail))
@@ -177,9 +179,11 @@ function connect() {
     // A fresh replay: start over so a reconnect never doubles anything.
     model.reset()
     words.reset()
+    desk.reset()
     for (const ev of JSON.parse(msg.data)) {
       model.apply(ev)
       words.ingest(ev)
+      desk.onEvent(ev, true)
     }
     model.applyHistory(history, showPast)
     refreshPanels()
@@ -195,12 +199,17 @@ function playDemo() {
   startDemo(events => events.forEach(ingest))
 }
 
+// The front desk: new jobs from the office. Without a bridge (the hosted
+// preview) it plays them itself; a demo bridge plays them for it.
+let bridgeDemo = false
+desk.mount({ ingest, pick, isDemo: () => isDemo, bridgeDemo: () => bridgeDemo })
+
 // A bridge started with --demo has sample sessions and no transcripts on
 // disk: its transcript tab plays the demo's too.
 transcript.setDemo(isDemo)
 recap.mount({ onPick: pick, demo: isDemo })
 if (!isDemo) {
-  fetch('/healthz').then(r => r.json()).then(h => { if (h.demo) { transcript.setDemo(true); recap.setDemo() } }).catch(() => {})
+  fetch('/healthz').then(r => r.json()).then(h => { if (h.demo) { transcript.setDemo(true); recap.setDemo(); bridgeDemo = true } }).catch(() => {})
 }
 
 await loadHistory()

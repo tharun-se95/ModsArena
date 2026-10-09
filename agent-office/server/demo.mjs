@@ -118,10 +118,15 @@ const pick = list => list[Math.floor(Math.random() * list.length)]
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const rand = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo))
 
+// The demo's sessions, for a front-desk job to start one (see demoJob).
+let runSession = null
+
 export function startDemo(publish) {
   let seq = 0
 
-  function runSession(session, project, pace, asThread = false, first = pick(PROMPTS)) {
+  // `job`, for a session the front desk started: it stops once for your OK
+  // (job.onAsk says when), and ends after its first turn.
+  runSession = function (session, project, pace, asThread = false, first = pick(PROMPTS), job = null) {
     const emit = ev => publish([{ t: Date.now(), session, ...ev }])
     let messages = rand(8000, 40000)
     let turns = 0
@@ -190,11 +195,13 @@ export function startDemo(publish) {
     async function ask(fields, auto) {
       const id = `demo-ask-${++seq}`
       emit({ kind: 'ask.open', id, ...fields })
+      job?.onAsk(true)
       const answer = await new Promise(resolve => {
         waiting.set(`${session}|${id}`, resolve)
         setTimeout(() => answerDemo(session, id, auto), rand(10000, 20000) * pace)
       })
       emit({ kind: 'ask.close', id, answer })
+      job?.onAsk(false)
       return answer
     }
 
@@ -236,8 +243,8 @@ export function startDemo(publish) {
             emit({ kind: 'asset.add', id: `img-${++seq}`, type: 'image', title, path: `screenshots/${shot}.png`, src: demoShot(shot, hue) })
           }
           // Now and then it stops to ask you something.
-          if (step === 1 && Math.random() < 0.4) {
-            const roll = Math.random()
+          if (step === 1 && (job || Math.random() < 0.4)) {
+            const roll = job ? 0.7 : Math.random()
             if (roll < 0.6) {
               const q = pick(QUESTIONS)
               const questions = [{ ...q, options: q.options.map(o => ({ ...o, ...(o.preview && { preview: demoShot(o.preview, hue) }) })) }]
@@ -267,6 +274,10 @@ export function startDemo(publish) {
         const reason = Math.random() < 0.08 ? 'error' : 'answer'
         emit({ kind: 'turn.complete', turnId, reason, durationMs: 9000, ...(reason === 'answer' && { answer: pick(ANSWERS) }) })
         breakdown()
+        if (job) {
+          job.onDone()
+          return
+        }
         // Then it waits on you: sometimes briefly, sometimes a while.
         await sleep((Math.random() < 0.5 ? rand(1500, 5000) : rand(9000, 20000)) * pace)
       }
@@ -278,6 +289,25 @@ export function startDemo(publish) {
   runSession('demo-payments-1', PROJECTS[0], 1, false, 'Harden the session handling')
   setTimeout(() => runSession('demo-payments-2', PROJECTS[0], 1.6, false, 'Why is the build flaky?'), 2500)
   setTimeout(() => runSession('demo-dashboard-1', PROJECTS[1], 1.3, true, 'Migrate charts to the new tokens'), 5000)
+}
+
+// Demo only: a front-desk job taken by a sample session instead of a real
+// `claude --bg` (see jobs.mjs). `update` reports where the job is, the way
+// the bridge does from `claude agents --json`.
+let jobSeq = 0
+export function demoJob() {
+  return (job, prompt, update) => {
+    const n = ++jobSeq
+    const short = `d${String(Date.now() % 1e7).padStart(7, '0')}`.slice(0, 8)
+    const project = PROJECTS.find(p => p.id === job.dir) ?? PROJECTS[0]
+    setTimeout(() => {
+      update({ state: 'working', short, session: `${short}-demo-job-${n}` })
+      runSession?.(`${short}-demo-job-${n}`, project, 0.7, false, prompt, {
+        onAsk: open => update({ state: open ? 'blocked' : 'working', ...(open && { waitingFor: 'permission prompt' }) }),
+        onDone: () => update({ state: 'done' }),
+      })
+    }, 1200)
+  }
 }
 
 // Past sessions in the shape GET /history answers.
