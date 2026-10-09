@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="agent-office-token" content="">
 <title>Agent Office</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 22 22'%3E%3Ccircle cx='11' cy='11' r='4.2' fill='%23b85c3c'/%3E%3Ccircle cx='11' cy='11' r='8.6' fill='none' stroke='%23d8cfc2' stroke-width='1.6'/%3E%3Ccircle cx='18.2' cy='6.4' r='2' fill='%232b2622'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 22 22'%3E%3Ccircle cx='11' cy='11' r='4.2' fill='%23b85c3c'/%3E%3Ccircle cx='11' cy='11' r='8.6' fill='none' stroke='%23d8cfc2' stroke-width='1.6'/%3E%3Ccircle cx='18.2' cy='6.4' r='2' fill='%231f1d1a'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
@@ -137,6 +137,43 @@
 
   .hint { position: absolute; z-index: 5; left: 50%; bottom: 14px; transform: translateX(-50%); font-size: 11.5px; color: var(--muted); padding: 4px 12px; border-radius: 999px; white-space: nowrap; }
 
+  /* Spend in plain terms (spend.js): a chip in the top bar, its panel
+     with each project and a daily limit, and a gentle heads-up near it. */
+  .spendbtn { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; padding: 3px 9px; border-radius: 999px; }
+  .spendbtn:hover, .spendbtn[aria-expanded="true"] { color: var(--ink); background: color-mix(in srgb, var(--line) 50%, transparent); }
+  .spendbtn svg { width: 16px; height: 16px; }
+  .spendbtn .spend-short { display: none; }
+  .spendbtn[data-state="near"] { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+  .spendbtn[data-state="over"] { color: var(--crit); background: color-mix(in srgb, var(--crit) 12%, transparent); }
+  #spend { top: 64px; right: 16px; width: 300px; max-height: calc(100% - 80px); overflow-y: auto; padding: 14px 16px; z-index: 7; }
+  #spend h3 { font: 500 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 14px 0 6px; }
+  .spend-big { margin: 0 0 8px; font: 600 24px/1.2 var(--serif); }
+  .spend-meter { display: block; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-bottom: 8px; }
+  .spend-meter span { display: block; height: 100%; border-radius: inherit; background: var(--ok); }
+  .spend-meter.near span { background: var(--warn); } .spend-meter.over span { background: var(--crit); }
+  .spend-warn { margin: 0 0 8px; padding: 7px 10px; border-radius: 10px; font-size: 12.5px; background: color-mix(in srgb, var(--warn) 14%, var(--paper)); }
+  .spend-warn.over { background: color-mix(in srgb, var(--crit) 12%, var(--paper)); }
+  .spend-rows li { display: flex; justify-content: space-between; gap: 10px; padding: 4px 0; border-top: 1px dashed var(--line); font-size: 13px; }
+  .spend-rows li:first-child { border-top: 0; }
+  .spend-rows b { font-weight: 500; white-space: nowrap; }
+  .spend-limit { display: flex; align-items: center; gap: 8px; }
+  .spend-limit label { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); font: 13px var(--mono); }
+  .spend-limit label:focus-within { border-color: var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+  .spend-limit input { width: 70px; border: 0; background: none; font: inherit; color: var(--ink); outline: none; }
+  .spend-limit button { margin-left: auto; padding: 5px 12px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 12.5px; font-weight: 500; }
+  .spend-note { margin: 6px 0 0; font-size: 11.5px; color: var(--muted); }
+  .spend-limit .spend-note { margin: 0; }
+  .room-spend { margin: -2px 0 2px 20px; font-size: 11.5px; color: var(--muted); }
+  #spend-toast { top: 64px; right: 16px; width: 300px; display: flex; align-items: center; gap: 10px; padding: 10px 12px; z-index: 6; border-left: 3px solid var(--warn); animation: spend-in 0.3s ease; }
+  #spend-toast[data-state="over"] { border-left-color: var(--crit); }
+  #spend-toast p { margin: 0; font-size: 12.5px; flex: 1; }
+  #spend-toast button { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; }
+  @keyframes spend-in { from { opacity: 0; transform: translateY(-6px); } }
+  @media (max-width: 900px) { #spend, #spend-toast { left: 12px; right: 12px; width: auto; } .spendbtn .spend-words { display: none; } .spendbtn .spend-short { display: inline; } }
+  @media (prefers-reduced-motion: reduce) { #spend-toast { animation: none; } }
+  /* With the spend chip the phone's top bar runs out of room: the mark stands in for the name. */
+  @media (max-width: 480px) { .brand .word { display: none; } .brand { padding: 6px 8px; } }
+
   .tag { pointer-events: auto; cursor: pointer; white-space: nowrap; font-size: 10.5px; }
   .tag.project { display: inline-flex; align-items: baseline; padding: 1px 8px; border-radius: 6px; background: color-mix(in srgb, var(--paper) 72%, transparent); backdrop-filter: blur(3px); }
   .tag .pname { font: 600 11.5px var(--serif); color: color-mix(in srgb, var(--ink) 80%, transparent); letter-spacing: 0.01em; }
@@ -173,6 +210,59 @@
   .line.pick:hover { background: color-mix(in srgb, var(--line) 55%, transparent); }
 
   [hidden] { display: none !important; }
+
+  /* Before anyone's in: a greeter critter at the front door, with a speech
+     bubble saying what will appear and the first command to copy. And a
+     calm card when the bridge goes quiet (welcome.js). */
+  #greeter { left: 50%; bottom: 58px; transform: translateX(-50%); display: flex; align-items: flex-end; gap: 6px; width: min(520px, calc(100% - 32px)); pointer-events: none; }
+  #greeter > * { pointer-events: auto; }
+  .greeter-bubble { position: relative; flex: 1; padding: 14px 16px 12px; border-radius: 18px 18px 6px 18px; margin-bottom: 64px; }
+  .greeter-bubble::after { content: ""; position: absolute; right: -7px; bottom: 14px; width: 14px; height: 14px; background: var(--paper); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); transform: rotate(-45deg); }
+  .greeter-title { display: block; font: 600 17px/1.3 var(--serif); }
+  .greeter-body { margin: 4px 0 10px; font-size: 13px; color: var(--muted); text-wrap: pretty; }
+  .greeter-steps { margin: 0; padding: 0; list-style: none; counter-reset: step; display: grid; gap: 8px; }
+  .greeter-steps li { counter-increment: step; display: grid; grid-template-columns: 22px 1fr; gap: 2px 8px; align-items: center; font-size: 13px; }
+  .greeter-steps li::before { content: counter(step); grid-row: span 2; align-self: start; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 16%, var(--paper)); color: var(--accent); font: 600 12px var(--mono); }
+  .greeter-steps q { font-style: italic; }
+  .greeter-cmd { display: inline-flex; align-items: center; justify-self: start; gap: 6px; margin-top: 4px; padding: 3px 4px 3px 10px; border-radius: 9px; background: color-mix(in srgb, var(--ink) 88%, var(--paper)); color: var(--paper); }
+  .greeter-cmd code { font: 500 13px var(--mono); }
+  .greeter-cmd code::before { content: "$ "; opacity: 0.55; }
+  .greeter-copy { padding: 3px 9px; border-radius: 6px; background: color-mix(in srgb, var(--paper) 18%, transparent); color: var(--paper); font-size: 12px; text-align: center; min-width: 54px; }
+  .greeter-copy:hover { background: color-mix(in srgb, var(--paper) 28%, transparent); }
+  .greeter-copy.done { background: var(--ok); color: #fff; }
+  .greeter-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 12px 0 0; padding-top: 10px; border-top: 1px dashed var(--line); font-size: 12px; }
+  .greeter-tour { color: var(--accent); font-weight: 500; }
+  .greeter-tour:hover { text-decoration: underline; }
+  .greeter-wait { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); margin-left: auto; }
+  .greeter-wait i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); animation: greeter-breathe 2.4s ease-in-out infinite; }
+  .greeter-door { position: relative; flex: none; width: 96px; display: grid; justify-items: center; }
+  .greeter-critter { position: relative; z-index: 1; width: 86px; height: 94px; color: var(--ink); animation: greeter-bob 3.2s ease-in-out infinite; }
+  .greeter-arm { transform-origin: 74px 48px; animation: greeter-wave 2.8s ease-in-out infinite; }
+  .greeter-eyes { transform-origin: 48px 56px; animation: greeter-blink 4.6s infinite; }
+  .greeter-gem { transform-origin: 48px 20px; animation: greeter-spin 5s linear infinite; }
+  .greeter-mat { width: 104px; height: 16px; margin-top: -10px; border-radius: 6px; background: repeating-linear-gradient(90deg, var(--clay) 0 6px, color-mix(in srgb, var(--clay) 70%, var(--paper)) 6px 12px); box-shadow: 0 2px 6px rgba(40, 30, 20, 0.18); transform: perspective(80px) rotateX(38deg); }
+  @keyframes greeter-bob { 50% { transform: translateY(-3px); } }
+  @keyframes greeter-wave { 0%, 40%, 100% { transform: rotate(0); } 10%, 30% { transform: rotate(-22deg); } 20% { transform: rotate(14deg); } }
+  @keyframes greeter-blink { 0%, 46%, 50%, 100% { transform: scaleY(1); } 48% { transform: scaleY(0.1); } }
+  @keyframes greeter-spin { to { transform: rotateY(360deg); } }
+  @keyframes greeter-breathe { 50% { opacity: 0.35; } }
+  #offline { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(400px, calc(100% - 32px)); padding: 18px 20px 16px; z-index: 8; }
+  .offline-title { display: block; font: 600 18px/1.3 var(--serif); }
+  .offline-body { margin: 6px 0 12px; font-size: 13px; color: var(--muted); text-wrap: pretty; }
+  .offline-try { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; }
+  .offline-try i { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); animation: greeter-breathe 1.6s ease-in-out infinite; }
+  .offline-now { margin-left: auto; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); font-size: 12.5px; }
+  .offline-now:hover { border-color: var(--accent); color: var(--accent); }
+  .offline-help { margin: 10px 0 0; font-size: 12px; color: var(--muted); }
+  .offline-help code, .greeter-body code { font: 12px var(--mono); padding: 1px 5px; border-radius: 5px; background: color-mix(in srgb, var(--line) 60%, transparent); color: var(--ink); }
+  @media (max-width: 900px) {
+    #greeter { bottom: auto; top: 50%; transform: translate(-50%, -50%); flex-direction: column; align-items: center; gap: 0; }
+    .greeter-bubble { margin: 0 0 10px; border-radius: 18px; }
+    .greeter-bubble::after { right: auto; left: 50%; bottom: -7px; margin-left: -7px; transform: rotate(45deg); }
+    .greeter-door { width: 80px; }
+    .greeter-critter { width: 64px; height: 70px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .greeter-critter, .greeter-arm, .greeter-eyes, .greeter-gem, .greeter-wait i, .offline-try i { animation: none; } }
   .status.down i { background: var(--crit); box-shadow: 0 0 0 4px color-mix(in srgb, var(--crit) 20%, transparent); }
   .sound { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; padding: 3px 8px; border-radius: 999px; }
   .sound:hover { color: var(--ink); background: color-mix(in srgb, var(--line) 50%, transparent); }
@@ -180,6 +270,29 @@
   .sound[aria-pressed="true"] .cross, .sound[aria-pressed="false"] .waves { display: none; }
   .toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; cursor: pointer; padding: 3px 8px; }
   .toggle input { accent-color: var(--accent); margin: 0; }
+
+  /* Alerts (notify.js): the bell in the top bar and its panel, with
+     desktop alerts, quiet hours and per-project mutes. */
+  .alertbtn { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; padding: 3px 8px; border-radius: 999px; }
+  .alertbtn:hover, .alertbtn[aria-expanded="true"] { color: var(--ink); background: color-mix(in srgb, var(--line) 50%, transparent); }
+  .alertbtn svg { width: 16px; height: 16px; }
+  .alertbtn:not(.on) .on-dot { display: none; }
+  #alerts { top: 64px; right: 16px; width: 320px; max-height: calc(100% - 80px); overflow-y: auto; padding: 14px 16px; z-index: 7; }
+  #alerts .eyebrow { margin-bottom: 4px; }
+  #alerts h3 { font: 500 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 14px 0 4px; }
+  .alerts-lede { margin: 0 0 10px; font-size: 13px; }
+  .alerts-ask { padding: 7px 14px; border-radius: 999px; background: var(--accent); color: #fff; font-weight: 500; font-size: 13px; }
+  .alerts-ask:hover { filter: brightness(1.06); }
+  .alerts-note { margin: 6px 0 0; font-size: 11.5px; color: var(--muted); }
+  .alerts-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 3px 0; font-size: 13px; cursor: pointer; }
+  .alerts-row input[type="checkbox"] { accent-color: var(--accent); margin: 0; }
+  .alerts-times { display: flex; align-items: center; gap: 8px; margin: 2px 0 0 22px; font-size: 12.5px; color: var(--muted); }
+  .alerts-times input, .alerts-row input[type="time"] { font: 12.5px var(--mono); color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 2px 6px; }
+  .alerts-row input:focus-visible, .alerts-times input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .alerts-row b { font-weight: 500; }
+  @media (max-width: 900px) { #alerts { left: 12px; right: 12px; width: auto; } .alertbtn span { display: none; } }
+  /* A phone's top bar holds every button on one line. */
+  @media (max-width: 480px) { .word { white-space: nowrap; } .controls { gap: 0; } .controls > button, .controls .toggle { padding-inline: 5px; } .controls .status span { display: none; } }
   .tag.project { pointer-events: auto; cursor: pointer; }
   .tag.project.focused { box-shadow: 0 0 0 1.5px var(--accent); }
   .tag.project.coffee { pointer-events: none; }
@@ -243,6 +356,35 @@
   .flag.bell.on svg { animation: bell-ring 0.5s ease-in-out 4; }
   @keyframes bell-ring { 25% { transform: rotate(18deg); } 75% { transform: rotate(-18deg); } }
   @media (prefers-reduced-motion: reduce) { .flag.bell.on svg { animation: none; } }
+
+  /* The guided tour (tour.js): the window dims around a spotlight, with a
+     note beside it. The hole's huge shadow is the dimming. */
+  .tourbtn { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; padding: 3px 8px; border-radius: 999px; }
+  .tourbtn:hover { color: var(--ink); background: color-mix(in srgb, var(--line) 50%, transparent); }
+  .tourbtn svg { width: 16px; height: 16px; }
+  #tour { position: fixed; inset: 0; z-index: 50; }
+  .tour-catch { position: absolute; inset: 0; }
+  .tour-hole { position: fixed; border-radius: 16px; pointer-events: none; box-shadow: 0 0 0 200vmax rgba(24, 18, 12, 0.5), 0 0 0 3px var(--accent), 0 0 24px 6px color-mix(in srgb, var(--accent) 45%, transparent); transition: left 0.35s ease, top 0.35s ease, width 0.35s ease, height 0.35s ease; }
+  .tour-hole.none { left: 50% !important; top: 50% !important; width: 0 !important; height: 0 !important; box-shadow: 0 0 0 200vmax rgba(24, 18, 12, 0.5); }
+  .tour-note { position: fixed; width: min(340px, calc(100vw - 24px)); padding: 16px 18px 12px; background: var(--paper); animation: tour-in 0.3s ease; }
+  .tour-count { margin: 0 0 4px; color: var(--accent); }
+  .tour-title { margin: 0; font: 600 19px/1.25 var(--serif); text-wrap: balance; }
+  .tour-body { margin: 6px 0 12px; font-size: 13.5px; line-height: 1.5; color: color-mix(in srgb, var(--ink) 82%, var(--muted)); text-wrap: pretty; }
+  .tour-dots { display: flex; gap: 5px; margin-bottom: 12px; }
+  .tour-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--line); transition: width 0.25s, background 0.25s; }
+  .tour-dots i.past { background: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+  .tour-dots i.on { width: 20px; border-radius: 4px; background: var(--accent); }
+  .tour-actions { display: flex; align-items: center; gap: 6px; }
+  .tour-skip { margin-right: auto; color: var(--muted); font-size: 12.5px; padding: 6px 4px; }
+  .tour-skip:hover { color: var(--ink); }
+  .tour-back { padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); font-size: 13px; }
+  .tour-next { padding: 7px 16px; border-radius: 999px; background: var(--accent); color: #fff; font-weight: 500; font-size: 13px; text-align: center; }
+  .tour-next:hover { filter: brightness(1.06); }
+  .tour-keys { margin: 10px 0 0; font-size: 11px; color: var(--muted); }
+  .tour-keys kbd { font: 10px var(--mono); padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; }
+  @keyframes tour-in { from { opacity: 0; transform: translateY(6px); } }
+  @media (max-width: 900px) { .tourbtn span, .tour-keys { display: none; } }
+  @media (prefers-reduced-motion: reduce) { .tour-hole, .tour-dots i { transition: none; } .tour-note { animation: none; } }
 
   /* The clipboard's tabs, and its Transcript tab: the conversation and a
      box to message the session or subagent (transcript.js). */
@@ -959,6 +1101,10 @@
           <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="11" r="4" fill="currentColor"/><path d="M10 3v2M3.5 11h-2M18.5 11h-2M5 6l1.4 1.4M15 6l-1.4 1.4M2 16h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>
           <span>Today</span>
         </button>
+        <button class="spendbtn" id="spend-open" type="button" aria-expanded="false" aria-controls="spend" data-state="none">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12.4 7.4c-.4-.8-1.3-1.2-2.4-1.2-1.4 0-2.3.7-2.3 1.7 0 2.4 4.8 1.3 4.8 3.9 0 1-1 1.8-2.5 1.8-1.2 0-2.1-.5-2.5-1.3M10 4.8v1.4m0 7.6v1.4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          <span class="spend-words">Nothing spent today</span><span class="spend-short">$0</span>
+        </button>
         <button class="libbtn" id="library-open" type="button" title="Everything the office has made">
           <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="3" height="14" rx="1" fill="currentColor"/><rect x="7.5" y="5" width="3" height="12" rx="1" fill="currentColor" opacity=".7"/><rect x="12" y="4" width="3" height="13" rx="1" transform="rotate(-12 13.5 10.5)" fill="currentColor" opacity=".85"/></svg>
           <span>Library</span><span class="count" id="library-count"></span>
@@ -970,6 +1116,14 @@
         <button class="sound" id="sound" type="button" aria-pressed="true" title="Office sounds">
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8h3l4-3.5v11L6 12H3z" fill="currentColor"/><path class="waves" d="M13 7.5a3.5 3.5 0 0 1 0 5M15 5.5a6.4 6.4 0 0 1 0 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path class="cross" d="M13.5 8l4 4m0-4l-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           <span>Sound on</span>
+        </button>
+        <button class="tourbtn" id="tour-open" type="button" title="Take the tour: a one-minute look around the office">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7.9 8a2.2 2.2 0 1 1 3 2.05c-.6.25-.9.7-.9 1.3v.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="14.4" r=".95" fill="currentColor"/></svg>
+          <span>Tour</span>
+        </button>
+        <button class="alertbtn" id="alerts-open" type="button" aria-expanded="false" aria-controls="alerts" title="Alerts">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.2a4.6 4.6 0 0 0-4.6 4.6v2.6L4 13.2h12l-1.4-2.8V7.8A4.6 4.6 0 0 0 10 3.2z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8.2 15.4a1.9 1.9 0 0 0 3.6 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle class="on-dot" cx="15" cy="4.6" r="2.4" fill="var(--ok)"/></svg>
+          <span>Alerts</span>
         </button>
         <label class="toggle" title="Show past sessions"><input type="checkbox" id="show-past" checked> <span>Past sessions</span></label>
         <button class="helpbtn" id="help-open" type="button" aria-expanded="false" aria-keyshortcuts="?" aria-label="What am I looking at?" title="What am I looking at? (?)"><span aria-hidden="true">?</span></button>
@@ -1005,6 +1159,8 @@
 
     <aside class="hud paper" id="side" aria-live="polite"></aside>
     <aside class="hud paper" id="library" aria-label="Library" hidden></aside>
+    <aside class="hud paper" id="spend" aria-label="Spend today" hidden></aside>
+    <aside class="hud paper" id="alerts" aria-label="Alerts" hidden></aside>
     <div id="lightbox" role="dialog" aria-label="Full size" hidden></div>
     <div id="handoff" hidden></div>
     <dialog id="recap" class="paper" aria-labelledby="recap-title"><div class="rc-body"></div></dialog>
