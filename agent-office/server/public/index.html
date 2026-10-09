@@ -1224,6 +1224,47 @@
      data-motion="reduce" (motion.js); nothing on the page animates. */
   :root[data-motion="reduce"] *, :root[data-motion="reduce"] *::before, :root[data-motion="reduce"] *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   :root[data-motion="reduce"] .card:hover, :root[data-motion="reduce"] .out.pic:hover { transform: none; }
+  /* ===== Make it yours (D4): three more critter colors (themes.js lists
+     all ten), the office theme picker in Settings, and the swatches in the
+     room editor and the critter color card. The themes themselves set
+     their tokens on <html> from themes.js. ===== */
+  :root { --tangerine: #f0913a; --berry: #c0569a; --slate: #6f849c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --tangerine: #f5a55c; --berry: #d878b4; --slate: #93a7bf; }
+  }
+  :root[data-theme="dark"] { --tangerine: #f5a55c; --berry: #d878b4; --slate: #93a7bf; }
+  .dot.tangerine { background: var(--tangerine); } .dot.berry { background: var(--berry); } .dot.slate { background: var(--slate); }
+  .set-choice { border: 0; margin: 0; padding: 0; min-width: 0; }
+  .set-choice legend { padding: 0; margin-bottom: 6px; }
+  .set-choice legend b { display: block; font-weight: 600; font-size: 13px; }
+  .set-choice legend small { display: block; color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+  .set-opts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .set-opt { position: relative; display: grid; gap: 4px; padding: 5px 5px 4px; border-radius: 9px; border: 1px solid var(--line); cursor: pointer; font-size: 11.5px; line-height: 1.25; text-align: center; }
+  .set-opt input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .set-opt:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+  .set-opt:has(input:checked) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); font-weight: 600; }
+  .set-opt:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .set-opt .swatch { display: flex; height: 22px; border-radius: 6px; overflow: hidden; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 12%, transparent); }
+  .set-opt .swatch i { flex: 1; }
+  .set-opt .swatch i:last-child { flex: 0 0 26%; }
+  :root[data-phone] .set-opt { min-height: 44px; }
+  .pe-label { margin: 10px 0 4px; font-size: 11.5px; color: var(--muted); }
+  .pe-swatches { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pe-swatches button { width: 26px; height: 26px; border-radius: 50%; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 18%, transparent); }
+  .pe-swatches button[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px var(--accent); }
+  .pe-swatches button:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
+  .pe-decor { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
+  .pe-decor button { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 8px; font-size: 12.5px; border: 1px solid var(--line); }
+  .pe-decor button:hover { background: color-mix(in srgb, var(--line) 50%, transparent); }
+  .pe-decor button[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); font-weight: 500; }
+  .pe-decor button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .dot-pick { display: inline-grid; place-items: center; width: 22px; height: 22px; margin: 0 4px 0 -6px; border-radius: 50%; vertical-align: middle; }
+  .dot-pick .dot { margin: 0; }
+  .dot-pick:hover { background: color-mix(in srgb, var(--line) 70%, transparent); }
+  .dot-pick:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+  .critter-edit .pe-swatches { margin-bottom: 10px; }
+  /* Text on the accent follows the theme (a bright accent takes dark ink). */
+  .pe-actions .primary, .tag.frontdesk small { color: var(--on-accent); }
 </style>
 </head>
 <body>

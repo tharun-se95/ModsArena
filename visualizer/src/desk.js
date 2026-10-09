@@ -109,7 +109,7 @@ function roomPicker() {
   return list.map(r => `
     <label class="jroom ${r.dir === dir ? 'on' : ''}" title="${escapeHtml(r.dir)}">
       <input type="radio" name="jroom" value="${escapeHtml(r.dir)}" ${r.dir === dir ? 'checked' : ''}>
-      <i class="room-${roomKey(r.raw)}" aria-hidden="true">${r.icon}</i><span>${escapeHtml(r.name)}</span>
+      <i class="room-${roomKey(r.raw, r.dir)}" aria-hidden="true">${r.icon}</i><span>${escapeHtml(r.name)}</span>
       <small>${r.live ? `${r.live} working here` : 'quiet'}</small>
     </label>`).join('')
 }

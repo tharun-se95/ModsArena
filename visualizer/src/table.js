@@ -4,6 +4,8 @@
 // subagents walk over to the coffee corner for a break before they leave.
 // The office keeps its own time: the windows follow your local hour, the
 // clock on the wall ticks, plants sway and a robot vacuum makes its rounds.
+// It wears the office theme you picked (themes.js), and each room and
+// critter what you chose for it (looks.js).
 //
 // The scene is reconciled from model.js every frame, so it never holds
 // state the model doesn't; walks and breaks are the only things it keeps.
@@ -34,6 +36,8 @@ import { toast } from './toast.js'
 import { cropOf } from './snapshot.js'
 import { budget } from './power.js'
 import { reduced } from './motion.js'
+import * as themes from './themes.js'
+import { roomLook, critterColor } from './looks.js'
 
 const ROW_DEPTH = 160 // one row: helpers, desk, the session, its label
 const BACK_SPACE = 44 // along the back wall, for the shelf, window and plants
@@ -96,10 +100,12 @@ const hash = text => {
   return h
 }
 export const tintOf = type => AGENT_TINT[type] ?? TINTS[hash(type) % TINTS.length]
-export const sessionTint = id => TINTS[hash(id) % TINTS.length]
+// A thread's critter wears the color you picked for it, or one from its id.
+export const sessionTint = id => critterColor(id) ?? TINTS[hash(id) % TINTS.length]
 const roomOf = name => ROOMS[hash(name) % ROOMS.length]
-// The wall color key of a project's room, for the directory's swatches.
-export const roomKey = roomOf
+// The wall color key of a project's room (the one you picked, or one from
+// its name), for the room and the directory's swatches.
+export const roomKey = (name, id) => roomLook(id).wall ?? roomOf(name)
 
 // ---------------------------------------------------------------------------
 // Scene
@@ -215,8 +221,10 @@ export function mount(el, { pick }) {
   scene.add(floor)
 
   readPalette()
-  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readPalette)
-  new MutationObserver(readPalette).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+  // A new theme, light or dark mode, or a room or critter you restyled:
+  // repaint where you are, without moving the camera.
+  themes.onChange(restyle)
+  document.addEventListener('office:looks', restyle)
 
   bindPointer()
   new ResizeObserver(fit).observe(stage)
@@ -228,17 +236,22 @@ export function mount(el, { pick }) {
 function readPalette() {
   const css = getComputedStyle(document.documentElement)
   const keys = ['floor', 'line', 'ok', 'warn', 'crit', 'clay', 'thread', 'scene', 'wood', 'wood-dark', 'trim', 'pot', 'glow', 'window', 'gem',
-    'desk', 'tile', 'counter', 'fridge', 'carpet', 'outer-wall', 'night', 'dawn', 'dusk', ...TINTS, ...ROOMS.map(r => `room-${r}`)]
+    'desk', 'tile', 'counter', 'fridge', 'carpet', 'outer-wall', 'night', 'dawn', 'dusk', ...themes.CRITTERS.map(c => c.id), ...ROOMS.map(r => `room-${r}`)]
   for (const k of keys) palette[k] = new THREE.Color(css.getPropertyValue(`--${k}`).trim() || '#888')
   scene.background = palette.scene
   floor.material.color.copy(palette.scene)
   // Rooms, the coffee corner and the office are rebuilt in the new colors
-  // on the next sync.
-  for (const t of rooms.values()) { if (t.mesh) unmount(t.mesh); t.w = null }
-  if (coffee) { unmount(coffee.group); coffee = null }
-  if (shell) { unmount(shell.group); shell = null }
+  // on the next sync, and what they were built of is freed.
+  for (const t of rooms.values()) { if (t.mesh) unmount(t.mesh, true); t.w = null }
+  if (coffee) { unmount(coffee.group, true); coffee = null }
+  if (shell) { unmount(shell.group, true); shell = null }
   layoutKey = ''
   for (const s of sessionViews.values()) {
+    const n = nodes.get(s.id)
+    if (n) {
+      s.tint = sessionTint(n.session)
+      s.room = roomKey(nodes.get(`p:${n.project}`)?.label ?? n.project, n.project)
+    }
     s.track.material.color.copy(palette.line)
     s.char.bulb.material.color.copy(palette.gem)
     s.char.bulb.material.emissive.copy(palette.gem)
@@ -246,8 +259,20 @@ function readPalette() {
     placeDesk(s)
     s.gaugeKey = ''
   }
-  for (const a of agentViews.values()) a.char.accentMat.color.copy(accent(a.tint))
+  for (const a of agentViews.values()) {
+    a.char.bodyMat.color.copy(palette[a.tint])
+    a.char.accentMat.color.copy(accent(a.tint))
+  }
   daylightAt = -1
+  if (renderer) renderer.shadowMap.needsUpdate = true
+}
+
+// Repaint in place: the rebuilt office keeps the camera where you left it
+// (and the thread you picked stays picked).
+let holdCamera = false
+function restyle() {
+  holdCamera = true
+  readPalette()
 }
 
 const accent = tint => palette[tint].clone().multiplyScalar(0.62)
@@ -260,12 +285,13 @@ function roomColors(room) {
     window: palette.window, desk: palette.desk, tile: palette.tile, counter: palette.counter, fridge: palette.fridge,
     carpet: palette.carpet, outerWall: palette['outer-wall'],
     books: TINTS.map(t => palette[t]), mugs: TINTS.map(t => palette[t]),
+    look: themes.look(),
   }
 }
 
 // Each session's desk sits behind its rug, monitor facing you.
 function placeDesk(s) {
-  if (s.desk) s.group.remove(s.desk.group)
+  if (s.desk) unmount(s.desk.group, true)
   s.desk = desk(roomColors(s.room), palette[s.tint])
   s.desk.group.position.set(0, FLOOR_TOP, DESK_Z)
   s.desk.group.traverse(o => { if (o.isMesh) o.userData.pick = { kind: 'session', id: s.id } })
@@ -277,9 +303,21 @@ function placeDesk(s) {
 // rebuilt room, coffee corner or office would otherwise show its sign twice.
 // A label that is reused (a room's sign, the front desk's) comes back on
 // the next frame once its new group is in the scene.
-function unmount(group) {
+// `free` also lets go of its geometry, materials and own textures, for a
+// piece that's being rebuilt or is gone for good; shared ones stay
+// (office.js marks them).
+function unmount(group, free = false) {
   group.removeFromParent()
-  group.traverse(o => { if (o.isCSS2DObject) o.element.remove() })
+  group.traverse(o => {
+    if (o.isCSS2DObject) o.element.remove()
+    if (!free || !o.isMesh) return
+    if (!o.geometry.userData.shared) o.geometry.dispose()
+    for (const m of [o.material].flat()) {
+      if (m.userData.shared) continue
+      for (const t of [m.map, m.bumpMap, m.alphaMap]) if (t && !t.userData.shared) t.dispose()
+      m.dispose()
+    }
+  })
 }
 
 function label(html, cls) {
@@ -319,7 +357,7 @@ let vacuum = null
 function ensureCoffee() {
   if (coffee) return coffee
   const c = coffeeCorner(roomColors('a'))
-  coffee = { ...c, w: COFFEE_W, d: COFFEE_D, target: new THREE.Vector3(), center: new THREE.Vector3(), placed: false, taken: new Set(), label: label('<span class="pname">Coffee corner</span>', 'project coffee') }
+  coffee = { ...c, w: COFFEE_W, d: COFFEE_D, target: new THREE.Vector3(), center: new THREE.Vector3(), placed: false, taken: new Set(), label: label(`<span class="pname">${escapeHtml(themes.look().coffeeName)}</span>`, 'project coffee') }
   coffee.label.obj.position.set(-25, 62, -COFFEE_D / 2 + 14)
   coffee.group.add(coffee.label.obj)
   scene.add(coffee.group)
@@ -329,7 +367,7 @@ function ensureCoffee() {
 function ensureShell(W, D) {
   const key = `${Math.round(W)}x${Math.round(D)}`
   if (shell && key === shellKey) return
-  if (shell) unmount(shell.group)
+  if (shell) unmount(shell.group, true)
   shell = officeShell({ W, D, colors: roomColors('a') })
   shellKey = key
   scene.add(shell.group)
@@ -431,13 +469,18 @@ function ensureRoom(p) {
   const w = cols * SESSION_GAP + SIDE_SPACE
   const d = BACK_SPACE + BEHIND + (Math.ceil(p.sessions.length / cols) - 1) * ROW_DEPTH + IN_FRONT
   t.cols = cols
-  if (t.w !== w || t.d !== d) {
-    if (t.mesh) unmount(t.mesh)
-    const built = buildRoom({ w, d, name: p.name, colors: roomColors(roomOf(p.name)) })
+  // The walls and decor you picked for it (looks.js).
+  const mine = roomLook(p.id.slice(2))
+  const wall = mine.wall ?? roomOf(p.name)
+  const lookKey = `${wall}|${mine.decor ?? ''}`
+  if (t.w !== w || t.d !== d || t.lookKey !== lookKey) {
+    if (t.mesh) unmount(t.mesh, true)
+    const built = buildRoom({ w, d, name: p.name, colors: roomColors(wall), decor: mine.decor })
+    t.lookKey = lookKey
     t.mesh = built.group
     t.plants = built.plants
     // What the project has earned so far; grow() shows it.
-    t.decor = roomDecor({ w, d, colors: roomColors(roomOf(p.name)), shelfAt: built.shelfAt })
+    t.decor = roomDecor({ w, d, colors: roomColors(wall), shelfAt: built.shelfAt })
     t.mesh.add(t.decor.group)
     t.decorKey = ''
     t.mesh.position.copy(t.center)
@@ -451,7 +494,7 @@ function ensureRoom(p) {
   const more = p.hidden > 0 ? `<span class="pmore">+${p.hidden}</span>` : ''
   const id = p.id.slice(2)
   const shown = projectName(id, p.name)
-  const html = `<button type="button" class="picon" data-edit-project="${escapeHtml(id)}" data-raw="${escapeHtml(p.name)}" title="Rename or change the icon" aria-label="Rename ${escapeHtml(shown)} or change its icon">${projectIcon(id, p.name)}</button><span class="pname">${escapeHtml(shown)}</span>${more}`
+  const html = `<button type="button" class="picon" data-edit-project="${escapeHtml(id)}" data-raw="${escapeHtml(p.name)}" title="Rename it, or change its icon, walls and decor" aria-label="Rename ${escapeHtml(shown)} or change its icon, walls and decor">${projectIcon(id, p.name)}</button><span class="pname">${escapeHtml(shown)}</span>${more}`
   if (t.html !== html) t.label.el.innerHTML = t.html = html
   t.label.el.classList.toggle('focused', focusedProject === p.id)
   return t
@@ -462,7 +505,7 @@ function ensureSession(n) {
   if (s) return s
   s = { id: n.id, home: new THREE.Vector3(), group: new THREE.Group(), gaugeKey: '', placed: false }
   s.tint = sessionTint(n.session)
-  s.room = roomOf(nodes.get(`p:${n.project}`)?.label ?? n.project)
+  s.room = roomKey(nodes.get(`p:${n.project}`)?.label ?? n.project, n.project)
   s.body = new THREE.Group() // the critter, which walks; the rest stays put
   s.char = makeCharacter({ build: 'session', bodyColor: palette[s.tint], inkColor: EYE, accentColor: palette.gem, pick: { kind: 'session', id: n.id } })
   s.char.root.scale.setScalar(SS)
@@ -801,7 +844,7 @@ export function sync(showPast) {
     p.sessions.forEach(n => { shownSessions.add(n.id); ensureSession(n) })
   }
   for (const id of [...rooms.keys()]) {
-    if (!list.some(p => p.id === id)) { unmount(rooms.get(id).mesh); rooms.get(id).label.el.remove(); rooms.delete(id) }
+    if (!list.some(p => p.id === id)) { unmount(rooms.get(id).mesh, true); rooms.get(id).label.el.remove(); rooms.delete(id) }
   }
   if (focusedProject && !rooms.has(focusedProject)) focusedProject = null
   for (const id of [...sessionViews.keys()]) if (!shownSessions.has(id)) dropSession(id)
@@ -843,8 +886,10 @@ export function sync(showPast) {
         }
       })
     }
-    frame()
+    // A repaint (restyle()) keeps the view you had.
+    if (!holdCamera) frame()
   }
+  holdCamera = false
   return list
 }
 
@@ -1137,6 +1182,7 @@ function commute(s, n, now, wall, busy) {
 // The time of day, from your clock: the windows' sky, the lamps and the sun.
 
 let daylightAt = -1
+const NIGHT_SUN = new THREE.Color('#c9d4ff')
 const KEYS = [[0, 'night'], [5.5, 'night'], [7, 'dawn'], [9, 'window'], [16.5, 'window'], [18.5, 'dawn'], [19.5, 'dusk'], [21, 'night'], [24, 'night']]
 
 function daylight(now) {
@@ -1159,10 +1205,13 @@ function daylight(now) {
   // After hours the office lights dim too, easing over half an hour either
   // side of 8pm and 7am; the lamps keep glowing.
   const late = lateness(h)
-  sun.intensity = SUN - dark * 0.7 - late * 0.35
-  sun.color.set('#fffaf2').lerp(new THREE.Color('#c9d4ff'), dark * 0.6)
-  sky.intensity = SKY - dark * 0.3 - late * 0.3
-  scene.environmentIntensity = ENV * (1 - dark * 0.5 - late * 0.2)
+  // The theme's lighting: gallery-bright in the Studio, cooler on the
+  // station (themes.js).
+  const lit = themes.look().light
+  sun.intensity = (SUN - dark * 0.7 - late * 0.35) * lit.sun
+  sun.color.set(lit.sunColor).lerp(NIGHT_SUN, dark * 0.6)
+  sky.intensity = (SKY - dark * 0.3 - late * 0.3) * lit.sky
+  scene.environmentIntensity = ENV * (1 - dark * 0.5 - late * 0.2) * lit.env
 }
 
 // ---------------------------------------------------------------------------

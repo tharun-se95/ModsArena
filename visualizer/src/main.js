@@ -27,6 +27,8 @@ import * as motion from './motion.js'
 import * as phone from './phone.js'
 import * as power from './power.js'
 import * as updates from './updates.js'
+import * as themes from './themes.js'
+import './critter-color.js'
 
 const HISTORY_REFRESH_MS = 60000
 const PANEL_REFRESH_MS = 700
@@ -135,8 +137,9 @@ for (const type of ['pointerdown', 'keydown']) addEventListener(type, unlock, { 
 settings.mountSettings(() => { transcript.redraw(); refreshPanels() })
 // "What am I looking at?": the ? button and the ? key.
 mountHelp()
-// A project renamed or given a new icon.
+// A project renamed or given a new icon; a room or critter restyled.
 document.addEventListener('office:names', () => refreshPanels())
+document.addEventListener('office:looks', () => refreshPanels())
 
 // Snapshot: a framed picture of the office, saved to your computer.
 const snapButton = document.getElementById('snapshot')
@@ -154,6 +157,14 @@ snapButton?.addEventListener('click', async () => {
 
 // The clipboard's tabs answer the arrow keys.
 addEventListener('keydown', a11y.tabKeys, true)
+
+// Make it yours: the office's look (themes.js); the scene repaints itself.
+settings.add({
+  id: 'office-theme', type: 'choice', label: 'Office theme',
+  hint: () => themes.THEMES[themes.theme()].hint,
+  options: themes.IDS.map(id => ({ value: id, label: themes.THEMES[id].name, swatch: themes.THEMES[id].look.swatch })),
+  get: themes.theme, set: themes.setTheme,
+})
 
 settings.add({
   id: 'reduce-motion', type: 'toggle', label: 'Reduce motion',

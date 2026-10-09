@@ -9,6 +9,8 @@
 //
 // `get` is read whenever the menu opens, so a row always shows the truth;
 // `disabled` (a function, optional) greys a row out with its hint saying why.
+// A row of type 'choice' offers `options` ([{ value, label, swatch? }]) as
+// radio cards; `get` returns the value picked and `set` takes the new one.
 // Added rows keep the order they were added in, under Developer view.
 
 import { devView, setDevView } from './prefs.js'
@@ -32,8 +34,11 @@ function bind() {
   slot.addEventListener('change', e => {
     const row = rows.find(r => r.id === e.target.dataset.setting)
     if (!row) return
-    row.set(e.target.checked)
+    row.set(row.type === 'choice' ? e.target.value : e.target.checked)
+    // Redrawn, the radio you just picked keeps the keyboard focus.
+    const value = e.target.value
     draw()
+    if (row.type === 'choice') slot.querySelector(`input[data-setting="${CSS.escape(row.id)}"][value="${CSS.escape(value)}"]`)?.focus()
   })
   // What opens something of its own (the alerts panel, the tour) puts the
   // menu away; the toggles and Snapshot (it says "Saved") leave it open.
@@ -59,11 +64,24 @@ function draw() {
   slot.innerHTML = rows.map(r => {
     const off = r.disabled?.() ?? false
     const hint = typeof r.hint === 'function' ? r.hint() : r.hint
+    if (r.type === 'choice') return choice(r, hint)
     return `<label class="switch set-row${off ? ' off' : ''}">
       <input type="checkbox" role="switch" data-setting="${escapeHtml(r.id)}" ${r.get() ? 'checked' : ''} ${off ? 'disabled' : ''}>
       <span><b>${escapeHtml(r.label)}</b>${hint ? `<small>${escapeHtml(hint)}</small>` : ''}</span>
     </label>`
   }).join('')
+}
+
+function choice(r, hint) {
+  const now = r.get()
+  return `<fieldset class="set-row set-choice">
+    <legend><b>${escapeHtml(r.label)}</b>${hint ? `<small>${escapeHtml(hint)}</small>` : ''}</legend>
+    <div class="set-opts">${r.options.map(o => `<label class="set-opt">
+      <input type="radio" name="set-${escapeHtml(r.id)}" data-setting="${escapeHtml(r.id)}" value="${escapeHtml(o.value)}" ${o.value === now ? 'checked' : ''}>
+      ${o.swatch ? `<span class="swatch" aria-hidden="true">${o.swatch.map(c => `<i style="background:${escapeHtml(c)}"></i>`).join('')}</span>` : ''}
+      <span>${escapeHtml(o.label)}</span>
+    </label>`).join('')}</div>
+  </fieldset>`
 }
 
 export function open() {
@@ -80,17 +98,18 @@ export function close() {
   button.setAttribute('aria-expanded', 'false')
 }
 
-// Add a row: { id, label, hint?, type: 'toggle', get, set, disabled? }.
+// Add a row: { id, label, hint?, type: 'toggle', get, set, disabled? }, or
+// { id, label, hint?, type: 'choice', options, get, set }.
 // Adding a row with an id that's already there replaces it.
 export function add(row) {
-  if (row.type && row.type !== 'toggle') throw new Error(`settings: unknown type ${row.type}`)
+  if (row.type && row.type !== 'toggle' && row.type !== 'choice') throw new Error(`settings: unknown type ${row.type}`)
   const at = rows.findIndex(r => r.id === row.id)
   if (at >= 0) rows[at] = row
   else rows.push(row)
   if (bind()) draw()
 }
 
-export const list = () => rows.map(r => ({ id: r.id, label: r.label, on: Boolean(r.get()) }))
+export const list = () => rows.map(r => ({ id: r.id, label: r.label, on: r.type === 'choice' ? r.get() : Boolean(r.get()) }))
 
 // Developer view: plain words everywhere, or the raw tool lines.
 export function mountSettings(onChange) {

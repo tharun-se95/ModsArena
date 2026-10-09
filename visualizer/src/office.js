@@ -4,6 +4,11 @@
 // color, and a few things to make it lived in: a bookshelf, a window, a
 // plant, a lamp, a picture. What a room holds is picked from
 // its name, so the same project always looks the same.
+//
+// The office theme (themes.js) comes in as `colors.look`: which floor
+// pattern, what's outside the windows, whether the trim glows and whether
+// the coffee corner is a galley. A room can also be dressed with decor you
+// pick (`decor`: plants, books, art or cosy lamps).
 
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
@@ -33,6 +38,10 @@ function canvasTexture(size, draw, color = true) {
   t.anisotropy = ANISO
   return t
 }
+
+// Shared pieces (the drawn surfaces, the window and lamp materials, the
+// trophies' parts) are marked, so a room taken down frees only its own.
+export const share = x => { x.userData.shared = true; return x }
 
 const gray = (v, a = 1) => `rgba(${v},${v},${v},${a})`
 
@@ -181,18 +190,80 @@ function drawFabric(g, size, bump) {
   speckle(g, size, bump ? 40 : 10, seeded('fabric'))
 }
 
+// Poured concrete: soft clouds, fine grit, the odd pore, and a saw-cut
+// joint around each slab.
+function drawConcrete(g, size, bump) {
+  const rand = seeded('concrete')
+  g.fillStyle = gray(bump ? 128 : 255)
+  g.fillRect(0, 0, size, size)
+  for (let i = 0; i < 40; i++) {
+    const x = rand() * size, y = rand() * size, r = 30 + rand() * 90
+    const grad = g.createRadialGradient(x, y, 0, x, y, r)
+    grad.addColorStop(0, gray(rand() < 0.5 ? 0 : 255, bump ? 0.04 : 0.035))
+    grad.addColorStop(1, gray(0, 0))
+    g.fillStyle = grad
+    g.fillRect(x - r, y - r, r * 2, r * 2)
+  }
+  speckle(g, size, bump ? 40 : 9, seeded('concrete-grit'))
+  for (let i = 0; i < 90; i++) {
+    g.fillStyle = gray(0, bump ? 0.5 : 0.12)
+    g.fillRect(rand() * size, rand() * size, 1.5, 1.5)
+  }
+  g.fillStyle = gray(0, bump ? 0.8 : 0.16)
+  g.fillRect(0, 0, size, 2)
+  g.fillRect(0, 0, 2, size)
+}
+
+// Deck plates for the space station: square panels with dark seams, a
+// raised lip and a rivet in each corner.
+function drawDeck(g, size, bump) {
+  const half = size / 2
+  g.fillStyle = gray(bump ? 128 : 255)
+  g.fillRect(0, 0, size, size)
+  speckle(g, size, bump ? 18 : 6, seeded('deck'))
+  for (const [x, y] of [[0, 0], [half, 0], [0, half], [half, half]]) {
+    g.fillStyle = gray(255, bump ? 0.35 : 0.08)
+    g.fillRect(x + 6, y + 6, half - 12, 3)
+    g.fillStyle = gray(0, bump ? 0.9 : 0.35)
+    g.fillRect(x, y, half, 3)
+    g.fillRect(x, y, 3, half)
+    for (const [cx, cy] of [[14, 14], [half - 14, 14], [14, half - 14], [half - 14, half - 14]]) {
+      g.fillStyle = gray(bump ? 255 : 0, bump ? 0.9 : 0.2)
+      g.beginPath()
+      g.arc(x + cx, y + cy, 3.2, 0, Math.PI * 2)
+      g.fill()
+    }
+  }
+}
+
+// Hull panels for the station's walls: tall plates with seams and a
+// raised band at hand height.
+function drawHull(g, size, bump) {
+  g.fillStyle = gray(bump ? 128 : 255)
+  g.fillRect(0, 0, size, size)
+  speckle(g, size, bump ? 14 : 5, seeded('hull'))
+  g.fillStyle = gray(0, bump ? 0.9 : 0.3)
+  g.fillRect(0, 0, 3, size)
+  g.fillRect(0, size * 0.62, size, 3)
+  g.fillStyle = gray(bump ? 255 : 0, bump ? 0.5 : 0.07)
+  g.fillRect(0, size * 0.36, size, size * 0.1)
+}
+
 const SURFACES = {
   planks: { draw: drawPlanks, size: 1024, unit: 72, roughness: 0.5, bump: 2.5 },
   carpet: { draw: drawCarpet, size: 512, unit: 70, roughness: 0.95, bump: 0.6 },
   checker: { draw: drawChecker, size: 512, unit: 40, roughness: 0.3, bump: 1.5 },
   wood: { draw: drawWood, size: 512, unit: 0, roughness: 0.5, bump: 0.5 },
   fabric: { draw: drawFabric, size: 256, unit: 0, roughness: 0.9, bump: 0.6 },
+  concrete: { draw: drawConcrete, size: 512, unit: 160, roughness: 0.85, bump: 0.8 },
+  deck: { draw: drawDeck, size: 512, unit: 60, roughness: 0.45, bump: 1.6 },
+  hull: { draw: drawHull, size: 256, unit: 40, roughness: 0.55, bump: 1.2 },
 }
 const drawn = {}
 function surface(kind) {
   if (!drawn[kind]) {
     const { draw, size } = SURFACES[kind]
-    drawn[kind] = { map: canvasTexture(size, (g, n) => draw(g, n, false)), bump: canvasTexture(size, (g, n) => draw(g, n, true), false) }
+    drawn[kind] = { map: share(canvasTexture(size, (g, n) => draw(g, n, false))), bump: share(canvasTexture(size, (g, n) => draw(g, n, true), false)) }
   }
   return drawn[kind]
 }
@@ -204,6 +275,7 @@ export function floorMaterial(color, w, d, pattern = 'planks') {
   const bumpMap = t.bump.clone()
   for (const m of [map, bumpMap]) {
     m.repeat.set(w / unit, d / unit)
+    m.userData.shared = false
     m.needsUpdate = true
   }
   return new THREE.MeshStandardMaterial({ color, map, bumpMap, bumpScale: bump, roughness })
@@ -235,7 +307,7 @@ function fadeTexture() {
   grad.addColorStop(1, '#000')
   g.fillStyle = grad
   g.fillRect(0, 0, 4, 64)
-  fade = new THREE.CanvasTexture(c)
+  fade = share(new THREE.CanvasTexture(c))
   return fade
 }
 
@@ -277,8 +349,40 @@ const mat = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, rough
 
 // Shared by every window and every lamp, so the time of day can repaint
 // them all at once (see daylight() in table.js).
-export const glassMat = new THREE.MeshStandardMaterial({ color: '#bfe3f7', emissive: '#bfe3f7', emissiveIntensity: 0.4, roughness: 0.15 })
-export const lampMat = new THREE.MeshStandardMaterial({ color: '#fbf6ec', emissive: '#ffcf7a', emissiveIntensity: 0.55, side: THREE.DoubleSide, roughness: 0.6 })
+export const glassMat = share(new THREE.MeshStandardMaterial({ color: '#bfe3f7', emissive: '#bfe3f7', emissiveIntensity: 0.4, roughness: 0.15 }))
+export const lampMat = share(new THREE.MeshStandardMaterial({ color: '#fbf6ec', emissive: '#ffcf7a', emissiveIntensity: 0.55, side: THREE.DoubleSide, roughness: 0.6 }))
+
+// A starfield for the station's portholes, drawn once: it's always night
+// out there, so the time of day leaves it alone.
+let starMat = null
+function stars() {
+  if (starMat) return starMat
+  const rand = seeded('stars')
+  const map = canvasTexture(256, (g, n) => {
+    const grad = g.createRadialGradient(n * 0.7, n * 0.3, 0, n * 0.5, n * 0.5, n * 0.75)
+    grad.addColorStop(0, '#1d2650')
+    grad.addColorStop(0.5, '#0c1128')
+    grad.addColorStop(1, '#05070f')
+    g.fillStyle = grad
+    g.fillRect(0, 0, n, n)
+    for (let i = 0; i < 160; i++) {
+      const r = rand() < 0.08 ? 1.6 : 0.5 + rand() * 0.7
+      g.fillStyle = `rgba(${rand() < 0.2 ? '190,220,255' : '255,255,255'},${0.45 + rand() * 0.55})`
+      g.beginPath()
+      g.arc(rand() * n, rand() * n, r, 0, Math.PI * 2)
+      g.fill()
+    }
+    // A small ringed planet.
+    g.fillStyle = '#d9a46a'
+    g.beginPath(); g.arc(n * 0.28, n * 0.68, n * 0.07, 0, Math.PI * 2); g.fill()
+    g.strokeStyle = 'rgba(240,215,170,0.8)'
+    g.lineWidth = 2
+    g.beginPath(); g.ellipse(n * 0.28, n * 0.68, n * 0.13, n * 0.03, -0.35, 0, Math.PI * 2); g.stroke()
+  })
+  map.wrapS = map.wrapT = THREE.ClampToEdgeWrapping
+  starMat = share(new THREE.MeshBasicMaterial({ map: share(map), toneMapped: false }))
+  return starMat
+}
 
 function shadowed(obj) {
   obj.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true } })
@@ -289,8 +393,7 @@ function shadowed(obj) {
 // a full office of books, bars and table legs adds up to thousands. Once a
 // piece is built, its still parts are merged into one mesh per look; `keep`
 // holds the parts that move or get repainted, which stay as they are.
-const SHARED = new Set([glassMat, lampMat])
-const look = (o, m) => `${SHARED.has(m) ? m.uuid : `${m.type}|${m.color?.getHex()}|${m.emissive?.getHex()}|${m.emissiveIntensity}|${m.roughness}|${m.metalness}|${m.side}|${m.map?.uuid}|${m.bumpMap?.uuid}|${m.vertexColors}`}|${o.castShadow}|${o.receiveShadow}`
+const look = (o, m) => `${m.userData.shared ? m.uuid : `${m.type}|${m.color?.getHex()}|${m.emissive?.getHex()}|${m.emissiveIntensity}|${m.roughness}|${m.metalness}|${m.side}|${m.map?.uuid}|${m.bumpMap?.uuid}|${m.vertexColors}`}|${o.castShadow}|${o.receiveShadow}`
 
 export function bake(root, keep = []) {
   root.updateMatrixWorld(true)
@@ -412,6 +515,31 @@ function windowPane(colors, w) {
   return g
 }
 
+// A round porthole with stars outside, in a thick metal ring, for the
+// space station. Centered like windowPane(): y = 18 on its group.
+function porthole(colors, r) {
+  const g = new THREE.Group()
+  const glass = new THREE.Mesh(new THREE.CircleGeometry(r, 40), stars())
+  glass.position.set(0, 18, 0.3)
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(r + 0.5, r * 0.16, 10, 40), mat(colors.trim, { roughness: 0.3, metalness: 0.6 }))
+  ring.position.set(0, 18, 0.9)
+  g.add(glass, ring)
+  return g
+}
+
+// What's outside: sky through a framed window, or stars through two
+// portholes on the station.
+const outside = (colors, w) => {
+  if (colors.look?.windows !== 'stars') return windowPane(colors, w)
+  const g = new THREE.Group()
+  for (const x of [-w * 0.24, w * 0.24]) {
+    const p = porthole(colors, 7)
+    p.position.x = x
+    g.add(p)
+  }
+  return g
+}
+
 function picture(colors, rand) {
   const g = new THREE.Group()
   const frame = new THREE.Mesh(rounded(14, 11, 1, 0.3), woodMat(colors.woodDark))
@@ -440,20 +568,81 @@ function couch(colors, rand) {
   return shadowed(g)
 }
 
+// Wall caps, skirting and window frames: on the station they glow in the
+// lamp color.
+const trim = colors => mat(colors.trim, { roughness: 0.4, ...(colors.look?.trimGlow && { emissive: colors.glow, emissiveIntensity: colors.look.trimGlow }) })
+
+// Decor you picked for a room (looks.js), along its side walls, where the
+// critters never stand: the helpers keep at least 50 units in from them.
+// Baked with the rest of the room, so it costs nothing per frame; its
+// plants stand still.
+function dress(room, kind, { w, d, colors, rand, place }) {
+  const back = -d / 2
+  const zs = [back + d * 0.36, back + d * 0.62]
+  const facing = (obj, side) => { obj.rotation.y = side < 0 ? Math.PI / 2 : -Math.PI / 2; return obj }
+  if (kind === 'plants') {
+    for (const [x, z, s] of [[-w / 2 + 14, zs[0], 1.1], [-w / 2 + 14, zs[1], 0.85], [w / 2 - 14, zs[0] + 8, 1.2]]) {
+      const p = plant(colors, rand)
+      delete p.userData.plant
+      place(p, x, FLOOR_TOP, z, PROP * s)
+    }
+  } else if (kind === 'books') {
+    place(facing(bookshelf(colors, rand), 1), w / 2 - 9.5, FLOOR_TOP, zs[0] + 6)
+    for (let i = 0; i < 2; i++) {
+      const stack = new THREE.Group()
+      for (let j = 0; j < 4; j++) {
+        const book = new THREE.Mesh(rounded(9 - j * 0.8, 1.6, 6.5, 0.3), mat(colors.books[Math.floor(rand() * colors.books.length)], { roughness: 0.55 }))
+        book.position.y = 0.8 + j * 1.7
+        book.rotation.y = (rand() - 0.5) * 0.5
+        stack.add(book)
+      }
+      place(shadowed(stack), -w / 2 + 10, FLOOR_TOP, zs[i])
+    }
+  } else if (kind === 'art') {
+    for (const side of [-1, 1]) {
+      for (const z of zs) place(facing(picture(colors, rand), side), side * (w / 2 - 0.4), -10, z, PROP * 1.15)
+    }
+  } else if (kind === 'lamps') {
+    place(lamp(colors), -w / 2 + 12, FLOOR_TOP, zs[0])
+    place(lamp(colors), w / 2 - 12, FLOOR_TOP, zs[1])
+    // A soft armchair under the first lamp.
+    const chair = couch(colors, rand)
+    chair.scale.set(PROP * 0.5, PROP, PROP)
+    chair.rotation.y = Math.PI / 2
+    chair.position.set(-w / 2 + 14, FLOOR_TOP, zs[0] + 24)
+    room.add(chair)
+  }
+}
+
 // ---------------------------------------------------------------------------
 // A room: `w` by `d`, centered on its group, open at the front (+z).
 
-export function buildRoom({ w, d, name, colors }) {
+export function buildRoom({ w, d, name, colors, decor }) {
   const rand = seeded(name)
   const room = new THREE.Group()
+  const style = colors.look ?? {}
 
-  const floor = new THREE.Mesh(rounded(w, FLOOR_TOP, d, 0.6), floorMaterial(colors.wood, w, d))
+  const floor = new THREE.Mesh(rounded(w, FLOOR_TOP, d, 0.6), floorMaterial(colors.wood, w, d, style.roomFloor ?? 'planks'))
   floor.position.y = FLOOR_TOP / 2
   floor.receiveShadow = true
   room.add(floor)
 
-  const wallMat = mat(colors.wall, { roughness: 0.85, vertexColors: true })
-  const trimMat = mat(colors.trim, { roughness: 0.4 })
+  // Station walls are hull panels, one material per length so the plates
+  // keep their size.
+  let plain = null
+  const wallMats = new Map()
+  const wallMat = len => {
+    if (style.walls !== 'panels') return (plain ??= mat(colors.wall, { roughness: 0.85, vertexColors: true }))
+    if (!wallMats.has(len)) {
+      const { roughness, bump } = SURFACES.hull
+      const t = surface('hull')
+      const [map, bumpMap] = [t.map.clone(), t.bump.clone()]
+      for (const m of [map, bumpMap]) { m.repeat.set(len / SURFACES.hull.unit, 1); m.userData.shared = false; m.needsUpdate = true }
+      wallMats.set(len, mat(colors.wall, { map, bumpMap, bumpScale: bump, roughness, vertexColors: true }))
+    }
+    return wallMats.get(len)
+  }
+  const trimMat = trim(colors)
   const walls = [
     [w + WALL_T * 2, 0, -d / 2 - WALL_T / 2, 'back'],
     [d, -w / 2 - WALL_T / 2, 0, 'side'],
@@ -461,7 +650,7 @@ export function buildRoom({ w, d, name, colors }) {
   ]
   for (const [len, x, z, kind] of walls) {
     const geo = shadeUp(kind === 'back' ? rounded(len, WALL_H, WALL_T, 0.6) : rounded(WALL_T, WALL_H, len, 0.6), WALL_H)
-    const wall = new THREE.Mesh(geo, wallMat)
+    const wall = new THREE.Mesh(geo, wallMat(len))
     wall.position.set(x, WALL_H / 2, z)
     wall.castShadow = wall.receiveShadow = true
     const cap = new THREE.Mesh(kind === 'back' ? rounded(len + 1, 1.6, WALL_T + 1.2, 0.4) : rounded(WALL_T + 1.2, 1.6, len + 1, 0.4), trimMat)
@@ -499,12 +688,13 @@ export function buildRoom({ w, d, name, colors }) {
   }
   const shelfAt = { x: -w / 2 + 48 + rand() * 10, z: back + 9.5 }
   place(bookshelf(colors, rand), shelfAt.x, FLOOR_TOP, shelfAt.z)
-  place(windowPane(colors, Math.min(46, w * 0.12)), w * 0.02, -8, back)
+  place(outside(colors, Math.min(46, w * 0.12)), w * 0.02, -8, back)
   if (w > 300) place(picture(colors, rand), w * 0.24, -6, back)
   place(plant(colors, rand), w / 2 - 18, FLOOR_TOP, back + 16)
   place(plant(colors, rand), -w / 2 + 16, FLOOR_TOP, d / 2 - 20, PROP * 0.8)
   place(lamp(colors), w / 2 - 16, FLOOR_TOP, d / 2 - 18, PROP * 0.9)
   if (w > 380 && rand() < 0.8) place(couch(colors, rand), w * 0.27, FLOOR_TOP, back + 18)
+  if (decor) dress(room, decor, { w, d, colors, rand, place })
 
   const plants = plantsIn(room)
   bake(room, plants)
@@ -565,6 +755,7 @@ function decorShared() {
     g.fillText('THINGS', w / 2, h * 0.92)
   })
   decorParts = {
+    neon: share(neon), poster: share(poster),
     gold: new THREE.MeshStandardMaterial({ color: '#e7b743', metalness: 0.65, roughness: 0.28 }),
     neonMat: new THREE.MeshBasicMaterial({ map: neon, transparent: true, depthWrite: false, toneMapped: false }),
     posterMat: new THREE.MeshStandardMaterial({ map: poster, roughness: 0.8 }),
@@ -574,6 +765,7 @@ function decorShared() {
     handle: new THREE.TorusGeometry(0.6, 0.16, 6, 12),
     sign: new THREE.PlaneGeometry(1, 1),
   }
+  for (const x of Object.values(decorParts)) share(x)
   return decorParts
 }
 
@@ -1003,20 +1195,29 @@ export function easel(colors) {
 export const COFFEE_W = 180
 export const COFFEE_D = 150
 
+// On the space station it's the galley: deck plates, a brushed-metal
+// counter with a glowing strip, and a porthole on the fridge door.
 export function coffeeCorner(colors) {
   const g = new THREE.Group()
   const rand = seeded('coffee')
-  const tiles = new THREE.Mesh(rounded(COFFEE_W, 1.4, COFFEE_D, 0.6), floorMaterial(colors.tile, COFFEE_W, COFFEE_D, 'checker'))
+  const style = colors.look ?? {}
+  const galley = Boolean(style.galley)
+  const tiles = new THREE.Mesh(rounded(COFFEE_W, 1.4, COFFEE_D, 0.6), floorMaterial(colors.tile, COFFEE_W, COFFEE_D, style.coffeeFloor ?? 'checker'))
   tiles.position.y = 0.7
   tiles.receiveShadow = true
   g.add(tiles)
 
   const back = -COFFEE_D / 2 + 14
-  const counter = new THREE.Mesh(rounded(120, 22, 24, 1), mat(colors.counter, { roughness: 0.45 }))
+  const counter = new THREE.Mesh(rounded(120, 22, 24, 1), mat(colors.counter, galley ? { roughness: 0.3, metalness: 0.55 } : { roughness: 0.45 }))
   counter.position.set(-25, 11, back)
-  const worktop = new THREE.Mesh(rounded(124, 2.4, 26, 0.6), woodMat(colors.woodDark))
+  const worktop = new THREE.Mesh(rounded(124, 2.4, 26, 0.6), galley ? mat(colors.trim, { roughness: 0.25, metalness: 0.7 }) : woodMat(colors.woodDark))
   worktop.position.set(-25, 23, back)
   g.add(counter, worktop)
+  if (galley) {
+    const strip = new THREE.Mesh(rounded(116, 1.2, 0.6, 0.3), new THREE.MeshBasicMaterial({ color: colors.glow, toneMapped: false }))
+    strip.position.set(-25, 3, back + 12.4)
+    g.add(strip)
+  }
   for (const x of [-70, -40, -10, 20]) {
     const handle = new THREE.Mesh(rounded(6, 1, 1, 0.3), mat(colors.trim, { roughness: 0.25, metalness: 0.7 }))
     handle.position.set(x, 18, back + 12.4)
@@ -1052,6 +1253,11 @@ export function coffeeCorner(colors) {
   const fhandle = new THREE.Mesh(rounded(1.6, 14, 1.6, 0.5), mat('#9a948c', { roughness: 0.2, metalness: 0.8 }))
   fhandle.position.set(44, 40, back + 12.6)
   g.add(fridge, fhandle)
+  if (galley) {
+    const window = porthole(colors, 4.5)
+    window.position.set(56, 24, back + 12.2)
+    g.add(window)
+  }
 
   // A round table with stools, and a mug or two left on it.
   const table = new THREE.Group()
@@ -1120,13 +1326,14 @@ const SHELL_H = 64
 
 export function officeShell({ W, D, colors }) {
   const g = new THREE.Group()
-  const carpet = new THREE.Mesh(new THREE.BoxGeometry(W, 0.4, D), floorMaterial(colors.carpet, W, D, 'carpet'))
+  const style = colors.look ?? {}
+  const carpet = new THREE.Mesh(new THREE.BoxGeometry(W, 0.4, D), floorMaterial(colors.carpet, W, D, style.officeFloor ?? 'carpet'))
   carpet.position.y = 0.2
   carpet.receiveShadow = true
   g.add(carpet)
 
   const wallMat = mat(colors.outerWall, { roughness: 0.9, vertexColors: true })
-  const trimMat = mat(colors.trim, { roughness: 0.4 })
+  const trimMat = trim(colors)
   const glass = glassMat
   const T = 5
   for (const [len, x, z, alongX] of [[W + T * 2, 0, -D / 2 - T / 2, true], [D, -W / 2 - T / 2, 0, false], [D, W / 2 + T / 2, 0, false]]) {
@@ -1143,10 +1350,16 @@ export function officeShell({ W, D, colors }) {
     [D, S, -W / 2 + S / 2, 0, 'left'],
     [D, S, W / 2 - S / 2, 0, 'right'],
   ], 0.45, 0.28))
-  // Tall windows along the back wall.
+  // Tall windows along the back wall, or portholes on the station.
   const panes = Math.max(2, Math.floor(W / 110))
   for (let i = 0; i < panes; i++) {
     const x = -W / 2 + (W / panes) * (i + 0.5)
+    if (style.windows === 'stars') {
+      const p = porthole(colors, 15)
+      p.position.set(x, 34 - 18, -D / 2 + 0.6)
+      g.add(p)
+      continue
+    }
     const pane = new THREE.Mesh(new THREE.PlaneGeometry(56, 36), glass)
     // Clear of the wall, so the two never fight over which is in front.
     pane.position.set(x, 34, -D / 2 + 0.8)
