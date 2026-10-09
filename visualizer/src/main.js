@@ -29,7 +29,6 @@ import * as phone from './phone.js'
 import * as power from './power.js'
 import * as updates from './updates.js'
 import * as themes from './themes.js'
-import * as robots from './robots.js'
 import './critter-color.js'
 
 const HISTORY_REFRESH_MS = 60000
@@ -167,15 +166,6 @@ settings.add({
   hint: () => themes.THEMES[themes.theme()].hint,
   options: themes.IDS.map(id => ({ value: id, label: themes.THEMES[id].name, swatch: themes.THEMES[id].look.swatch })),
   get: themes.theme, set: themes.setTheme,
-})
-
-// Classic critters or robot crabs: every critter is rebuilt where it stands.
-settings.add({
-  id: 'critters', type: 'choice', label: 'Critters',
-  hint: () => (robots.critterStyle() === 'robot' ? 'Little robot crabs with screen faces, one design per kind of helper' : 'The classic block critters'),
-  options: robots.STYLES.map(id => ({ value: id, label: robots.STYLE_LABELS[id] })),
-  get: robots.critterStyle,
-  set: id => { if (robots.setCritterStyle(id)) table.restyleCritters(robots.critterStyle()) },
 })
 
 settings.add({
