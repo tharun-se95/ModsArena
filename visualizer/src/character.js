@@ -6,10 +6,13 @@
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { envelope } from './moods.js'
+import { critterStyle } from './critter-style.js'
+import { makeCrab, crabPose, crabEmote } from './crab.js'
 
 const cache = new Map()
 const DOT_GEO = new THREE.SphereGeometry(1, 12, 10)
 const DOT_MAT = new THREE.MeshStandardMaterial({ color: '#fbf6ec', roughness: 0.5 })
+DOT_GEO.userData.shared = DOT_MAT.userData.shared = true
 function box(w, h, d, r = 0.08) {
   const key = `${w}|${h}|${d}|${r}`
   if (!cache.has(key)) cache.set(key, new RoundedBoxGeometry(w, h, d, 4, Math.min(r, w / 2, h / 2, d / 2)))
@@ -26,7 +29,55 @@ const BUILDS = {
   'test-runner': { w: 2.0, h: 0.85, d: 0.95, legs: 6, legH: 0.55, eye: [0.2, 0.26], crown: 'antennae' },
 }
 
-export function makeCharacter({ build = 'general-purpose', bodyColor, inkColor, accentColor, pick }) {
+// Crabs are built bigger than the blocks (their claws reach wide); this
+// brings them to about the same size on a desk.
+const CRAB_SCALE = 0.8
+
+// A robot crab (crab.js) in the blocks' clothes: its orange parts are the
+// body colour, the lead carries the same spinning gem, and it thinks in the
+// same dots. Crabs wear no crowns, so accentMat is kept only so the office
+// can recolour it like any critter's.
+function makeCrabCharacter({ build, bodyColor, accentColor, pick }) {
+  const crab = makeCrab({ orange: bodyColor, pick })
+  const root = new THREE.Group()
+  crab.root.scale.setScalar(CRAB_SCALE)
+  root.add(crab.root)
+  const tall = crab.height
+  let bulb = null
+  let height = tall
+  if (build === 'session') {
+    bulb = new THREE.Mesh(new THREE.OctahedronGeometry(0.32, 0), new THREE.MeshStandardMaterial({ color: accentColor, emissive: accentColor, emissiveIntensity: 0.2, roughness: 0.3, flatShading: true }))
+    bulb.position.y = tall + 0.45
+    bulb.scale.y = 1.35
+    bulb.castShadow = true
+    if (pick) bulb.userData.pick = pick
+    crab.top.add(bulb)
+    height += 0.95
+  }
+  const dots = new THREE.Group()
+  dots.position.set(1.15, tall - 0.2, 0)
+  dots.visible = false
+  ;[0.2, 0.28, 0.38].forEach((r, i) => {
+    const dot = new THREE.Mesh(DOT_GEO, DOT_MAT)
+    dot.scale.setScalar(r)
+    dot.position.set(i * 0.34, i * 0.46, 0)
+    dot.userData.r = r
+    dots.add(dot)
+  })
+  crab.top.add(dots)
+  crab.dots = dots
+  return Object.assign(crab, {
+    style: 'crab', root, crab: crab.root, bulb, dots,
+    bodyMat: crab.mats.orange,
+    accentMat: new THREE.MeshStandardMaterial({ color: accentColor }),
+    height: height * CRAB_SCALE,
+  })
+}
+
+// `style` is 'crab' (the robot crabs in crab.js) or 'block' (the critters
+// below); it follows the Settings choice unless the caller says otherwise.
+export function makeCharacter({ build = 'general-purpose', bodyColor, inkColor, accentColor, pick, style = critterStyle() }) {
+  if (style === 'crab') return makeCrabCharacter({ build, bodyColor, accentColor, pick })
   const b = BUILDS[build] ?? BUILDS['general-purpose']
   const root = new THREE.Group()
   const rig = new THREE.Group()
@@ -154,6 +205,11 @@ export function makeCharacter({ build = 'general-purpose', bodyColor, inkColor, 
 // to turn toward, `hop` 0..1 a one-shot jump when it calls a tool, and
 // `asleep` closes its eyes for good.
 export function pose(c, t, { busy = 0, look = 0, hop = 0, alarm = false, asleep = false } = {}) {
+  if (c.style === 'crab') {
+    crabPose(c, t, { busy, look, hop, alarm, asleep, apply: false })
+    if (c.bulb) spinGem(c.bulb, t, busy, c.seed)
+    return
+  }
   const breathe = Math.sin(t * (asleep ? 0.9 : 2) + c.seed) * 0.02
   const jump = Math.sin(Math.min(1, hop) * Math.PI) * 0.5
   c.rig.position.y = jump
@@ -183,18 +239,22 @@ export function pose(c, t, { busy = 0, look = 0, hop = 0, alarm = false, asleep 
   const closed = asleep || (t > c.blinkAt && t < c.blinkAt + 0.14)
   for (const e of c.eyes) e.scale.y = closed ? 0.15 : 1
 
-  if (c.bulb) {
-    c.bulb.rotation.y = t * (0.6 + busy * 2.4)
-    c.bulb.position.y = c.bulb.userData.y ??= c.bulb.position.y
-    c.bulb.position.y += Math.sin(t * 2 + c.seed) * 0.06
-    c.bulb.material.emissiveIntensity = 0.15 + busy * (0.55 + 0.35 * Math.sin(t * 8))
-  }
+  if (c.bulb) spinGem(c.bulb, t, busy, c.seed)
+}
+
+// The lead's gem turns, bobs, and glows while it works.
+function spinGem(bulb, t, busy, seed) {
+  bulb.rotation.y = t * (0.6 + busy * 2.4)
+  bulb.position.y = bulb.userData.y ??= bulb.position.y
+  bulb.position.y += Math.sin(t * 2 + seed) * 0.06
+  bulb.material.emissiveIntensity = 0.15 + busy * (0.55 + 0.35 * Math.sin(t * 8))
 }
 
 // A mood on top of the pose (moods.js says which): call it right after
 // pose(). `still` (prefers-reduced-motion) keeps the shapes and drops the
 // bouncing.
 export function emote(c, t, mood, still = false) {
+  if (c.style === 'crab') return crabEmote(c, t, mood, envelope, still)
   const kind = mood?.kind
   c.dots.visible = kind === 'think'
   c.top.rotation.x = 0

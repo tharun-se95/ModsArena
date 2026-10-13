@@ -63,7 +63,7 @@ const sideAt = (y, z) => R.x * Math.max(0, 1 - Math.abs(y / (y < 0 ? R_LOW : R.y
 const VISOR = { pw: 1.95, ph: 1.04, tc: 1.38 }
 const dirAt = (phi, theta) => new THREE.Vector3(-Math.cos(phi) * Math.sin(theta), Math.cos(theta), Math.sin(phi) * Math.sin(theta))
 
-export const FACES = ['happy', 'blink', 'think', 'focused', 'surprised', 'laugh', 'sleepy', 'love']
+export const FACES = ['happy', 'blink', 'think', 'focused', 'surprised', 'laugh', 'sleepy', 'sad', 'love']
 
 // A tube along `points` whose radius runs r0 -> r1 (plus a mid bulge),
 // capped with spheres: fingers, legs and stalks.
@@ -125,58 +125,73 @@ function spark(ctx, x, y, r, color) {
   ctx.restore()
 }
 
-// The shell's skin, wrapped round the sphere's UVs: cream fading darker
-// underneath, orange speckles over the top and sides, the spark low on
-// the front (u = 0.25 faces +z).
-function shellTexture(orange) {
-  const W = 1024, H = 512
+// The shell's skin, wrapped round the sphere's UVs, in two layers every
+// crab shares: the cream base (darker underneath, with its seams) and the
+// paint (orange chips over the top and sides, the spark low on the front,
+// u = 0.25 facing +z), drawn white on clear so each crab tints it its own
+// colour.
+const SKIN_W = 1024, SKIN_H = 512
+function canvasTexture(draw) {
   const c = document.createElement('canvas')
-  c.width = W
-  c.height = H
-  const ctx = c.getContext('2d')
-  const g = ctx.createLinearGradient(0, 0, 0, H)
-  g.addColorStop(0, SHELL)
-  g.addColorStop(0.55, SHELL)
-  g.addColorStop(1, UNDER)
-  ctx.fillStyle = g
-  ctx.fillRect(0, 0, W, H)
-
-  const r = rand(7)
-  ctx.fillStyle = orange
-  // Seams: one round the lower hull, one down the middle of the back.
-  ctx.fillStyle = SEAM
-  ctx.fillRect(0, 2.22 / Math.PI * H, W, 3)
-  ctx.fillRect(0.75 * W - 1.5, 0.12 * H, 3, (2.22 / Math.PI - 0.12) * H)
-
-  for (let i = 0; i < 70; i++) {
-    const u = r(), th = 0.3 + r() * 1.9 // latitude, from the top
-    // Keep the visor and the spark clear.
-    const du = Math.abs(u - 0.25)
-    if (du < 0.17 && th > 0.7) continue
-    ctx.fillStyle = orange
-    const y = th / Math.PI * H
-    const stretch = 1 / Math.max(0.35, Math.sin(th)) // the sphere pinches toward the top
-    const size = 2 + r() * r() * 14
-    ctx.globalAlpha = 0.5 + r() * 0.45
-    ctx.beginPath()
-    // A blob of a few overlapping dabs, like chipped paint.
-    for (let k = 0; k < 3; k++) {
-      ctx.ellipse(u * W + (r() - 0.5) * size * stretch, y + (r() - 0.5) * size, size * stretch * (0.5 + r() * 0.6), size * (0.4 + r() * 0.5), r() * 3, 0, Math.PI * 2)
-    }
-    ctx.fill()
-  }
-  ctx.globalAlpha = 1
-  // The spark, squeezed to undo the UV stretch at that latitude.
-  ctx.save()
-  ctx.translate(0.25 * W, 2.0 / Math.PI * H)
-  ctx.scale(1 / Math.sin(2.0) * 0.55, 1)
-  spark(ctx, 0, 0, 44, orange)
-  ctx.restore()
-
+  c.width = SKIN_W
+  c.height = SKIN_H
+  draw(c.getContext('2d'), SKIN_W, SKIN_H)
   const tex = new THREE.CanvasTexture(c)
   tex.colorSpace = THREE.SRGBColorSpace
   tex.anisotropy = 4
+  tex.userData.shared = true
   return tex
+}
+
+let skin = null
+function skins() {
+  if (skin) return skin
+  const base = canvasTexture((ctx, W, H) => {
+    const g = ctx.createLinearGradient(0, 0, 0, H)
+    g.addColorStop(0, SHELL)
+    g.addColorStop(0.55, SHELL)
+    g.addColorStop(1, UNDER)
+    ctx.fillStyle = g
+    ctx.fillRect(0, 0, W, H)
+    // Seams: one round the lower hull, one down the middle of the back.
+    ctx.fillStyle = SEAM
+    ctx.fillRect(0, 2.22 / Math.PI * H, W, 3)
+    ctx.fillRect(0.75 * W - 1.5, 0.12 * H, 3, (2.22 / Math.PI - 0.12) * H)
+  })
+  const paint = canvasTexture((ctx, W, H) => {
+    const r = rand(7)
+    ctx.fillStyle = '#ffffff'
+    for (let i = 0; i < 70; i++) {
+      const u = r(), th = 0.3 + r() * 1.9 // latitude, from the top
+      // Keep the visor and the spark clear.
+      if (Math.abs(u - 0.25) < 0.17 && th > 0.7) continue
+      const y = th / Math.PI * H
+      const stretch = 1 / Math.max(0.35, Math.sin(th)) // the sphere pinches toward the top
+      const size = 2 + r() * r() * 14
+      ctx.globalAlpha = 0.5 + r() * 0.45
+      ctx.beginPath()
+      // A blob of a few overlapping dabs, like chipped paint.
+      for (let k = 0; k < 3; k++) {
+        ctx.ellipse(u * W + (r() - 0.5) * size * stretch, y + (r() - 0.5) * size, size * stretch * (0.5 + r() * 0.6), size * (0.4 + r() * 0.5), r() * 3, 0, Math.PI * 2)
+      }
+      ctx.fill()
+    }
+    ctx.globalAlpha = 1
+    // The spark, squeezed to undo the UV stretch at that latitude.
+    ctx.save()
+    ctx.translate(0.25 * W, 2.0 / Math.PI * H)
+    ctx.scale(1 / Math.sin(2.0) * 0.55, 1)
+    spark(ctx, 0, 0, 44, '#ffffff')
+    ctx.restore()
+  })
+  // The bent shell and visor are the same for every crab too.
+  const { pw, ph, tc } = VISOR
+  const shellGeo = shellGeometry(new THREE.SphereGeometry(1, 96, 64))
+  const paintGeo = shellGeometry(new THREE.SphereGeometry(1, 96, 64), 0.003)
+  const visorGeo = shellGeometry(new THREE.SphereGeometry(1, 64, 40, Math.PI / 2 - pw / 2, pw, tc - ph / 2, ph), 0.008)
+  for (const g of [shellGeo, paintGeo, visorGeo]) g.userData.shared = true
+  skin = { base, paint, shellGeo, paintGeo, visorGeo }
+  return skin
 }
 
 // The visor: a rounded black faceplate with the eyes drawn on in glowing
@@ -257,6 +272,12 @@ export function drawFace(ctx, face = 'happy') {
     both((x, s) => stroke(ctx, () => { ctx.moveTo(x + s * 30, Y - 30); ctx.lineTo(x - s * 26, Y); ctx.lineTo(x + s * 30, Y + 30) }))
   } else if (face === 'sleepy') {
     both(x => stroke(ctx, () => ctx.arc(x, Y - 16, 38, Math.PI * 0.18, Math.PI * 0.82)))
+  } else if (face === 'sad') {
+    // Brows tipped up in the middle over low, flat eyes.
+    both((x, s) => {
+      stroke(ctx, () => { ctx.moveTo(x - s * 40, Y - 22); ctx.lineTo(x + s * 30, Y - 40) })
+      stroke(ctx, () => ctx.arc(x, Y - 4, 30, Math.PI * 0.2, Math.PI * 0.8))
+    })
   } else if (face === 'love') {
     both(x => fillGlow(ctx, () => {
       const s = 1.15
@@ -377,7 +398,8 @@ function visorRim(mat) {
 
 export function makeCrab({ orange = ORANGE, pick, face = 'happy' } = {}) {
   const mats = {
-    shell: new THREE.MeshPhysicalMaterial({ map: shellTexture(orange), roughness: 0.4, clearcoat: 0.3, clearcoatRoughness: 0.35 }),
+    shell: new THREE.MeshPhysicalMaterial({ map: skins().base, roughness: 0.4, clearcoat: 0.3, clearcoatRoughness: 0.35 }),
+    paint: new THREE.MeshStandardMaterial({ map: skins().paint, roughness: 0.35, transparent: true, depthWrite: false }),
     rim: new THREE.MeshPhysicalMaterial({ color: SHELL, roughness: 0.4, clearcoat: 0.3, clearcoatRoughness: 0.35 }),
     orange: new THREE.MeshPhysicalMaterial({ color: orange, roughness: 0.3, clearcoat: 0.6, clearcoatRoughness: 0.2 }),
     rubber: new THREE.MeshStandardMaterial({ color: RUBBER, roughness: 0.55 }),
@@ -385,6 +407,8 @@ export function makeCrab({ orange = ORANGE, pick, face = 'happy' } = {}) {
     pupil: new THREE.MeshPhysicalMaterial({ color: '#070708', roughness: 0.1, clearcoat: 1, clearcoatRoughness: 0.04 }),
     glint: new THREE.MeshBasicMaterial({ color: '#ffffff' }),
   }
+  // The paint chips follow the orange parts' colour: one Color, shared.
+  mats.paint.color = mats.orange.color
 
   const root = new THREE.Group()
   const rig = new THREE.Group()
@@ -395,8 +419,9 @@ export function makeCrab({ orange = ORANGE, pick, face = 'happy' } = {}) {
   body.position.y = CY
   top.add(body)
 
-  const shell = new THREE.Mesh(shellGeometry(new THREE.SphereGeometry(1, 96, 64)), mats.shell)
-  body.add(shell, visorRim(mats.rim))
+  const shell = new THREE.Mesh(skins().shellGeo, mats.shell)
+  const paint = new THREE.Mesh(skins().paintGeo, mats.paint)
+  body.add(shell, paint, visorRim(mats.rim))
 
   // The visor: its patch of the shell, a hair proud of it, inside the rim.
   const canvas = document.createElement('canvas')
@@ -409,8 +434,7 @@ export function makeCrab({ orange = ORANGE, pick, face = 'happy' } = {}) {
     color: '#666666', map: faceTex, emissiveMap: faceTex, emissive: '#ffffff', emissiveIntensity: 1.3,
     roughness: 0.45, envMapIntensity: 0.5, clearcoat: 1, clearcoatRoughness: 0.06, alphaTest: 0.5,
   })
-  const { pw, ph, tc } = VISOR
-  const visor = new THREE.Mesh(shellGeometry(new THREE.SphereGeometry(1, 64, 40, Math.PI / 2 - pw / 2, pw, tc - ph / 2, ph), 0.008), visorMat)
+  const visor = new THREE.Mesh(skins().visorGeo, visorMat)
   body.add(visor)
 
   // Eyes on the top front corners of the shell.
@@ -450,7 +474,7 @@ export function makeCrab({ orange = ORANGE, pick, face = 'happy' } = {}) {
     o.receiveShadow = true
     if (pick) o.userData.pick = pick
   })
-  visor.castShadow = false
+  visor.castShadow = paint.castShadow = false
 
   const c = {
     root, rig, top, shell, visor, stalks, arms, legs, mats, visorMat,
@@ -473,8 +497,11 @@ export function setFace(c, face) {
 
 // Per-frame pose: `busy` 0..1 taps the legs and clacks the claws, `look`
 // turns it, `hop` 0..1 is a one-shot jump, `asleep` keeps its eyes shut,
-// `walk` is a sideways scuttle. Its resting expression is c.mood.
-export function crabPose(c, t, { busy = 0, look = 0, hop = 0, asleep = false, walk = false } = {}) {
+// `walk` is a sideways scuttle, `alarm` (its context nearly full) throws
+// both claws up. Its resting expression is c.mood. With `apply` false the
+// face it would show is left in c.want, for crabEmote() to have the last
+// word (so the visor isn't redrawn twice a frame).
+export function crabPose(c, t, { busy = 0, look = 0, hop = 0, asleep = false, walk = false, alarm = false, apply = true } = {}) {
   const breathe = Math.sin(t * (asleep ? 0.9 : 2) + c.seed) * 0.015
   const jump = Math.sin(Math.min(1, hop) * Math.PI) * 0.45
   c.rig.position.y = jump
@@ -494,7 +521,7 @@ export function crabPose(c, t, { busy = 0, look = 0, hop = 0, asleep = false, wa
   for (const a of c.arms) {
     const s = a.userData.side
     a.rotation.x = -0.15 + Math.sin(t * 1.6 + c.seed + s) * 0.04
-    a.rotation.z = s * jump * 0.8
+    a.rotation.z = s * (alarm ? 2.3 + Math.sin(t * 7) * 0.2 : jump * 0.8)
     const open = busy ? 0.15 + 0.2 * Math.max(0, Math.sin(t * 10 + s)) : 0.12
     a.userData.finger.rotation.x = -open
   }
@@ -508,5 +535,47 @@ export function crabPose(c, t, { busy = 0, look = 0, hop = 0, asleep = false, wa
 
   if (t > c.blinkAt + 0.14) c.blinkAt = t + 2 + Math.random() * 4
   const closed = asleep || (t > c.blinkAt && t < c.blinkAt + 0.14)
-  setFace(c, asleep ? 'sleepy' : closed ? 'blink' : c.mood)
+  c.want = asleep ? 'sleepy' : closed ? 'blink' : alarm ? 'surprised' : c.mood
+  if (apply) setFace(c, c.want)
+}
+
+// What each mood (moods.js) shows on the visor.
+const MOOD_FACES = { think: 'think', cheer: 'laugh', sulk: 'sad', perk: 'surprised', yawn: 'sleepy' }
+
+// A mood on top of the pose (call right after crabPose with apply: false):
+// its face, and its claws and shell. `envelope` (moods.js) eases it in and
+// out; `still` keeps the shapes and drops the bouncing.
+export function crabEmote(c, t, mood, envelope, still = false) {
+  const kind = mood?.kind
+  if (c.dots) c.dots.visible = kind === 'think'
+  c.top.rotation.x = 0
+  if (!kind) return setFace(c, c.want ?? c.mood)
+  const k = mood.k
+  if (kind === 'think') {
+    // One dot after another swells, like an ellipsis typing itself.
+    c.dots?.children.forEach((d, i) => d.scale.setScalar(d.userData.r * (still ? 1 : 1 + 0.35 * Math.max(0, Math.sin((k - i / 3) * Math.PI * 2)))))
+    return setFace(c, c.want === 'blink' ? 'blink' : 'think')
+  }
+  const e = envelope(k)
+  setFace(c, e > 0.25 ? MOOD_FACES[kind] : c.want ?? c.mood)
+  if (kind === 'cheer') {
+    // Both claws up, clacking, and a bounce or two.
+    for (const a of c.arms) {
+      a.rotation.z = a.userData.side * (2.3 + (still ? 0 : Math.sin(t * 18) * 0.2)) * e
+      a.userData.finger.rotation.x = -0.15 - 0.25 * Math.max(0, Math.sin(t * 20)) * e
+    }
+    if (!still) c.rig.position.y += Math.abs(Math.sin(k * Math.PI * 3)) * 0.4 * e
+  } else if (kind === 'sulk') {
+    // A slump: tipping forward, claws on the floor.
+    c.top.rotation.x = 0.22 * e
+    c.top.position.y -= 0.06 * e
+  } else if (kind === 'perk') {
+    // Looks up at you with a little hop.
+    c.top.rotation.x = -0.2 * e
+    if (!still) c.rig.position.y += Math.sin(Math.min(1, k * 2.5) * Math.PI) * 0.3
+  } else if (kind === 'yawn') {
+    // A slow stretch, claws up.
+    c.top.rotation.x = -0.15 * e
+    for (const a of c.arms) a.rotation.z = a.userData.side * 1.4 * e
+  }
 }

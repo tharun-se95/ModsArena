@@ -70,4 +70,14 @@ for (const [label, yaw] of [['Front', 0], ['Three-quarter', 0.7], ['Side', Math.
   put('#turn', shot(320, 280, { yaw, dist: 8.4, pitch: 0.12, target: 0.9 }), label)
 }
 for (const f of FACES) put('#faces', shot(240, 220, { face: f, dist: 8.6, pitch: 0.2 }), f[0].toUpperCase() + f.slice(1))
+// In each of the office's ten critter colours (index.html's tokens), as a
+// thread's crab would wear them.
+const COLOURS = [
+  ['Coral', '#ec7a5c'], ['Tangerine', '#f0913a'], ['Mustard', '#e9ad35'], ['Leaf', '#5fb35a'], ['Teal', '#2fa59a'],
+  ['Sky', '#4b9be0'], ['Lilac', '#9a7ae0'], ['Pink', '#e872a0'], ['Berry', '#c0569a'], ['Slate', '#6f849c'],
+]
+for (const [name, hex] of COLOURS) {
+  crab.mats.orange.color.set(hex)
+  put('#colours', shot(480, 400, { yaw: -0.45, dist: 8.6, pitch: 0.2 }), name)
+}
 document.body.dataset.ready = '1'

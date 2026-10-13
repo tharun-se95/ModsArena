@@ -29,6 +29,7 @@ import * as phone from './phone.js'
 import * as power from './power.js'
 import * as updates from './updates.js'
 import * as themes from './themes.js'
+import * as critters from './critter-style.js'
 import './critter-color.js'
 
 const HISTORY_REFRESH_MS = 60000
@@ -166,6 +167,16 @@ settings.add({
   hint: () => themes.THEMES[themes.theme()].hint,
   options: themes.IDS.map(id => ({ value: id, label: themes.THEMES[id].name, swatch: themes.THEMES[id].look.swatch })),
   get: themes.theme, set: themes.setTheme,
+})
+
+// Robot crabs or the classic blocks. Every critter is built when it first
+// appears, so the page reloads to rebuild the office in the new style.
+settings.add({
+  id: 'critters', type: 'choice', label: 'Critters',
+  hint: () => (critters.critterStyle() === 'crab' ? 'Little robot crabs with glowing faces, in each thread\u2019s colour' : 'The classic block critters'),
+  options: critters.STYLES.map(id => ({ value: id, label: critters.STYLE_LABELS[id] })),
+  get: critters.critterStyle,
+  set: id => { if (critters.setCritterStyle(id)) location.reload() },
 })
 
 settings.add({
