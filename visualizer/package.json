@@ -7,7 +7,8 @@
   "license": "MIT",
   "scripts": {
     "build": "esbuild src/main.js --bundle --minify --format=esm --target=es2022 --outfile=../agent-office/server/public/app.js",
-    "watch": "npm run build -- --watch"
+    "watch": "npm run build -- --watch",
+    "studio": "esbuild studio/crab-studio.js --bundle --format=iife --outfile=studio/dist/crab-studio.js"
   },
   "dependencies": {
     "three": "^0.180.0"
