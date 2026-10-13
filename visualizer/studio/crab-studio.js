@@ -35,7 +35,10 @@ crabPose(crab, 0.3)
 crab.blinkAt = 99
 const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100)
 
-function shot(w, h, { yaw = 0, pitch = 0.32, dist = 7.8, target = 1.05, face = 'happy', fov = 30 } = {}) {
+function shot(w, h, { yaw = 0, pitch = 0.32, dist = 7.8, target = 1.05, face = 'happy', fov = 30, wave = false } = {}) {
+  // The hero raises its right claw in a wave, like the mascot sheet.
+  const arm = crab.arms[1]
+  arm.rotation.set(wave ? -1.1 : -0.15, wave ? 0.3 : 0, wave ? -0.6 : 0)
   renderer.setSize(w, h, false)
   camera.aspect = w / h
   camera.fov = fov
@@ -57,9 +60,9 @@ const put = (sel, img, label) => {
   document.querySelector(sel).append(fig)
 }
 
-put('#hero', shot(900, 640, { yaw: -0.5, pitch: 0.28, dist: 7.2 }))
+put('#hero', shot(900, 640, { yaw: -0.45, pitch: 0.16, dist: 7.0, wave: true }))
 for (const [label, yaw] of [['Front', 0], ['Three-quarter', 0.7], ['Side', Math.PI / 2], ['Back', Math.PI]]) {
   put('#turn', shot(320, 280, { yaw, dist: 8.4 }), label)
 }
-for (const f of FACES) put('#faces', shot(240, 220, { face: f, dist: 7.6, pitch: 0.2 }), f[0].toUpperCase() + f.slice(1))
+for (const f of FACES) put('#faces', shot(240, 220, { face: f, dist: 8.6, pitch: 0.2 }), f[0].toUpperCase() + f.slice(1))
 document.body.dataset.ready = '1'

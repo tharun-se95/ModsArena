@@ -1,7 +1,8 @@
 // The crab critter: a little robot crab after the Claude Bot mascot sheets.
-// A cream dome shell with orange speckles and a spark on its belly, a
-// glossy black visor whose glowing eyes are its face, two orange eyestalks,
-// big pincers up front and three jointed legs a side. Built in the classic
+// A cream pill of a shell with orange chips and a spark on its belly, a
+// glossy black visor in a raised rim whose glowing eyes are its face, two
+// big eyes on short black necks, chunky pincers up front and three
+// segmented legs a side, every joint a black rubber ring. Built in the classic
 // critters' unit space (feet at y = 0, facing +z) so the office could
 // scale and place it the same way.
 //
@@ -11,16 +12,54 @@
 
 import * as THREE from 'three'
 
-export const SHELL = '#f2e3cc'
+export const SHELL = '#f3dfc6'
 export const ORANGE = '#ef6a2e'
-const UNDER = '#dcc8ac'
+const UNDER = '#e6cdb0'
+const SEAM = '#cfb193'
+const RUBBER = '#26221f'
 const INK = '#0b0c10'
 const GLOW = '#dff3ff'
 const HALO = '#5cb6ff'
 
-// Shell radii and where its centre sits.
-const R = { x: 1.08, y: 0.8, z: 0.95 }
-const CY = 0.9
+// The shell is a superellipsoid (rounder than a box, squarer than an egg):
+// radii, the bottom a little flatter than the top, and how square.
+const R = { x: 1.15, y: 0.84, z: 1.0 }
+const R_LOW = 0.66
+const N = 2.35
+const CY = 0.86
+
+// Where a direction from the shell's centre (a unit vector) meets its
+// surface, and the outward normal there, both relative to the centre.
+function shellAt(dx, dy, dz, P = new THREE.Vector3(), Nrm = new THREE.Vector3()) {
+  const ry = dy < 0 ? R_LOW : R.y
+  const k = (Math.abs(dx) ** N + Math.abs(dy) ** N + Math.abs(dz) ** N) ** (1 / N)
+  P.set(dx / k * R.x, dy / k * ry, dz / k * R.z)
+  const g = (p, r) => Math.sign(p) * Math.abs(p / r) ** (N - 1) / r
+  Nrm.set(g(P.x, R.x), g(P.y, ry), g(P.z, R.z)).normalize()
+  return P
+}
+
+// A sphere's grid (and its UVs) bent onto the shell, pushed out by `lift`.
+function shellGeometry(sphere, lift = 0) {
+  const pos = sphere.attributes.position, nor = sphere.attributes.normal
+  const P = new THREE.Vector3(), Nrm = new THREE.Vector3(), D = new THREE.Vector3()
+  for (let i = 0; i < pos.count; i++) {
+    D.fromBufferAttribute(pos, i).normalize()
+    shellAt(D.x, D.y, D.z, P, Nrm)
+    P.addScaledVector(Nrm, lift)
+    pos.setXYZ(i, P.x, P.y, P.z)
+    nor.setXYZ(i, Nrm.x, Nrm.y, Nrm.z)
+  }
+  return sphere
+}
+
+// The shell's top at (x, z), from its centre.
+const topAt = (x, z) => R.y * Math.max(0, 1 - Math.abs(x / R.x) ** N - Math.abs(z / R.z) ** N) ** (1 / N)
+
+// The visor's patch of the shell, in sphere angles (phi round from the
+// side, pi / 2 straight ahead; theta down from the top).
+const VISOR = { pw: 1.95, ph: 1.04, tc: 1.38 }
+const dirAt = (phi, theta) => new THREE.Vector3(-Math.cos(phi) * Math.sin(theta), Math.cos(theta), Math.sin(phi) * Math.sin(theta))
 
 export const FACES = ['happy', 'blink', 'think', 'focused', 'surprised', 'laugh', 'sleepy', 'love']
 
@@ -67,15 +106,15 @@ function rand(seed) {
   return () => ((s = Math.imul(s ^ (s >>> 15), 0x2c1b3c6d) + 0x9e3779b9 >>> 0) / 4294967296)
 }
 
-// Ten rounded petals: the spark on its belly.
+// Eight rounded petals: the spark on its belly.
 function spark(ctx, x, y, r, color) {
   ctx.save()
   ctx.translate(x, y)
   ctx.fillStyle = color
-  for (let i = 0; i < 10; i++) {
-    ctx.rotate(Math.PI / 5)
+  for (let i = 0; i < 8; i++) {
+    ctx.rotate(Math.PI / 4)
     ctx.beginPath()
-    ctx.ellipse(0, -r * 0.55, r * 0.13, r * 0.5, 0, 0, Math.PI * 2)
+    ctx.ellipse(0, -r * 0.55, r * 0.16, r * 0.5, 0, 0, Math.PI * 2)
     ctx.fill()
   }
   ctx.beginPath()
@@ -102,15 +141,21 @@ function shellTexture(orange) {
 
   const r = rand(7)
   ctx.fillStyle = orange
-  for (let i = 0; i < 46; i++) {
-    const u = r(), th = 0.35 + r() * 1.55 // latitude, from the top
+  // Seams: one round the lower hull, one down the middle of the back.
+  ctx.fillStyle = SEAM
+  ctx.fillRect(0, 2.22 / Math.PI * H, W, 3)
+  ctx.fillRect(0.75 * W - 1.5, 0.12 * H, 3, (2.22 / Math.PI - 0.12) * H)
+
+  for (let i = 0; i < 70; i++) {
+    const u = r(), th = 0.3 + r() * 1.9 // latitude, from the top
     // Keep the visor and the spark clear.
     const du = Math.abs(u - 0.25)
-    if (du < 0.16 && th > 0.75) continue
+    if (du < 0.17 && th > 0.7) continue
+    ctx.fillStyle = orange
     const y = th / Math.PI * H
     const stretch = 1 / Math.max(0.35, Math.sin(th)) // the sphere pinches toward the top
-    const size = 4 + r() * r() * 22
-    ctx.globalAlpha = 0.55 + r() * 0.4
+    const size = 2 + r() * r() * 14
+    ctx.globalAlpha = 0.5 + r() * 0.45
     ctx.beginPath()
     // A blob of a few overlapping dabs, like chipped paint.
     for (let k = 0; k < 3; k++) {
@@ -121,9 +166,9 @@ function shellTexture(orange) {
   ctx.globalAlpha = 1
   // The spark, squeezed to undo the UV stretch at that latitude.
   ctx.save()
-  ctx.translate(0.25 * W, 2.28 / Math.PI * H)
-  ctx.scale(1 / Math.sin(2.28) * (R.y / R.x) * 0.95, 1)
-  spark(ctx, 0, 0, 40, orange)
+  ctx.translate(0.25 * W, 2.0 / Math.PI * H)
+  ctx.scale(1 / Math.sin(2.0) * 0.55, 1)
+  spark(ctx, 0, 0, 44, orange)
   ctx.restore()
 
   const tex = new THREE.CanvasTexture(c)
@@ -134,13 +179,14 @@ function shellTexture(orange) {
 
 // The visor: a rounded black faceplate with the eyes drawn on in glowing
 // strokes. Everything outside the plate is clear (alphaTest trims it).
-const FW = 512, FH = 300
+const FW = 512, FH = 280
+const PLATE = { x: 10, y: 10, w: FW - 20, h: FH - 20, r: 120 }
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath()
   ctx.roundRect(x, y, w, h, r)
 }
 
-function stroke(ctx, path, width = 24) {
+function stroke(ctx, path, width = 30) {
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
   // A wide soft halo, then the bright core.
@@ -166,21 +212,32 @@ function fillGlow(ctx, path) {
   ctx.shadowBlur = 0
 }
 
+// The faint little smile under its eyes.
+function smile(ctx, Y) {
+  ctx.lineCap = 'round'
+  ctx.lineWidth = 5
+  ctx.strokeStyle = 'rgba(150,190,225,0.35)'
+  ctx.beginPath()
+  ctx.arc(FW / 2, Y + 18, 22, Math.PI * 0.2, Math.PI * 0.8)
+  ctx.stroke()
+}
+
 export function drawFace(ctx, face = 'happy') {
   ctx.clearRect(0, 0, FW, FH)
   ctx.save()
-  roundRect(ctx, 6, 6, FW - 12, FH - 12, 118)
-  const g = ctx.createRadialGradient(FW * 0.5, FH * 0.42, 20, FW * 0.5, FH * 0.5, FW * 0.6)
-  g.addColorStop(0, '#14171d')
-  g.addColorStop(1, '#030305')
+  roundRect(ctx, PLATE.x, PLATE.y, PLATE.w, PLATE.h, PLATE.r)
+  const g = ctx.createRadialGradient(FW * 0.5, FH * 0.45, 20, FW * 0.5, FH * 0.5, FW * 0.6)
+  g.addColorStop(0, '#16110f')
+  g.addColorStop(1, '#040303')
   ctx.fillStyle = g
   ctx.fill()
   ctx.clip()
 
-  const L = FW * 0.33, Rt = FW * 0.67, Y = FH * 0.5, r = 46
+  const L = FW * 0.31, Rt = FW * 0.69, Y = FH * 0.47, r = 52
   const both = fn => { fn(L, -1); fn(Rt, 1) }
   if (face === 'happy') {
-    both(x => stroke(ctx, () => ctx.arc(x, Y + 18, r, Math.PI * 1.12, Math.PI * 1.88)))
+    both(x => stroke(ctx, () => ctx.arc(x, Y + 22, r, Math.PI * 1.1, Math.PI * 1.9)))
+    smile(ctx, Y)
   } else if (face === 'blink') {
     both(x => stroke(ctx, () => { ctx.moveTo(x - 34, Y); ctx.lineTo(x + 34, Y) }))
   } else if (face === 'think') {
@@ -207,6 +264,8 @@ export function drawFace(ctx, face = 'happy') {
     }))
   }
 
+  if (face === 'love' || face === 'laugh') smile(ctx, Y)
+
   // A soft sheen across the top of the glass.
   const sheen = ctx.createLinearGradient(0, 0, 0, FH * 0.4)
   sheen.addColorStop(0, 'rgba(255,255,255,0.10)')
@@ -216,39 +275,52 @@ export function drawFace(ctx, face = 'happy') {
   ctx.restore()
 }
 
-// One leg: hip -> knee -> foot, in the leg's own space (hip at the origin).
+// A rounded segment from a to b (a capsule that can taper).
+const seg = (a, b, r0, r1, mat, opts) => taper([a, b], r0, r1, mat, { seg: 6, ...opts })
+
+// One leg, hip at the origin: a stubby thigh arching up and out, a black
+// knee, a fat shin, a black ankle and a short blunt tip on the floor.
 function leg(side, dz, mats) {
   const g = new THREE.Group()
-  const knee = v(side * 0.42, 0.14, dz * 0.4)
-  const foot = v(side * 0.62, -0.46, dz)
-  g.add(taper([v(0, 0, 0), v(side * 0.22, 0.12, dz * 0.2), knee], 0.14, 0.12, mats.orange))
-  g.add(ball(0.12, mats.joint, knee.toArray()))
-  g.add(taper([knee, v(side * 0.58, -0.08, dz * 0.75), foot], 0.12, 0.035, mats.orange, { bulge: 0.025 }))
+  const knee = v(side * 0.27, 0.13, dz * 0.3)
+  const ankle = v(side * 0.42, -0.14, dz * 0.6)
+  const foot = v(side * 0.47, -0.4, dz * 0.72)
+  g.add(ball(0.12, mats.rubber))
+  g.add(seg(v(side * 0.04, 0.02, 0), knee.clone().multiplyScalar(0.84), 0.13, 0.125, mats.orange, { bulge: 0.02 }))
+  g.add(ball(0.105, mats.rubber, knee.toArray()))
+  g.add(seg(knee.clone().lerp(ankle, 0.2), ankle.clone().lerp(knee, 0.16), 0.125, 0.11, mats.orange, { bulge: 0.025 }))
+  g.add(ball(0.085, mats.rubber, ankle.toArray()))
+  g.add(seg(ankle.clone().lerp(foot, 0.2), foot, 0.1, 0.035, mats.orange, { bulge: 0.015 }))
   return g
 }
 
-// One pincer arm, pivoting at the shoulder. Returns the pivot; the upper
-// finger (`finger`) opens and closes.
+// One pincer arm, pivoting at the shoulder: black rubber joints between
+// chunky orange segments, then a big crab claw whose fixed finger curls up
+// to meet the hinged one (`finger`) curling down.
 function claw(side, mats) {
   const pivot = new THREE.Group()
   pivot.userData.side = side
-  const elbow = v(side * 0.28, -0.18, 0.22)
-  const wrist = v(side * 0.3, -0.12, 0.5)
-  pivot.add(taper([v(0, 0, 0), elbow], 0.13, 0.12, mats.orange))
-  pivot.add(ball(0.13, mats.joint, elbow.toArray()))
-  pivot.add(taper([elbow, wrist], 0.12, 0.15, mats.orange))
+  const elbow = v(side * 0.26, -0.16, 0.16)
+  const wrist = v(side * 0.34, -0.16, 0.44)
+  pivot.add(ball(0.13, mats.rubber))
+  pivot.add(seg(v(0, 0, 0).lerp(elbow, 0.2), elbow.clone().lerp(v(0, 0, 0), 0.15), 0.13, 0.13, mats.orange, { bulge: 0.02 }))
+  pivot.add(ball(0.12, mats.rubber, elbow.toArray()))
+  pivot.add(seg(elbow.clone().lerp(wrist, 0.18), wrist.clone().lerp(elbow, 0.12), 0.14, 0.16, mats.orange, { bulge: 0.02 }))
+  pivot.add(ball(0.15, mats.rubber, wrist.toArray()))
 
-  // The hand: a fat palm, a fixed lower jaw and a hinged upper finger,
-  // tipped in toward the middle.
   const hand = new THREE.Group()
   hand.position.copy(wrist)
-  hand.rotation.set(-0.15, -side * 0.35, -side * 0.25)
-  hand.add(ball(0.33, mats.orange, [0, 0, 0.18], [1, 0.92, 1.2]))
-  const jaw = taper([v(0, -0.1, 0.38), v(0, -0.08, 0.6), v(-side * 0.05, 0.03, 0.8)], 0.17, 0.035, mats.orange, { bulge: 0.03 })
-  hand.add(jaw)
+  // Rolled on its side, so the pincer opens outward and the gap shows.
+  hand.rotation.set(-0.2, -side * 0.12, side * 1.25)
+  hand.scale.setScalar(1.18)
+  // The palm: a fat rounded block, wider top to bottom than side to side.
+  hand.add(ball(0.3, mats.orange, [0, 0.02, 0.24], [0.8, 1, 1.15]))
+  // Fixed finger along the bottom, curling up at the tip.
+  hand.add(taper([v(0, -0.1, 0.42), v(0, -0.13, 0.6), v(0, -0.06, 0.76), v(0, 0.06, 0.84)], 0.17, 0.04, mats.orange, { bulge: 0.03, seg: 18 }))
+  // Hinged finger along the top, curling down to meet it.
   const finger = new THREE.Group()
-  finger.position.set(0, 0.13, 0.36)
-  finger.add(taper([v(0, 0, 0), v(0, 0.07, 0.24), v(-side * 0.04, -0.07, 0.48)], 0.16, 0.03, mats.orange, { bulge: 0.035 }))
+  finger.position.set(0, 0.14, 0.4)
+  finger.add(taper([v(0, 0, 0), v(0, 0.07, 0.18), v(0, 0.02, 0.34), v(0, -0.1, 0.44)], 0.17, 0.04, mats.orange, { bulge: 0.03, seg: 18 }))
   hand.add(finger)
   pivot.add(hand)
   pivot.userData.finger = finger
@@ -256,31 +328,55 @@ function claw(side, mats) {
   return pivot
 }
 
-// One eyestalk with its eye: orange socket, cream white, glossy black
-// pupil with a glint. Pivots at its base.
+// One eye on a short black neck: orange socket, cream white, glossy
+// black pupil with a glint. Pivots at its base.
 function eyestalk(side, mats) {
   const g = new THREE.Group()
-  g.add(taper([v(0, 0, 0), v(side * 0.02, 0.14, 0.02), v(side * 0.04, 0.24, 0.04)], 0.1, 0.085, mats.orange))
+  g.add(seg(v(0, -0.04, 0), v(0, 0.16, 0.02), 0.075, 0.07, mats.rubber))
   const eye = new THREE.Group()
-  eye.position.set(side * 0.05, 0.4, 0.06)
-  eye.add(ball(0.23, mats.orange))
-  eye.add(ball(0.2, mats.cream, [0, 0, 0.065]))
-  eye.add(ball(0.165, mats.pupil, [0, 0, 0.14], [1, 1, 0.85]))
-  eye.add(ball(0.045, mats.glint, [-0.06, 0.065, 0.27]))
-  eye.rotation.y = side * 0.12
+  eye.position.set(0, 0.36, 0.04)
+  eye.add(ball(0.27, mats.orange))
+  eye.add(ball(0.235, mats.cream, [0, 0, 0.075]))
+  eye.add(ball(0.165, mats.pupil, [0, 0, 0.22], [1, 1, 0.7]))
+  eye.add(ball(0.05, mats.glint, [-0.06, 0.07, 0.33]))
+  eye.rotation.y = side * 0.18
   g.add(eye)
   g.userData.eye = eye
   return g
 }
 
+// The raised cream rim round the visor: a tube along the faceplate's
+// rounded edge, carried onto the shell.
+function visorRim(mat) {
+  const { pw, ph, tc } = VISOR
+  const pts = []
+  const { x, y, w, h, r } = PLATE
+  // Walk the rounded rectangle in canvas pixels.
+  const corners = [[x + w - r, y + r, -Math.PI / 2], [x + w - r, y + h - r, 0], [x + r, y + h - r, Math.PI / 2], [x + r, y + r, Math.PI]]
+  for (const [cx, cy, a0] of corners) {
+    for (let i = 0; i <= 12; i++) {
+      const a = a0 + (i / 12) * (Math.PI / 2)
+      pts.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r])
+    }
+  }
+  const P = new THREE.Vector3(), Nrm = new THREE.Vector3()
+  const path = pts.map(([px, py]) => {
+    const d = dirAt(Math.PI / 2 - pw / 2 + (px / FW) * pw, tc - ph / 2 + (py / FH) * ph)
+    shellAt(d.x, d.y, d.z, P, Nrm)
+    return P.clone().addScaledVector(Nrm, 0.015)
+  })
+  const geo = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(path, true), 200, 0.055, 12, true)
+  return new THREE.Mesh(geo, mat)
+}
+
 export function makeCrab({ orange = ORANGE, pick, face = 'happy' } = {}) {
   const mats = {
-    shell: new THREE.MeshPhysicalMaterial({ map: shellTexture(orange), roughness: 0.42, clearcoat: 0.35, clearcoatRoughness: 0.3 }),
-    under: new THREE.MeshStandardMaterial({ color: UNDER, roughness: 0.55 }),
-    orange: new THREE.MeshPhysicalMaterial({ color: orange, roughness: 0.32, clearcoat: 0.5, clearcoatRoughness: 0.25 }),
-    joint: new THREE.MeshStandardMaterial({ color: '#c94d1d', roughness: 0.4 }),
-    cream: new THREE.MeshStandardMaterial({ color: '#fbf3e6', roughness: 0.3 }),
-    pupil: new THREE.MeshPhysicalMaterial({ color: '#08080a', roughness: 0.12, clearcoat: 1, clearcoatRoughness: 0.05 }),
+    shell: new THREE.MeshPhysicalMaterial({ map: shellTexture(orange), roughness: 0.4, clearcoat: 0.3, clearcoatRoughness: 0.35 }),
+    rim: new THREE.MeshPhysicalMaterial({ color: SHELL, roughness: 0.4, clearcoat: 0.3, clearcoatRoughness: 0.35 }),
+    orange: new THREE.MeshPhysicalMaterial({ color: orange, roughness: 0.3, clearcoat: 0.6, clearcoatRoughness: 0.2 }),
+    rubber: new THREE.MeshStandardMaterial({ color: RUBBER, roughness: 0.55 }),
+    cream: new THREE.MeshStandardMaterial({ color: '#fbf1e2', roughness: 0.3 }),
+    pupil: new THREE.MeshPhysicalMaterial({ color: '#070708', roughness: 0.1, clearcoat: 1, clearcoatRoughness: 0.04 }),
     glint: new THREE.MeshBasicMaterial({ color: '#ffffff' }),
   }
 
@@ -289,13 +385,14 @@ export function makeCrab({ orange = ORANGE, pick, face = 'happy' } = {}) {
   root.add(rig)
   const top = new THREE.Group() // the shell and all it carries
   rig.add(top)
+  const body = new THREE.Group()
+  body.position.y = CY
+  top.add(body)
 
-  // Shell and belly.
-  const shell = ball(1, mats.shell, [0, CY, 0], [R.x, R.y, R.z])
-  const belly = ball(1, mats.under, [0, CY - 0.36, 0], [R.x * 0.82, 0.32, R.z * 0.8])
-  top.add(shell, belly)
+  const shell = new THREE.Mesh(shellGeometry(new THREE.SphereGeometry(1, 96, 64)), mats.shell)
+  body.add(shell, visorRim(mats.rim))
 
-  // The visor: a patch of a slightly bigger shell across the front.
+  // The visor: its patch of the shell, a hair proud of it, inside the rim.
   const canvas = document.createElement('canvas')
   canvas.width = FW
   canvas.height = FH
@@ -303,38 +400,37 @@ export function makeCrab({ orange = ORANGE, pick, face = 'happy' } = {}) {
   faceTex.colorSpace = THREE.SRGBColorSpace
   faceTex.anisotropy = 4
   const visorMat = new THREE.MeshPhysicalMaterial({
-    map: faceTex, emissiveMap: faceTex, emissive: '#ffffff', emissiveIntensity: 1.25,
-    roughness: 0.6, envMapIntensity: 0.1, specularIntensity: 0.3, clearcoat: 0.5, clearcoatRoughness: 0.05, alphaTest: 0.5,
+    color: '#666666', map: faceTex, emissiveMap: faceTex, emissive: '#ffffff', emissiveIntensity: 1.3,
+    roughness: 0.45, envMapIntensity: 0.5, clearcoat: 1, clearcoatRoughness: 0.06, alphaTest: 0.5,
   })
-  const pw = 1.9, ph = 1.08, tc = 1.42
-  const visor = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 32, Math.PI / 2 - pw / 2, pw, tc - ph / 2, ph), visorMat)
-  visor.position.y = CY
-  visor.scale.set(R.x * 1.012, R.y * 1.012, R.z * 1.012)
-  top.add(visor)
+  const { pw, ph, tc } = VISOR
+  const visor = new THREE.Mesh(shellGeometry(new THREE.SphereGeometry(1, 64, 40, Math.PI / 2 - pw / 2, pw, tc - ph / 2, ph), 0.008), visorMat)
+  body.add(visor)
 
-  // Eyestalks on top of the shell.
+  // Eyes on the top front corners of the shell.
   const stalks = [-1, 1].map(side => {
     const s = eyestalk(side, mats)
-    s.position.set(side * 0.4, CY + 0.66, 0.12)
-    s.rotation.z = -side * 0.12
+    const x = side * 0.55, z = 0.3
+    s.position.set(x, topAt(x, z) - 0.02, z)
+    s.rotation.z = -side * 0.1
+    body.add(s)
     return s
   })
-  top.add(...stalks)
 
-  // Pincers out front at the shoulders.
+  // Pincers at the front corners, resting low beside the face.
   const arms = [-1, 1].map(side => {
     const a = claw(side, mats)
-    a.position.set(side * 0.88, CY - 0.18, 0.32)
+    a.position.set(side * 0.98, -0.3, 0.42)
+    body.add(a)
     return a
   })
-  top.add(...arms)
 
-  // Three legs a side, splayed front to back.
+  // Three legs a side under the hull, splayed front to back.
   const legs = []
   for (const side of [-1, 1]) {
-    ;[0.36, 0, -0.38].forEach((z, i) => {
-      const l = leg(side, z * 0.9, mats)
-      l.position.set(side * 0.72, 0.46, z)
+    ;[0.25, -0.12, -0.48].forEach((z, i) => {
+      const l = leg(side, z * 1.1 - 0.05, mats)
+      l.position.set(side * 0.86, 0.42, z)
       l.userData.side = side
       l.userData.phase = (i + (side > 0 ? 1 : 0)) % 2 ? Math.PI : 0
       legs.push(l)
@@ -353,7 +449,7 @@ export function makeCrab({ orange = ORANGE, pick, face = 'happy' } = {}) {
   const c = {
     root, rig, top, shell, visor, stalks, arms, legs, mats, visorMat,
     faceCtx: canvas.getContext('2d'), faceTex, face: null, mood: face,
-    height: CY + 1.3,
+    height: CY + R.y + 0.65,
     seed: Math.random() * 10,
     blinkAt: 1 + Math.random() * 3,
   }
