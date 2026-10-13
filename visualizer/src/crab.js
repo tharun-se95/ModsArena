@@ -7,10 +7,17 @@
 // scale and place it the same way.
 //
 // The face is a small canvas drawn onto the visor, redrawn only when the
-// expression changes (setFace). crabPose() breathes, blinks, taps its legs
+// expression changes (setFace). Each kind of helper wears a kit
+// (crab-kits.js): a backpack, a beret, glasses or headphones.
+//
+// Cheap to have many of: every rigid part (a leg, an arm, a palm, a kit) is
+// built once, merged into one geometry per material and shared by every
+// crab, so a crab is about 35 draw calls, not 130. crabPose() breathes, blinks, taps its legs
 // and clacks its claws.
 
 import * as THREE from 'three'
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 
 export const SHELL = '#f3dfc6'
 export const ORANGE = '#ef6a2e'
@@ -67,7 +74,7 @@ export const FACES = ['happy', 'blink', 'think', 'focused', 'surprised', 'laugh'
 
 // A tube along `points` whose radius runs r0 -> r1 (plus a mid bulge),
 // capped with spheres: fingers, legs and stalks.
-function taper(points, r0, r1, mat, { bulge = 0, radial = 16, seg = 14 } = {}) {
+function taper(points, r0, r1, mat, { bulge = 0, radial = 12, seg = 10, caps = true } = {}) {
   const curve = points.length === 2 ? new THREE.LineCurve3(...points) : new THREE.CatmullRomCurve3(points)
   const geo = new THREE.TubeGeometry(curve, seg, 1, radial, false)
   const pos = geo.attributes.position
@@ -85,8 +92,8 @@ function taper(points, r0, r1, mat, { bulge = 0, radial = 16, seg = 14 } = {}) {
   geo.computeVertexNormals()
   const g = new THREE.Group()
   g.add(new THREE.Mesh(geo, mat))
-  for (const [p, r] of [[points[0], r0], [points.at(-1), r1]]) {
-    const cap = new THREE.Mesh(new THREE.SphereGeometry(r * 0.99, radial, 10), mat)
+  for (const [p, r] of caps ? [[points[0], r0], [points.at(-1), r1]] : []) {
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(r * 0.99, radial, 6), mat)
     cap.position.copy(p)
     g.add(cap)
   }
@@ -94,13 +101,63 @@ function taper(points, r0, r1, mat, { bulge = 0, radial = 16, seg = 14 } = {}) {
 }
 
 function ball(r, mat, [x, y, z] = [0, 0, 0], [sx, sy, sz] = [1, 1, 1]) {
-  const m = new THREE.Mesh(new THREE.SphereGeometry(r, 32, 24), mat)
+  // Small balls (joints, glints) need far fewer facets to look round.
+  const m = new THREE.Mesh(r < 0.16 ? new THREE.SphereGeometry(r, 12, 8) : new THREE.SphereGeometry(r, 20, 14), mat)
   m.position.set(x, y, z)
   m.scale.set(sx, sy, sz)
   return m
 }
 
 const v = (x, y, z) => new THREE.Vector3(x, y, z)
+
+// What kits are made of: the same for every crab, never tinted.
+const std = o => { const m = new THREE.MeshStandardMaterial(o); m.userData.shared = true; return m }
+const KIT = {
+  leather: std({ color: '#86552f', roughness: 0.6 }),
+  flap: std({ color: '#6c4325', roughness: 0.6 }),
+  bedroll: std({ color: '#707046', roughness: 0.75 }),
+  buckle: std({ color: '#d9c9a3', roughness: 0.35, metalness: 0.5 }),
+  beret: std({ color: '#3f2d26', roughness: 0.85 }),
+  frame: std({ color: '#2a201c', roughness: 0.35 }),
+  lens: Object.assign(new THREE.MeshPhysicalMaterial({ color: '#ffffff', roughness: 0.05, transparent: true, opacity: 0.12, depthWrite: false }), { userData: { shared: true } }),
+  band: std({ color: '#3a2c26', roughness: 0.5 }),
+  pad: std({ color: '#d8c3a5', roughness: 0.7 }),
+}
+
+// Rigid parts, built once: key -> [{ role, geometry }]. A part is built
+// from meshes in the crab's own materials (`mats`) or the kit's; its
+// meshes are merged into one geometry per material, so it's one draw call
+// per material however many pieces it has, and every crab shares them.
+const parts = new Map()
+function baked(key, mats, build) {
+  if (!parts.has(key)) {
+    const g = build()
+    g.updateMatrixWorld(true)
+    const roleOf = m => Object.keys(mats).find(k => mats[k] === m) ?? `kit:${Object.keys(KIT).find(k => KIT[k] === m)}`
+    const byRole = new Map()
+    g.traverse(o => {
+      if (!o.isMesh) return
+      const copy = o.geometry.clone().applyMatrix4(o.matrixWorld)
+      const role = roleOf(o.material)
+      if (!byRole.has(role)) byRole.set(role, [])
+      byRole.get(role).push(copy)
+      o.geometry.dispose()
+    })
+    parts.set(key, [...byRole].map(([role, geos]) => {
+      // Merging needs all indexed or none.
+      const all = geos.some(x => !x.index) ? geos.map(x => (x.index ? x.toNonIndexed() : x)) : geos
+      const merged = mergeGeometries(all)
+      for (const x of geos) x.dispose()
+      merged.userData.shared = true
+      return { role, geometry: merged }
+    }))
+  }
+  const out = new THREE.Group()
+  for (const { role, geometry } of parts.get(key)) {
+    out.add(new THREE.Mesh(geometry, role.startsWith('kit:') ? KIT[role.slice(4)] : mats[role]))
+  }
+  return out
+}
 
 // A small seeded random, so every crab wears the same speckles.
 function rand(seed) {
@@ -186,9 +243,9 @@ function skins() {
   })
   // The bent shell and visor are the same for every crab too.
   const { pw, ph, tc } = VISOR
-  const shellGeo = shellGeometry(new THREE.SphereGeometry(1, 96, 64))
-  const paintGeo = shellGeometry(new THREE.SphereGeometry(1, 96, 64), 0.003)
-  const visorGeo = shellGeometry(new THREE.SphereGeometry(1, 64, 40, Math.PI / 2 - pw / 2, pw, tc - ph / 2, ph), 0.008)
+  const shellGeo = shellGeometry(new THREE.SphereGeometry(1, 56, 36))
+  const paintGeo = shellGeometry(new THREE.SphereGeometry(1, 56, 36), 0.003)
+  const visorGeo = shellGeometry(new THREE.SphereGeometry(1, 40, 24, Math.PI / 2 - pw / 2, pw, tc - ph / 2, ph), 0.008)
   for (const g of [shellGeo, paintGeo, visorGeo]) g.userData.shared = true
   skin = { base, paint, shellGeo, paintGeo, visorGeo }
   return skin
@@ -299,7 +356,7 @@ export function drawFace(ctx, face = 'happy') {
 }
 
 // A rounded segment from a to b (a capsule that can taper).
-const seg = (a, b, r0, r1, mat, opts) => taper([a, b], r0, r1, mat, { seg: 6, ...opts })
+const seg = (a, b, r0, r1, mat, opts) => taper([a, b], r0, r1, mat, { seg: 5, radial: 10, ...opts })
 
 // One leg, hip at the origin (high on the shell's side): a stubby thigh
 // out, a black knee, a fat shin dropping nearly straight down, a black
@@ -327,11 +384,15 @@ function claw(side, mats) {
   pivot.userData.side = side
   const elbow = v(side * 0.2, 0.02, 0.03)
   const wrist = v(side * 0.46, -0.02, 0.06)
-  pivot.add(ball(0.13, mats.rubber))
-  pivot.add(seg(v(0, 0, 0).lerp(elbow, 0.2), elbow.clone().lerp(v(0, 0, 0), 0.15), 0.13, 0.13, mats.orange, { bulge: 0.02 }))
-  pivot.add(ball(0.12, mats.rubber, elbow.toArray()))
-  pivot.add(seg(elbow.clone().lerp(wrist, 0.18), wrist.clone().lerp(elbow, 0.12), 0.14, 0.16, mats.orange, { bulge: 0.02 }))
-  pivot.add(ball(0.15, mats.rubber, wrist.toArray()))
+  pivot.add(baked(`arm${side}`, mats, () => {
+    const g = new THREE.Group()
+    g.add(ball(0.13, mats.rubber))
+    g.add(seg(v(0, 0, 0).lerp(elbow, 0.2), elbow.clone().lerp(v(0, 0, 0), 0.15), 0.13, 0.13, mats.orange, { bulge: 0.02 }))
+    g.add(ball(0.12, mats.rubber, elbow.toArray()))
+    g.add(seg(elbow.clone().lerp(wrist, 0.18), wrist.clone().lerp(elbow, 0.12), 0.14, 0.16, mats.orange, { bulge: 0.02 }))
+    g.add(ball(0.15, mats.rubber, wrist.toArray()))
+    return g
+  }))
 
   const hand = new THREE.Group()
   hand.position.copy(wrist)
@@ -340,14 +401,18 @@ function claw(side, mats) {
   hand.rotation.order = 'YXZ'
   hand.rotation.set(Math.PI / 2 - 0.25, -side * (Math.PI / 2 - 0.5), 0)
   hand.scale.setScalar(1.2)
-  // The palm: a fat rounded block, wider top to bottom than side to side.
-  hand.add(ball(0.3, mats.orange, [0, 0.02, 0.24], [0.8, 1, 1.15]))
-  // Fixed finger along the bottom, curling up at the tip.
-  hand.add(taper([v(0, -0.1, 0.42), v(0, -0.13, 0.6), v(0, -0.06, 0.76), v(0, 0.06, 0.84)], 0.17, 0.04, mats.orange, { bulge: 0.03, seg: 18 }))
+  // The palm, a fat rounded block, and the fixed finger along the bottom,
+  // curling up at the tip.
+  hand.add(baked('palm', mats, () => {
+    const g = new THREE.Group()
+    g.add(ball(0.3, mats.orange, [0, 0.02, 0.24], [0.8, 1, 1.15]))
+    g.add(taper([v(0, -0.1, 0.42), v(0, -0.13, 0.6), v(0, -0.06, 0.76), v(0, 0.06, 0.84)], 0.17, 0.04, mats.orange, { bulge: 0.03, seg: 18 }))
+    return g
+  }))
   // Hinged finger along the top, curling down to meet it.
   const finger = new THREE.Group()
   finger.position.set(0, 0.14, 0.4)
-  finger.add(taper([v(0, 0, 0), v(0, 0.07, 0.18), v(0, 0.02, 0.34), v(0, -0.1, 0.44)], 0.17, 0.04, mats.orange, { bulge: 0.03, seg: 18 }))
+  finger.add(baked('finger', mats, () => taper([v(0, 0, 0), v(0, 0.07, 0.18), v(0, 0.02, 0.34), v(0, -0.1, 0.44)], 0.17, 0.04, mats.orange, { bulge: 0.03, seg: 18 })))
   hand.add(finger)
   pivot.add(hand)
   pivot.userData.finger = finger
@@ -359,13 +424,17 @@ function claw(side, mats) {
 // black pupil with a glint. Pivots at its base.
 function eyestalk(side, mats) {
   const g = new THREE.Group()
-  g.add(seg(v(0, -0.04, 0), v(0, 0.1, 0.02), 0.075, 0.07, mats.rubber))
+  g.add(baked('neck', mats, () => seg(v(0, -0.04, 0), v(0, 0.1, 0.02), 0.075, 0.07, mats.rubber)))
   const eye = new THREE.Group()
   eye.position.set(0, 0.3, 0.04)
-  eye.add(ball(0.27, mats.orange))
-  eye.add(ball(0.235, mats.cream, [0, 0, 0.075]))
-  eye.add(ball(0.165, mats.pupil, [0, 0, 0.22], [1, 1, 0.7]))
-  eye.add(ball(0.05, mats.glint, [-0.06, 0.07, 0.33]))
+  eye.add(baked('eye', mats, () => {
+    const e = new THREE.Group()
+    e.add(ball(0.27, mats.orange))
+    e.add(ball(0.235, mats.cream, [0, 0, 0.075]))
+    e.add(ball(0.165, mats.pupil, [0, 0, 0.22], [1, 1, 0.7]))
+    e.add(ball(0.05, mats.glint, [-0.06, 0.07, 0.33]))
+    return e
+  }))
   eye.rotation.y = side * 0.18
   g.add(eye)
   g.userData.eye = eye
@@ -392,11 +461,118 @@ function visorRim(mat) {
     shellAt(d.x, d.y, d.z, P, Nrm)
     return P.clone().addScaledVector(Nrm, 0.015)
   })
-  const geo = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(path, true), 200, 0.055, 12, true)
+  const geo = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(path, true), 120, 0.055, 8, true)
   return new THREE.Mesh(geo, mat)
 }
 
-export function makeCrab({ orange = ORANGE, pick, face = 'happy' } = {}) {
+// Where the visor's eyes sit (canvas x, as a fraction across the plate) on
+// the shell, pushed `lift` out along it, and the outward normal there.
+function onVisor(fx, fy, lift) {
+  const { pw, ph, tc } = VISOR
+  const d = dirAt(Math.PI / 2 - pw / 2 + fx * pw, tc - ph / 2 + fy * ph)
+  const P = new THREE.Vector3(), Nrm = new THREE.Vector3()
+  shellAt(d.x, d.y, d.z, P, Nrm)
+  return { at: P.addScaledVector(Nrm, lift), normal: Nrm }
+}
+
+// The kits, in the shell's space (its centre at the origin, facing +z).
+const KIT_BUILDS = {
+  // Explorer: a leather backpack with a flap, a buckle and a bedroll on top.
+  backpack() {
+    const g = new THREE.Group()
+    const pack = new THREE.Mesh(new RoundedBoxGeometry(0.95, 0.8, 0.42, 4, 0.14), KIT.leather)
+    pack.position.set(0, 0.02, -R.z - 0.1)
+    const flap = new THREE.Mesh(new RoundedBoxGeometry(0.9, 0.36, 0.1, 3, 0.05), KIT.flap)
+    flap.position.set(0, 0.24, -R.z - 0.33)
+    const buckle = new THREE.Mesh(new RoundedBoxGeometry(0.14, 0.12, 0.04, 2, 0.02), KIT.buckle)
+    buckle.position.set(0, 0.1, -R.z - 0.39)
+    const pocket = new THREE.Mesh(new RoundedBoxGeometry(0.6, 0.28, 0.12, 3, 0.05), KIT.flap)
+    pocket.position.set(0, -0.2, -R.z - 0.33)
+    const roll = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 1.0, 20), KIT.bedroll)
+    roll.rotation.z = Math.PI / 2
+    roll.position.set(0, 0.5, -R.z + 0.02)
+    for (const x of [-0.3, 0.3]) {
+      const tie = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.025, 6, 20), KIT.flap)
+      tie.rotation.y = Math.PI / 2
+      tie.position.set(x, 0.5, -R.z + 0.02)
+      g.add(tie)
+    }
+    // Straps over the shell's shoulders, to the front.
+    for (const x of [-0.42, 0.42]) {
+      const strap = taper([v(x, 0.35, -R.z - 0.05), v(x, topAt(x, -0.5) + 0.02, -0.5), v(x, topAt(x, 0) + 0.02, 0), v(x * 1.05, topAt(x, 0.2) - 0.05, 0.22)], 0.035, 0.035, KIT.flap, { radial: 8, seg: 18 })
+      g.add(strap)
+    }
+    g.add(pack, flap, buckle, pocket, roll)
+    return g
+  },
+  // Creative: a soft beret, tipped back and to one side, with its stalk.
+  beret() {
+    const g = new THREE.Group()
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.74, 32, 16), KIT.beret)
+    cap.scale.set(1, 0.3, 1)
+    const band = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.07, 10, 36), KIT.beret)
+    band.rotation.x = Math.PI / 2
+    band.position.y = -0.06
+    const stalk = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.05, 0.14, 8), KIT.beret)
+    stalk.position.y = 0.26
+    g.add(cap, band, stalk)
+    g.position.set(-0.05, topAt(-0.05, -0.18) + 0.05, -0.18)
+    g.rotation.set(-0.15, 0, 0.2)
+    const outer = new THREE.Group()
+    outer.add(g)
+    return outer
+  },
+  // Coder: big round glasses over the visor's eyes, with a bridge and arms.
+  glasses() {
+    const g = new THREE.Group()
+    const centres = [0.31, 0.69].map(fx => onVisor(fx, 0.47, 0.07))
+    for (const { at, normal } of centres) {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.27, 0.05, 12, 40), KIT.frame)
+      ring.position.copy(at)
+      ring.lookAt(at.clone().add(normal))
+      const lens = new THREE.Mesh(new THREE.CircleGeometry(0.26, 32), KIT.lens)
+      lens.position.copy(at)
+      lens.lookAt(at.clone().add(normal))
+      g.add(ring, lens)
+    }
+    const [a, b] = centres.map(c => c.at)
+    const mid = a.clone().lerp(b, 0.5).add(v(0, 0.06, 0.03))
+    g.add(taper([a.clone().add(v(0.24, 0.05, 0)), mid, b.clone().add(v(-0.24, 0.05, 0))], 0.035, 0.035, KIT.frame, { radial: 8, seg: 10 }))
+    // Arms back along the shell's sides.
+    for (const [c, s] of [[a, -1], [b, 1]]) {
+      const start = c.clone().add(v(s * 0.26, 0.04, -0.04))
+      const back = onVisor(s < 0 ? -0.08 : 1.08, 0.38, 0.03).at
+      g.add(taper([start, back], 0.03, 0.03, KIT.frame, { radial: 8, seg: 6 }))
+    }
+    return g
+  },
+  // Focus: headphones, the band over the shell behind its eyes, cups on
+  // its sides.
+  headphones() {
+    const g = new THREE.Group()
+    const z = -0.42
+    const pts = []
+    for (let i = 0; i <= 24; i++) {
+      const a = Math.PI * (i / 24)
+      const x = Math.cos(a) * 1.02
+      pts.push(v(x, Math.max(0.05, topAt(Math.min(Math.abs(x), R.x * 0.98), z)) + 0.07 * Math.sin(a) + 0.04, z))
+    }
+    g.add(taper(pts, 0.065, 0.065, KIT.band, { radial: 10, seg: 40 }))
+    for (const side of [-1, 1]) {
+      const x = side * (sideAt(0.08, z) + 0.06)
+      const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.27, 0.16, 28), KIT.band)
+      cup.rotation.z = Math.PI / 2
+      cup.position.set(x, 0.08, z)
+      const pad = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.07, 10, 28), KIT.pad)
+      pad.rotation.y = Math.PI / 2
+      pad.position.set(x - side * 0.08, 0.08, z)
+      g.add(cup, pad)
+    }
+    return g
+  },
+}
+
+export function makeCrab({ orange = ORANGE, pick, face = 'happy', kit: kitName = 'none' } = {}) {
   const mats = {
     shell: new THREE.MeshPhysicalMaterial({ map: skins().base, roughness: 0.4, clearcoat: 0.3, clearcoatRoughness: 0.35 }),
     paint: new THREE.MeshStandardMaterial({ map: skins().paint, roughness: 0.35, transparent: true, depthWrite: false }),
@@ -421,7 +597,7 @@ export function makeCrab({ orange = ORANGE, pick, face = 'happy' } = {}) {
 
   const shell = new THREE.Mesh(skins().shellGeo, mats.shell)
   const paint = new THREE.Mesh(skins().paintGeo, mats.paint)
-  body.add(shell, paint, visorRim(mats.rim))
+  body.add(shell, paint, baked('rim', mats, () => visorRim(mats.rim)))
 
   // The visor: its patch of the shell, a hair proud of it, inside the rim.
   const canvas = document.createElement('canvas')
@@ -455,11 +631,14 @@ export function makeCrab({ orange = ORANGE, pick, face = 'happy' } = {}) {
     return a
   })
 
+  // Its kit, if it wears one (the lead's gem is the office's to add).
+  if (KIT_BUILDS[kitName]) body.add(baked(`kit:${kitName}`, mats, KIT_BUILDS[kitName]))
+
   // Three legs a side, high on the shell: one ahead of the claw, two behind.
   const legs = []
   for (const side of [-1, 1]) {
     ;[0.48, -0.3, -0.64].forEach((z, i) => {
-      const l = leg(side, z, mats)
+      const l = baked(`leg${side}${i}`, mats, () => leg(side, z, mats))
       l.position.set(side * (sideAt(HIP_Y - CY, z) - 0.06), HIP_Y, z)
       l.userData.side = side
       l.userData.phase = (i + (side > 0 ? 1 : 0)) % 2 ? Math.PI : 0

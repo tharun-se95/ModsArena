@@ -8,6 +8,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { envelope } from './moods.js'
 import { critterStyle } from './critter-style.js'
 import { makeCrab, crabPose, crabEmote } from './crab.js'
+import { kitFor } from './crab-kits.js'
 
 const cache = new Map()
 const DOT_GEO = new THREE.SphereGeometry(1, 12, 10)
@@ -34,11 +35,12 @@ const BUILDS = {
 const CRAB_SCALE = 0.8
 
 // A robot crab (crab.js) in the blocks' clothes: its orange parts are the
-// body colour, the lead carries the same spinning gem, and it thinks in the
-// same dots. Crabs wear no crowns, so accentMat is kept only so the office
-// can recolour it like any critter's.
+// body colour, it wears its kind's kit (crab-kits.js), the lead carries the
+// same spinning gem, and it thinks in the same dots. Kits keep their own
+// colours, so accentMat is kept only so the office can recolour it like any
+// critter's.
 function makeCrabCharacter({ build, bodyColor, accentColor, pick }) {
-  const crab = makeCrab({ orange: bodyColor, pick })
+  const crab = makeCrab({ orange: bodyColor, pick, kit: kitFor(build) })
   const root = new THREE.Group()
   crab.root.scale.setScalar(CRAB_SCALE)
   root.add(crab.root)
@@ -47,7 +49,7 @@ function makeCrabCharacter({ build, bodyColor, accentColor, pick }) {
   let height = tall
   if (build === 'session') {
     bulb = new THREE.Mesh(new THREE.OctahedronGeometry(0.32, 0), new THREE.MeshStandardMaterial({ color: accentColor, emissive: accentColor, emissiveIntensity: 0.2, roughness: 0.3, flatShading: true }))
-    bulb.position.y = tall + 0.45
+    bulb.position.set(0, tall + 0.85, 0.15)
     bulb.scale.y = 1.35
     bulb.castShadow = true
     if (pick) bulb.userData.pick = pick

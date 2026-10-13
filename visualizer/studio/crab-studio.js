@@ -5,6 +5,8 @@
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { makeCrab, crabPose, setFace, FACES } from '../src/crab.js'
+import { kitFor } from '../src/crab-kits.js'
+import { roleOf } from '../src/critters.js'
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: true })
 renderer.setPixelRatio(2)
@@ -29,7 +31,7 @@ floor.rotation.x = -Math.PI / 2
 floor.receiveShadow = true
 scene.add(floor)
 
-const crab = makeCrab()
+let crab = makeCrab()
 scene.add(crab.root)
 crabPose(crab, 0.3)
 crab.blinkAt = 99
@@ -79,5 +81,27 @@ const COLOURS = [
 for (const [name, hex] of COLOURS) {
   crab.mats.orange.color.set(hex)
   put('#colours', shot(480, 400, { yaw: -0.45, dist: 8.6, pitch: 0.2 }), name)
+}
+// The team: each kind of helper in its kit and a colour of its own.
+const TEAM = [
+  ['session', '#ef6a2e'], ['general-purpose', '#5fb35a'], ['Explore', '#4b9be0'],
+  ['Plan', '#9a7ae0'], ['code-reviewer', '#e872a0'], ['test-runner', '#2fa59a'],
+]
+for (const [type, hex] of TEAM) {
+  scene.remove(crab.root)
+  crab = makeCrab({ orange: hex, kit: kitFor(type) })
+  scene.add(crab.root)
+  crabPose(crab, 0.3)
+  crab.blinkAt = 99
+  const kit = kitFor(type)
+  put('#team', shot(480, 420, { yaw: -0.55, dist: 8.8, pitch: 0.22 }), `${roleOf(type)} · ${kit === 'none' ? 'plain' : kit === 'gem' ? 'gem (in the office)' : kit}`)
+}
+// And from behind, where the backpack and headphones show best.
+for (const [type, hex] of TEAM.filter(([t]) => ['Explore', 'test-runner', 'Plan'].includes(t))) {
+  scene.remove(crab.root)
+  crab = makeCrab({ orange: hex, kit: kitFor(type) })
+  scene.add(crab.root)
+  crabPose(crab, 0.3)
+  put('#team-back', shot(480, 420, { yaw: Math.PI - 0.6, dist: 8.8, pitch: 0.25 }), `${roleOf(type)}, from behind`)
 }
 document.body.dataset.ready = '1'
