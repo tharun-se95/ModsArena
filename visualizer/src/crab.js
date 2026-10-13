@@ -27,6 +27,7 @@ const R = { x: 1.15, y: 0.84, z: 1.0 }
 const R_LOW = 0.66
 const N = 2.35
 const CY = 0.86
+const HIP_Y = 0.66 // how high the legs join the shell
 
 // Where a direction from the shell's centre (a unit vector) meets its
 // surface, and the outward normal there, both relative to the centre.
@@ -53,8 +54,9 @@ function shellGeometry(sphere, lift = 0) {
   return sphere
 }
 
-// The shell's top at (x, z), from its centre.
+// The shell's top at (x, z), and its side at (y, z), from its centre.
 const topAt = (x, z) => R.y * Math.max(0, 1 - Math.abs(x / R.x) ** N - Math.abs(z / R.z) ** N) ** (1 / N)
+const sideAt = (y, z) => R.x * Math.max(0, 1 - Math.abs(y / (y < 0 ? R_LOW : R.y)) ** N - Math.abs(z / R.z) ** N) ** (1 / N)
 
 // The visor's patch of the shell, in sphere angles (phi round from the
 // side, pi / 2 straight ahead; theta down from the top).
@@ -278,30 +280,32 @@ export function drawFace(ctx, face = 'happy') {
 // A rounded segment from a to b (a capsule that can taper).
 const seg = (a, b, r0, r1, mat, opts) => taper([a, b], r0, r1, mat, { seg: 6, ...opts })
 
-// One leg, hip at the origin: a stubby thigh arching up and out, a black
-// knee, a fat shin, a black ankle and a short blunt tip on the floor.
+// One leg, hip at the origin (high on the shell's side): a stubby thigh
+// out, a black knee, a fat shin dropping nearly straight down, a black
+// ankle and a short blunt tip on the floor.
 function leg(side, dz, mats) {
   const g = new THREE.Group()
-  const knee = v(side * 0.27, 0.13, dz * 0.3)
-  const ankle = v(side * 0.42, -0.14, dz * 0.6)
-  const foot = v(side * 0.47, -0.4, dz * 0.72)
-  g.add(ball(0.12, mats.rubber))
-  g.add(seg(v(side * 0.04, 0.02, 0), knee.clone().multiplyScalar(0.84), 0.13, 0.125, mats.orange, { bulge: 0.02 }))
-  g.add(ball(0.105, mats.rubber, knee.toArray()))
-  g.add(seg(knee.clone().lerp(ankle, 0.2), ankle.clone().lerp(knee, 0.16), 0.125, 0.11, mats.orange, { bulge: 0.025 }))
-  g.add(ball(0.085, mats.rubber, ankle.toArray()))
-  g.add(seg(ankle.clone().lerp(foot, 0.2), foot, 0.1, 0.035, mats.orange, { bulge: 0.015 }))
+  const knee = v(side * 0.24, 0.06, dz * 0.15)
+  const ankle = v(side * 0.44, -0.3, dz * 0.3)
+  const foot = v(side * 0.54, -HIP_Y + 0.02, dz * 0.38)
+  g.add(ball(0.15, mats.rubber))
+  g.add(seg(v(side * 0.04, 0.02, 0), knee.clone().multiplyScalar(0.8), 0.17, 0.16, mats.orange, { bulge: 0.03 }))
+  g.add(ball(0.13, mats.rubber, knee.toArray()))
+  g.add(seg(knee.clone().lerp(ankle, 0.22), ankle.clone().lerp(knee, 0.16), 0.16, 0.14, mats.orange, { bulge: 0.035 }))
+  g.add(ball(0.11, mats.rubber, ankle.toArray()))
+  g.add(seg(ankle.clone().lerp(foot, 0.2), foot, 0.13, 0.04, mats.orange, { bulge: 0.025 }))
   return g
 }
 
-// One pincer arm, pivoting at the shoulder: black rubber joints between
-// chunky orange segments, then a big crab claw whose fixed finger curls up
-// to meet the hinged one (`finger`) curling down.
+// One pincer arm, pivoting at the shoulder: a reach out from the side of
+// the shell through black rubber joints, then a big crab claw
+// hanging down beside the body, tips on the floor, its fixed finger
+// curling to meet the hinged one (`finger`).
 function claw(side, mats) {
   const pivot = new THREE.Group()
   pivot.userData.side = side
-  const elbow = v(side * 0.26, -0.16, 0.16)
-  const wrist = v(side * 0.34, -0.16, 0.44)
+  const elbow = v(side * 0.2, 0.02, 0.03)
+  const wrist = v(side * 0.46, -0.02, 0.06)
   pivot.add(ball(0.13, mats.rubber))
   pivot.add(seg(v(0, 0, 0).lerp(elbow, 0.2), elbow.clone().lerp(v(0, 0, 0), 0.15), 0.13, 0.13, mats.orange, { bulge: 0.02 }))
   pivot.add(ball(0.12, mats.rubber, elbow.toArray()))
@@ -310,9 +314,11 @@ function claw(side, mats) {
 
   const hand = new THREE.Group()
   hand.position.copy(wrist)
-  // Rolled on its side, so the pincer opens outward and the gap shows.
-  hand.rotation.set(-0.2, -side * 0.12, side * 1.25)
-  hand.scale.setScalar(1.18)
+  // Fingers pointing down, the pincer opening inward and a little forward
+  // so the gap shows from the front.
+  hand.rotation.order = 'YXZ'
+  hand.rotation.set(Math.PI / 2 - 0.25, -side * (Math.PI / 2 - 0.5), 0)
+  hand.scale.setScalar(1.2)
   // The palm: a fat rounded block, wider top to bottom than side to side.
   hand.add(ball(0.3, mats.orange, [0, 0.02, 0.24], [0.8, 1, 1.15]))
   // Fixed finger along the bottom, curling up at the tip.
@@ -332,9 +338,9 @@ function claw(side, mats) {
 // black pupil with a glint. Pivots at its base.
 function eyestalk(side, mats) {
   const g = new THREE.Group()
-  g.add(seg(v(0, -0.04, 0), v(0, 0.16, 0.02), 0.075, 0.07, mats.rubber))
+  g.add(seg(v(0, -0.04, 0), v(0, 0.1, 0.02), 0.075, 0.07, mats.rubber))
   const eye = new THREE.Group()
-  eye.position.set(0, 0.36, 0.04)
+  eye.position.set(0, 0.3, 0.04)
   eye.add(ball(0.27, mats.orange))
   eye.add(ball(0.235, mats.cream, [0, 0, 0.075]))
   eye.add(ball(0.165, mats.pupil, [0, 0, 0.22], [1, 1, 0.7]))
@@ -417,20 +423,20 @@ export function makeCrab({ orange = ORANGE, pick, face = 'happy' } = {}) {
     return s
   })
 
-  // Pincers at the front corners, resting low beside the face.
+  // Pincers out from the middle of each side, standing clear of the body.
   const arms = [-1, 1].map(side => {
     const a = claw(side, mats)
-    a.position.set(side * 0.98, -0.3, 0.42)
+    a.position.set(side * (sideAt(0.12, 0.05) - 0.04), 0.12, 0.05)
     body.add(a)
     return a
   })
 
-  // Three legs a side under the hull, splayed front to back.
+  // Three legs a side, high on the shell: one ahead of the claw, two behind.
   const legs = []
   for (const side of [-1, 1]) {
-    ;[0.25, -0.12, -0.48].forEach((z, i) => {
-      const l = leg(side, z * 1.1 - 0.05, mats)
-      l.position.set(side * 0.86, 0.42, z)
+    ;[0.48, -0.3, -0.64].forEach((z, i) => {
+      const l = leg(side, z, mats)
+      l.position.set(side * (sideAt(HIP_Y - CY, z) - 0.06), HIP_Y, z)
       l.userData.side = side
       l.userData.phase = (i + (side > 0 ? 1 : 0)) % 2 ? Math.PI : 0
       legs.push(l)
