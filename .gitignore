@@ -1,3 +1,4 @@
 node_modules/
 .claude-plugin/types/
 site/
+visualizer/studio/dist/

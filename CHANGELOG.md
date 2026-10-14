@@ -7,6 +7,21 @@ git tag (`v0.2.1`) with a GitHub Release, and the same version is in
 modsarena (`/plugin` → Marketplaces), a new one arrives on its own;
 otherwise `claude plugin update agent-office@modsarena` fetches it.
 
+## 0.11.0
+
+- **Robot crabs.** The critters are now little robot crabs, after the
+  Claude Bot mascot: a cream shell, a glossy visor whose glowing eyes are
+  their face, big pincers and six jointed legs. Each wears its thread's
+  colour on its claws, legs and paint chips.
+- **One for every job.** Each kind of helper has its own kit: the lead
+  carries its gem, researchers a backpack, planners a beret, reviewers
+  round glasses and testers headphones; builders are plain crabs.
+- **Faces that show how it's going.** Happy while working, a thinking
+  look between tools, laughing when it cheers, sad when it sulks,
+  surprised when its context is nearly full and sleepy when it rests.
+- **Prefer the blocks?** Settings → Critters switches back to the classic
+  block critters.
+
 ## 0.10.0
 
 - **Make it yours.** Pick an office theme in Settings: Cozy (today's look),
