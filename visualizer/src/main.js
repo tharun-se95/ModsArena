@@ -70,6 +70,9 @@ function pick(id) {
 // the top or bottom.
 const stageEl = document.getElementById('stage')
 function measureInsets() {
+  // While you drag the panel's edge the office holds still; it settles
+  // once when you let go (clipsize.js).
+  if (document.documentElement.classList.contains('clip-resizing')) return
   const W = stageEl.clientWidth, H = stageEl.clientHeight
   const insets = { left: 0, right: 0, top: 0, bottom: 0 }
   // The phone's little office in the Inbox has nothing over it.
@@ -94,6 +97,7 @@ function measureInsets() {
 }
 const panelWatch = new ResizeObserver(measureInsets)
 for (const el of document.querySelectorAll('.hud.left > *, #side, .topbar, #stage')) panelWatch.observe(el)
+addEventListener('panel-resized', measureInsets)
 
 // The keyboard: j/k (or the arrows) walk the directory, thread by thread
 // and agent by agent; 1-3 switch tabs; r replies; Esc goes up a level.
@@ -169,11 +173,11 @@ settings.add({
   get: themes.theme, set: themes.setTheme,
 })
 
-// Robot crabs or the classic blocks. Every critter is built when it first
+// Robot crabs or the classic Claude bots. Every critter is built when it first
 // appears, so the page reloads to rebuild the office in the new style.
 settings.add({
   id: 'critters', type: 'choice', label: 'Critters',
-  hint: () => (critters.critterStyle() === 'crab' ? 'Little robot crabs with glowing faces, in each thread\u2019s colour' : 'The classic block critters'),
+  hint: () => (critters.critterStyle() === 'crab' ? 'Little robot crabs with glowing faces, in each thread\u2019s colour' : 'The classic Claude bots, the blocky design from before the crabs'),
   options: critters.STYLES.map(id => ({ value: id, label: critters.STYLE_LABELS[id] })),
   get: critters.critterStyle,
   set: id => { if (critters.setCritterStyle(id)) location.reload() },

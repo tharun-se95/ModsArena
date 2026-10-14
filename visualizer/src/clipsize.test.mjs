@@ -1,33 +1,32 @@
 // node --test visualizer/src/*.test.mjs
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { clampClip, clampSheet, dragClip, dragSheet, CLIP_W, CLIP_MIN_W, CLIP_MIN_H, SHEET_SHARE } from './clipsize.js'
+import { clampPanel, dragPanel, fromOld, clampSheet, dragSheet, PANEL_W, PANEL_MIN_W, SHEET_SHARE } from './clipsize.js'
 
 const desk = { vw: 1440, vh: 900 }
 
-test('the clipboard starts about 1.3 times the old 320px, and taller', () => {
-  assert.equal(CLIP_W, 416)
-  const s = clampClip(null, desk)
-  assert.equal(s.w, 416)
-  assert.equal(s.h, 720)
-  assert.equal(clampClip(null, { vw: 1280, vh: 700 }).h, 700 - 74 - 16) // as tall as the window allows
+test('the panel starts half as wide again as the old 320px directory', () => {
+  assert.equal(PANEL_W, 480)
+  assert.equal(clampPanel(null, desk), 480)
+  assert.equal(clampPanel('wide', desk), 480) // junk saved falls back
 })
 
-test('a size stays readable and on screen, and leaves the left panel clear', () => {
-  assert.deepEqual(clampClip({ w: 100, h: 50 }, desk), { w: CLIP_MIN_W, h: CLIP_MIN_H })
-  const big = clampClip({ w: 5000, h: 5000 }, desk)
-  assert.equal(big.w, 1440 - 322 - 32)
-  assert.equal(big.h, 900 - 90)
-  // A saved size that's junk falls back to the default.
-  assert.deepEqual(clampClip({ w: 'wide', h: NaN }, desk), clampClip(null, desk))
+test('a width stays readable and on screen, and leaves the left panel clear', () => {
+  assert.equal(clampPanel(100, desk), PANEL_MIN_W)
+  assert.equal(clampPanel(5000, desk), 1440 - 322 - 32)
   // A window smaller than the minimum still gets the minimum.
-  assert.deepEqual(clampClip({ w: 900, h: 900 }, { vw: 320, vh: 300 }), { w: CLIP_MIN_W, h: CLIP_MIN_H })
+  assert.equal(clampPanel(900, { vw: 320, vh: 300 }), PANEL_MIN_W)
 })
 
-test('dragging the left edge widens it; the corner also makes it taller', () => {
-  const start = { w: 416, h: 600 }
-  assert.deepEqual(dragClip(start, -50, 30, 'edge'), { w: 466, h: 600 })
-  assert.deepEqual(dragClip(start, 40, 30, 'corner'), { w: 376, h: 630 })
+test('dragging the left edge left widens it, right narrows it', () => {
+  assert.equal(dragPanel(480, -50), 530)
+  assert.equal(dragPanel(480, 40), 440)
+})
+
+test('a clipboard width saved by 0.10 carries over; anything else is the default', () => {
+  assert.equal(fromOld({ w: 600, h: 720 }), 600)
+  assert.equal(fromOld(null), null)
+  assert.equal(fromOld({ w: 'wide' }), null)
 })
 
 test('the phone sheet keeps a share of the screen, with office showing above', () => {
