@@ -404,7 +404,8 @@ export async function resume(n, text) {
     const res = await fetch('/resume', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-agent-office-token': token },
-      body: JSON.stringify({ session: n.session, text: text.trim() }),
+      // `dir` only for a demo bridge, which has no transcript to read it from.
+      body: JSON.stringify({ session: n.session, text: text.trim(), dir: n.project ?? n.cwd }),
     })
     const body = await res.json().catch(() => ({}))
     if (!res.ok) throw new Error(body.error ?? `the bridge answered ${res.status}`)

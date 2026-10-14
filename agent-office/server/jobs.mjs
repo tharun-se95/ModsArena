@@ -289,8 +289,8 @@ export function createJobs({ publish, isKnown, demo }) {
     return result
   }
 
-  // A live job on a session, if the front desk started or resumed it.
-  const liveJobOf = session => [...jobs.values()].find(j => j.session === session && j.short && ['starting', 'working', 'blocked'].includes(j.state))
+  // The newest job on a session, if the front desk started or resumed it.
+  const jobOf = session => [...jobs.values()].reverse().find(j => j.session === session && j.short)
 
   async function stop(body) {
     const job = jobs.get(body?.id)
@@ -309,5 +309,5 @@ export function createJobs({ publish, isKnown, demo }) {
     return { status: 200 }
   }
 
-  return { start, resume, stop, liveJobOf, jobs }
+  return { start, resume, stop, jobOf, jobs }
 }

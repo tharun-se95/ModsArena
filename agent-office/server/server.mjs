@@ -208,8 +208,8 @@ async function sessionFolder(session) {
 }
 
 // Deleting for good. A session still open in Claude Code (live here, its
-// transcript written lately) is left alone; one the front desk runs in the
-// background is stopped first.
+// transcript written lately) is left alone; one the front desk started or
+// picked up in the background is stopped first.
 const LATELY_MS = 20 * 60 * 1000
 async function isOpenElsewhere(session) {
   const a = anchors.get(session)
@@ -228,9 +228,12 @@ function purge(session, agent) {
 }
 
 async function deleteSession(session) {
-  const job = jobs.liveJobOf(session)
-  if (job) await jobs.stop({ id: job.id })
-  else if (await isOpenElsewhere(session)) return { status: 409, error: 'it’s still open in Claude Code. End it there first (/exit), then delete it' }
+  // One the front desk runs in the background (working, or done and idle)
+  // is the office's own to stop; any other still open is yours.
+  const job = jobs.jobOf(session)
+  if (job) {
+    if (!['stopped', 'failed'].includes(job.state)) await jobs.stop({ id: job.id })
+  } else if (await isOpenElsewhere(session)) return { status: 409, error: 'it’s still open in Claude Code. End it there first (/exit), then delete it' }
   const path = await findTranscript(session)
   const removed = flag('demo') ? [] : path ? await removeTranscript(path) : []
   forget(session)
