@@ -4,6 +4,7 @@
 
 import { unwrapPrompt, isEngineNote } from '../../agent-office/server/prompts.mjs'
 import { goalTitle } from './names.js'
+import { engineError } from '../../agent-office/server/engine-errors.mjs'
 
 export const TOOL_LINGER_MS = 6000 // a finished tool stays visible this long
 const FINISHED_AGENT_LIMIT = 12
@@ -237,7 +238,11 @@ const handlers = {
     if (ev.agent && !nodes.has(aid(ev.session, ev.agent))) return
     const node = owner(ev)
     if (ev.context?.window) node.context = ev.context
-    if (ev.answer) node.answer = { t: ev.t, text: ev.answer }
+    if (ev.answer) {
+      // Claude Code's own error line in place of an answer: kept as a problem.
+      const problem = engineError(ev.answer, { isError: ev.reason === 'error' })
+      node.answer = { t: ev.t, text: ev.answer, ...(problem && { problem }) }
+    }
     if (node.kind === 'session') {
       node.turnOpen = false
       node.lastReason = ev.reason

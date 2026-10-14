@@ -123,8 +123,9 @@ function cardInfo(n, running) {
     ${assets.askCard(first, { answerable: answerable(first), compact: true })}
     ${more.length ? `<p class="ask-more">${plural(more.length, 'more question')} after this one</p>` : ''}`
   }
-  const said = n.answer?.text
-  const blurb = state === 'stuck'
+  const problem = n.answer?.problem
+  const said = problem ? null : n.answer?.text
+  const blurb = problem ? `${problem.title}. ${problem.fix}` : state === 'stuck'
     ? (n.lastReason === 'aborted' ? 'You stopped its last turn.' : n.lastReason === 'refusal' ? 'Its last turn ended on a refusal.' : 'Its last turn ended on an error.')
     : state === 'working' ? 'Back at work.'
       : said ? quote(plain(said)) : n.turns ? 'Done with your last request.' : 'Ready for its first prompt.'
@@ -135,7 +136,7 @@ function cardInfo(n, running) {
       <span class="card-where"><i class="dot ${sessionTint(n.session)}"></i>${escapeHtml(where(n))}${n.thread ? '<span class="badge">thread</span>' : ''}<time>${ago(n.answeredAt ?? n.startedAt)}</time></span>
       <b>${escapeHtml(title(n))}</b>
       ${assets.progress(n)}
-      <span class="card-said">${escapeHtml(blurb)}</span>
+      <span class="card-said${problem ? ' problem' : ''}">${escapeHtml(blurb)}</span>
     </button>`
 }
 
@@ -477,7 +478,7 @@ function agentDetails(n) {
   return `
     ${gauge(n, agentState(n) !== 'done', 'its own')}
     ${facts ? `<p class="dmeta">${escapeHtml(facts)}</p>` : ''}
-    ${n.answer?.text ? `<h3>Last report</h3><div class="tx md report">${markdown(n.answer.text)}</div>` : ''}`
+    ${n.answer?.text && !n.answer.problem ? `<h3>Last report</h3><div class="tx md report">${markdown(n.answer.text)}</div>` : ''}`
 }
 
 function head(n, running) {

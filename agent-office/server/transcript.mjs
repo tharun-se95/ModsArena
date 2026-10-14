@@ -9,6 +9,7 @@
 //   { kind: 'tool', id, name, summary, t }  a tool call...
 //   { kind: 'result', id, ok, text }        ...and what came back
 //   { kind: 'note', text, t }               compactions, notifications
+//   { kind: 'problem', title, fix, line, t } Claude Code couldn't answer (engine-errors.mjs)
 //
 // The page asks again with `after` (a byte offset) and gets only what's new.
 
@@ -17,6 +18,7 @@ import { join } from 'node:path'
 import { projectsDir } from './history.mjs'
 import { summarize } from './normalize.mjs'
 import { unwrapPrompt } from './prompts.mjs'
+import { engineError } from './engine-errors.mjs'
 
 const ID = /^[\w-]{1,100}$/
 const FIRST_READ = 512 * 1024 // a long session opens at its last half megabyte
@@ -57,8 +59,16 @@ export function entriesOf(row) {
   const content = row.message?.content
   if (row.type === 'system' && row.subtype === 'compact_boundary') return [{ kind: 'note', text: 'Context compacted', t }]
   if (row.type === 'assistant' && Array.isArray(content)) {
+    // Claude Code's own line where a reply would be ("Login expired ·
+    // Please run /login"): a problem to fix, not something Claude said.
+    const own = row.isApiErrorMessage === true || row.message?.model === '<synthetic>'
     return content.flatMap(b => {
-      if (b.type === 'text' && b.text?.trim()) return [{ kind: 'say', text: clip(b.text.trim(), TEXT_LIMIT), t }]
+      if (b.type === 'text' && b.text?.trim()) {
+        const problem = engineError(b.text, { isError: row.isApiErrorMessage === true })
+        if (problem) return [{ ...problem, cause: problem.kind, kind: 'problem', t }]
+        if (own) return [{ kind: 'note', text: clip(b.text.trim(), 200), t }]
+        return [{ kind: 'say', text: clip(b.text.trim(), TEXT_LIMIT), t }]
+      }
       if (b.type === 'tool_use') return [{ kind: 'tool', id: b.id, name: b.name, summary: summarize(b.input) ?? '', t }]
       return []
     })
