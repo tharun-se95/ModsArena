@@ -58,7 +58,7 @@ export function alertFor(n, state) {
     return { title: `A question from “${clip(name, 40)}”`, body: `${clip(q, 140)}${where}` }
   }
   if (state === 'stuck') return { title: `“${clip(name, 40)}” needs a look`, body: `Its last turn didn’t finish.${where}` }
-  return { title: `“${clip(name, 40)}” is waiting on you`, body: `${n.answer?.text ? clip(plain(n.answer.text), 140) : 'Done with your last request.'}${where}` }
+  return { title: `“${clip(name, 40)}” is waiting on you`, body: `${n.answer?.problem ? `${n.answer.problem.title}. ${n.answer.problem.fix}` : n.answer?.text ? clip(plain(n.answer.text), 140) : 'Done with your last request.'}${where}` }
 }
 
 const clip = (s, n) => {

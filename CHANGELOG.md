@@ -7,6 +7,21 @@ git tag (`v0.2.1`) with a GitHub Release, and the same version is in
 modsarena (`/plugin` → Marketplaces), a new one arrives on its own;
 otherwise `claude plugin update agent-office@modsarena` fetches it.
 
+## 0.12.1
+
+- **A message box like Claude Code's.** A chip on top says who it goes to
+  (the critter's colour, its name, the thread, and whether it's live or
+  will be picked up again), the words go in a rounded box with the send
+  key inside it that grows as you write, and a quiet line of hints sits
+  under it.
+- **"Login expired" is shown as a problem, not an answer.** When Claude
+  Code can't answer (its sign-in expired, it's busy renewing it in another
+  window, a usage limit, an API error), it writes its own error line where
+  Claude's reply would go. The office used to show that line as Claude's
+  answer. Now the conversation and the inbox card say what went wrong and
+  what to do: for an expired sign-in, run `claude` in a terminal, type
+  `/login`, then send your message again.
+
 ## 0.12.0
 
 - **Talk to a session that has ended.** Its message box stays open: what

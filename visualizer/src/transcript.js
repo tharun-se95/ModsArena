@@ -15,6 +15,7 @@ import { outputCard } from './assets.js'
 import { describe, stepSummary } from './plain.js'
 import { devView } from './prefs.js'
 import * as mentions from './mentions.js'
+import { who } from './critters.js'
 
 const POLL_MS = 1500
 const KEEP = 600
@@ -48,6 +49,9 @@ function bubble(entry, results) {
       return `<div class="tx say md">${markdown(entry.text)}${time}</div>`
     case 'note':
       return `<div class="tx note">${escapeHtml(entry.text)}</div>`
+    // Claude Code couldn't answer: what went wrong and what to do.
+    case 'problem':
+      return `<div class="tx problem" role="alert"><b>${escapeHtml(entry.title)}</b><p>${escapeHtml(entry.fix)}</p><small>Claude Code said: ${escapeHtml(entry.line)}</small>${time}</div>`
     // What the work made, as the card the Outputs tab shows.
     case 'output':
       return `<div class="tx made ${entry.output.type}">${outputCard(entry.output)}</div>`
@@ -245,7 +249,8 @@ function demoEntries(n) {
     entries.push({ kind: 'result', id, ok: a.ok, text: a.ok ? '' : 'Something went wrong (sample activity).' })
   })
   // Its last reply, as Claude wrote it (markdown).
-  if (n.answer?.text) entries.push({ kind: 'say', text: n.answer.text, t: n.answer.t })
+  if (n.answer?.problem) entries.push({ ...n.answer.problem, cause: n.answer.problem.kind, kind: 'problem', t: n.answer.t })
+  else if (n.answer?.text) entries.push({ kind: 'say', text: n.answer.text, t: n.answer.t })
   // What it made, and what it asked you, where they happened.
   for (const o of outputs) {
     if (o.session !== n.session || (n.kind === 'agent' ? o.agent !== n.agent : o.agent) || o.type === 'plan') continue
@@ -433,13 +438,42 @@ export function focusComposer() {
 function composer(n) {
   if (!demo && !token) return { off: 'Messaging needs the office opened from its bridge (run /office).' }
   if (hasEnded(n)) {
-    return { resume: true, placeholder: 'Message it to pick it up again…', hint: 'It has ended: this picks it up again in the background, in its own folder, and it answers here. That uses tokens.' }
+    return { resume: true, state: 'Ended · picks up again', placeholder: 'Message it to pick it up again…', hint: 'Picks it up again in the background · uses tokens', more: 'It has ended: this picks it up again in the background, in its own folder, and it answers here. That uses tokens.' }
   }
   if (n.kind === 'agent' && n.status === 'done') {
-    return { placeholder: `Message ${n.label}…`, hint: 'It has finished: a message resumes it to answer, which uses tokens.' }
+    return { state: 'Finished', placeholder: `Message ${n.label}…`, hint: 'Resumes it to answer · uses tokens', more: 'It has finished: a message resumes it to answer, which uses tokens.' }
   }
-  if (n.kind === 'agent') return { placeholder: `Message ${n.label}…`, hint: 'Goes straight to this subagent while it works.' }
-  return { placeholder: 'Message this session… (@ to pick an agent)', hint: 'Arrives as its next prompt, marked as from Agent Office. Tool approvals still happen in Claude Code.' }
+  if (n.kind === 'agent') return { state: 'Live', placeholder: `Message ${n.label}…`, hint: 'Goes straight to this agent', more: 'Goes straight to this subagent while it works.' }
+  return { state: 'Live', placeholder: 'Message this session…', hint: 'Arrives as its next prompt · @ picks an agent', more: 'Arrives as its next prompt, marked as from Agent Office. Tool approvals still happen in Claude Code.' }
+}
+
+// The message box, the way Claude Code's own looks: who it goes to on a
+// chip above, the words in a rounded box with the send key inside it, and
+// a quiet line of hints under it.
+const SEND_ICON = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.5 4.5v6.2a1.8 1.8 0 0 1-1.8 1.8H5"/><path d="M8.2 9.2 4.8 12.5l3.4 3.3"/></svg>'
+
+function composeHtml(n, box) {
+  const to = who(n)
+  const what = n.kind === 'agent' ? (n.description || n.label) : n.label
+  return `<form class="tx-compose${box.resume ? ' resume' : ''}">
+    <div class="tx-to" title="${escapeHtml(box.more)}">
+      <i class="tx-dot" aria-hidden="true"></i>
+      <b>${escapeHtml(to.name)}</b>
+      <span class="tx-what">${escapeHtml(what ?? '')}</span>
+      <em class="tx-state">${escapeHtml(box.state)}</em>
+    </div>
+    <div class="tx-box">
+      <textarea rows="1" placeholder="${escapeHtml(box.placeholder)}" aria-label="${escapeHtml(box.placeholder)}"></textarea>
+      <button type="submit" class="tx-send" aria-label="Send" title="Send (Enter)" disabled>${SEND_ICON}</button>
+    </div>
+    <p class="tx-bar"><span class="tx-hint" title="${escapeHtml(box.more)}">${escapeHtml(box.hint)}</span><span class="tx-keys" title="Enter sends, Shift+Enter starts a new line"><kbd>↵</kbd> send <kbd>⇧↵</kbd> new line</span></p>
+  </form>`
+}
+
+// The box grows with what you write, up to a few lines.
+function fit(field) {
+  field.style.height = 'auto'
+  field.style.height = `${Math.min(field.scrollHeight, 160)}px`
 }
 
 // Put the transcript for node `n` into `root` (the tab's holder), or keep
@@ -456,13 +490,7 @@ export function attach(root, n) {
   stop()
   root.innerHTML = `
     <div class="tx-log" role="log" aria-live="polite" aria-label="Conversation with ${escapeHtml(nameOf(n))}"></div>
-    ${box.off
-      ? `<p class="tx-off">${escapeHtml(box.off)}</p>`
-      : `<form class="tx-compose${box.resume ? ' resume' : ''}">
-          <textarea rows="2" placeholder="${escapeHtml(box.placeholder)}" aria-label="${escapeHtml(box.placeholder)}"></textarea>
-          <button type="submit">Send</button>
-          <p class="tx-hint">${escapeHtml(box.hint)} Enter sends, Shift+Enter starts a new line.</p>
-        </form>`}`
+    ${box.off ? `<p class="tx-off">${escapeHtml(box.off)}</p>` : composeHtml(n, box)}`
   view = { id: n.id, root, mode, target: target(n), entries: same?.entries ?? [], pending: same?.pending ?? [], next: same?.next, empty: 'Reading the transcript…', firstDraw: true, expanded: same?.expanded ?? new Set() }
   // "Show all" on a folded answer: it stays open as the conversation updates.
   root.querySelector('.tx-log').addEventListener('click', e => {
@@ -481,12 +509,17 @@ export function attach(root, n) {
   })
   const form = root.querySelector('form')
   const field = form?.querySelector('textarea')
+  const sendKey = form?.querySelector('.tx-send')
+  const sync = () => { fit(field); sendKey.disabled = !field.value.trim() }
   if (field && typed) field.value = typed
+  field?.addEventListener('input', sync)
+  if (field) requestAnimationFrame(sync)
   if (field && n.kind === 'session' && mode === 'chat') mentions.attach(field, () => nodes.get(n.id))
   form?.addEventListener('submit', e => {
     e.preventDefault()
     const text = field.value
     field.value = ''
+    sync()
     void send(text)
   })
   field?.addEventListener('keydown', e => {

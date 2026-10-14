@@ -444,12 +444,36 @@
   .tx-dot.running { background: var(--warn); animation: tx-pulse 1s ease-in-out infinite; }
   @keyframes tx-pulse { 50% { opacity: 0.3; } }
   .tx-empty, .tx-off { margin: 8px 0; font-size: 12px; color: var(--muted); }
-  .tx-compose { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: end; padding-top: 8px; border-top: 1px solid var(--line); }
-  .tx-compose textarea { font: 13px/1.4 var(--sans); color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 7px 9px; resize: none; min-height: 38px; max-height: 120px; }
-  .tx-compose textarea:focus { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); border-color: var(--accent); }
-  .tx-compose button { padding: 8px 14px; border-radius: 10px; background: var(--accent); color: #fff; font-weight: 500; font-size: 13px; text-align: center; }
-  .tx-compose button:hover { filter: brightness(1.06); }
-  .tx-hint { grid-column: 1 / -1; margin: 0; font-size: 10.5px; color: var(--muted); }
+  /* Claude Code couldn't answer (engine-errors.mjs): what went wrong and the fix. */
+  .tx.problem { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, var(--crit) 9%, var(--paper)); border: 1px solid color-mix(in srgb, var(--crit) 35%, var(--line)); font-size: 13px; line-height: 1.45; }
+  .tx.problem b { color: var(--crit); font-weight: 600; }
+  .tx.problem b::before { content: "⚠ "; }
+  .tx.problem p { margin: 0; color: var(--ink); }
+  .tx.problem small { color: var(--muted); font: 500 11px var(--mono); }
+  .card-said.problem { color: var(--crit); }
+  /* The message box, the way Claude Code's own looks: who it goes to on a
+     chip, a rounded box with the send key inside, a quiet line of hints. */
+  .tx-compose { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); --to: var(--panel-tint, var(--accent)); }
+  .tx-to { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 12px; border-radius: 12px; background: color-mix(in srgb, var(--to) 16%, var(--paper)); border: 1px solid color-mix(in srgb, var(--to) 30%, transparent); font-size: 12.5px; }
+  .tx-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--to); }
+  .tx-to b { flex: none; font-weight: 600; color: var(--ink); }
+  .tx-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font: 500 12px var(--mono); }
+  .tx-state { margin-left: auto; flex: none; font-style: normal; font-weight: 600; font-size: 12px; color: color-mix(in srgb, var(--to) 70%, var(--ink)); }
+  .tx-box { position: relative; display: flex; align-items: flex-end; gap: 6px; padding: 6px 6px 6px 14px; border-radius: 14px; border: 1px solid color-mix(in srgb, var(--ink) 18%, var(--line)); background: color-mix(in srgb, var(--bg) 55%, var(--paper)); transition: border-color 0.15s, box-shadow 0.15s; }
+  .tx-box:focus-within { border-color: color-mix(in srgb, var(--to) 75%, var(--ink)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--to) 18%, transparent); }
+  .tx-box textarea { flex: 1; min-width: 0; min-height: 34px; max-height: 160px; padding: 7px 0; border: 0; background: none; color: var(--ink); font: 14px/1.45 var(--sans); resize: none; outline: none; }
+  .tx-box textarea::placeholder { color: color-mix(in srgb, var(--muted) 85%, transparent); }
+  .tx-send { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; color: var(--muted); transition: color 0.15s, background 0.15s; }
+  .tx-send svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .tx-send:not(:disabled) { color: var(--ink); }
+  .tx-send:not(:disabled):hover { background: color-mix(in srgb, var(--to) 16%, transparent); }
+  .tx-send:disabled { cursor: default; opacity: 0.5; }
+  .tx-bar { display: flex; align-items: center; gap: 10px; margin: 0; padding: 0 4px; font-size: 11.5px; color: var(--muted); }
+  .tx-hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tx-keys { margin-left: auto; flex: none; white-space: nowrap; }
+  .tx-keys kbd { font: 500 10.5px var(--mono); padding: 0 4px; border-radius: 4px; border: 1px solid var(--line); background: var(--paper); }
+  .tx-keys kbd + kbd { margin-left: 0; }
+  @media (max-width: 520px) { .tx-keys { display: none; } }
   @media (prefers-reduced-motion: reduce) { .tx-dot.running { animation: none; } }
 
   /* Speak human: a run of tool calls as one plain step that opens to the
@@ -1299,7 +1323,7 @@
   .jtrust p { margin: 0; }
   .jtrust code { white-space: normal; word-break: break-all; }
   .jtrust .muted { color: var(--muted); }
-  .tx-compose.resume textarea { border-style: dashed; }
+  .tx-compose.resume .tx-to { border-style: dashed; }
   .set-removed { margin: 10px 0 0; font-size: 13px; }
   .set-removed summary { cursor: pointer; }
   .set-removed summary small { color: var(--muted); font: 500 11px var(--mono); }
@@ -1393,8 +1417,8 @@
     :root[data-phone="projects"][data-sheet] #stage { visibility: visible; }
     :root[data-phone="projects"][data-sheet] #side.clipboard { top: auto; height: var(--sheet-h, 60%); }
     :root[data-phone="projects"] .entry, :root[data-phone="projects"] .agent-row, :root[data-phone="projects"] .member, :root[data-phone="projects"] .tab, :root[data-phone="projects"] .crumbs button { min-height: 44px; }
-    :root[data-phone="projects"] .tx-compose textarea { font-size: 16px; min-height: 44px; }
-    :root[data-phone="projects"] .tx-compose button { min-height: 44px; }
+    :root[data-phone="projects"] .tx-compose textarea { font-size: 16px; }
+    :root[data-phone="projects"] .tx-send { width: 44px; height: 44px; }
     :root[data-phone] #library { top: var(--phone-top); bottom: var(--phone-bottom); }
     :root[data-phone] .settings-pop { top: calc(var(--phone-top) - 4px); right: 10px; left: 10px; width: auto; max-height: calc(100% - var(--phone-top) - var(--phone-bottom)); }
     :root[data-phone] .settings-pop .menu-row { min-height: 44px; align-items: center; }
@@ -1428,14 +1452,14 @@
   .badge { color: var(--lilac-ink); }
   .ask.permission .ask-eyebrow { color: var(--warn-ink); }
   .ask.plan .ask-eyebrow { color: color-mix(in srgb, var(--sky) 55%, var(--ink)); }
-  .count, .tx-compose button, .pill.asking, .tx-answer, .bub .badge, .card-reply button:hover,
+  .count, .pill.asking, .tx-answer, .bub .badge, .card-reply button:hover,
   button.ask-opt.picked, .ask-opts.row .ask-opt.rec { color: var(--on-accent); }
   .pill.asking::before { background: var(--on-accent); }
   /* A ring you can see on whatever has keyboard focus. */
   :where(a, button, input, textarea, select, summary, [tabindex]):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   button:focus-visible { outline-color: var(--focus); }
   .card-reply:has(textarea:focus-visible) { outline: 2px solid var(--focus); outline-offset: 4px; border-radius: 6px; }
-  .tx-compose textarea:focus-visible { outline: 2px solid var(--focus); }
+  .tx-box:has(textarea:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; box-shadow: none; }
   .tab:focus-visible { border-radius: 6px 6px 0 0; }
   .tabpanel { display: contents; }
   .sr-only { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
