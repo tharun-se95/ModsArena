@@ -7,6 +7,20 @@ git tag (`v0.2.1`) with a GitHub Release, and the same version is in
 modsarena (`/plugin` → Marketplaces), a new one arrives on its own;
 otherwise `claude plugin update agent-office@modsarena` fetches it.
 
+## 0.11.3
+
+- **A conversation you can read.** The Conversation tab goes turn by
+  turn: what you said, Claude's work folded to one line ("Looked through
+  3 files, searched the code… · 8 steps"), then its answer in full across
+  the panel. Older long answers fold to their opening lines with Show
+  all; the work opens to every note and step, and stays open while it
+  runs.
+- **A steady office.** Rooms keep their places: a new project takes the
+  next spot instead of reshuffling the others, and a refresh draws the
+  same office. Threads keep their desks.
+- **No more flicker.** Name labels and the hover bubble stay put while
+  you point at them, and crowded labels no longer swap back and forth.
+
 ## 0.11.2
 
 - **`/office` restarts the office.** Run it while the office is up and it

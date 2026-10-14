@@ -17,6 +17,8 @@ import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRe
 import { makeCharacter, pose, emote } from './character.js'
 import { moodOf } from './moods.js'
 import { homeTime, lateness, swell } from './hours.js'
+import { orderRooms, pickCols, byStart } from './layout-order.js'
+import { load as loadPref, save as savePref } from './prefs.js'
 import {
   buildRoom, rug, desk, easel, coffeeCorner, officeShell, frontDesk, glassMat, lampMat, roomDecor,
   FLOOR_TOP, WALL_H, COFFEE_W, COFFEE_D, FRONT_W,
@@ -122,6 +124,7 @@ const confetti = []
 let selected = null
 let hovered = null // the session under the pointer (or whose helper is)
 let hoverPick = null // exactly what is under the pointer, for the bubble
+let labelHover = null // the session whose name label is under the pointer
 let focusedProject = null
 let layoutKey = ''
 let onPick = () => {}
@@ -444,15 +447,24 @@ function chooseSessions(showPast) {
   for (const [project, { live, past }] of byProject) {
     live.sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0))
     past.sort((a, b) => recency(b) - recency(a))
-    const shown = [...live, ...(showPast ? past.slice(0, PAST_PER_PROJECT) : [])]
+    // Each thread keeps its desk: by when it started (layout-order.js).
+    const shown = [...live, ...(showPast ? past.slice(0, PAST_PER_PROJECT) : [])].sort(byStart)
     if (!shown.length) continue
     const node = nodes.get(`p:${project}`)
     out.push({ id: `p:${project}`, name: node?.label ?? project, live: live.length, hidden: past.length - (showPast ? Math.min(past.length, PAST_PER_PROJECT) : 0), sessions: shown, recent: Math.max(...shown.map(recency)) })
   }
   const live = out.filter(p => p.live).sort((a, b) => a.name.localeCompare(b.name))
   const quiet = out.filter(p => !p.live).sort((a, b) => b.recent - a.recent).slice(0, PAST_ONLY_PROJECTS)
-  return [...live, ...quiet]
+  // Which rooms show is up to what's live and recent; where each one goes
+  // isn't: every project keeps the slot it got first (layout-order.js).
+  const { rooms: placed, order } = orderRooms([...live, ...quiet], roomOrder)
+  if (order.join('|') !== roomOrder.join('|')) {
+    roomOrder = order
+    savePref('room-order', order)
+  }
+  return placed
 }
+let roomOrder = (() => { const o = loadPref('room-order', []); return Array.isArray(o) ? o : [] })()
 
 function ensureRoom(p) {
   let t = rooms.get(p.id)
@@ -517,8 +529,8 @@ function ensureSession(n) {
   s.label = label('', 'session')
   s.label.obj.position.set(0, FLOOR_TOP, 32)
   s.label.el.addEventListener('click', () => onPick(n.id))
-  s.label.el.addEventListener('pointerenter', () => { hovered = n.id; hoverPick = { kind: 'session', id: n.id } })
-  s.label.el.addEventListener('pointerleave', () => { if (hovered === n.id) hovered = hoverPick = null })
+  s.label.el.addEventListener('pointerenter', () => { hovered = labelHover = n.id; hoverPick = { kind: 'session', id: n.id } })
+  s.label.el.addEventListener('pointerleave', () => { if (labelHover === n.id) labelHover = null; if (hovered === n.id) hovered = hoverPick = null })
   s.zzz = flag('zzz', '<i>z</i><i>z</i><i>z</i>')
   s.zzz.obj.position.set(10, FLOOR_TOP + SS * s.char.height + 4, 0)
   s.oops = flag('oops', '!')
@@ -593,22 +605,25 @@ function dropAgent(id) {
 // Layout: rooms packed into rows, choosing the column count that lets the
 // office fill the stage best. Positions ease, so a change never jumps.
 
+let lastCols = 0
 function layout(list) {
   // The coffee corner is packed in with the rooms, last, so it always ends
   // a row and its right side is open to the office's side aisle.
   const items = [...list.map(p => rooms.get(p.id)), ensureCoffee()]
-  // Pick the arrangement that fills the space the panels leave free.
+  // The arrangement that fills the space the panels leave free.
   const sw = Math.max(1, (stage.clientWidth || 1) - insets.left - insets.right)
   const sh = Math.max(1, (stage.clientHeight || 1) - insets.top - insets.bottom)
-  let best = null
-  for (let cols = 1; cols <= items.length; cols++) {
+  const measure = cols => {
     const rows = []
     for (let i = 0; i < items.length; i += cols) rows.push(items.slice(i, i + cols))
     const W = Math.max(...rows.map(r => r.reduce((a, t) => a + t.w, 0) + (r.length - 1) * ROOM_GAP)) + OFFICE_MARGIN * 2
     const D = rows.reduce((a, r) => a + Math.max(...r.map(t => t.d)), 0) + (rows.length - 1) * ROOM_GAP + OFFICE_MARGIN * 2
-    const scale = Math.min(sw / (W + 60), sh / (D * Math.sin(TILT) + 80))
-    if (!best || scale > best.scale) best = { cols, W, D, scale }
+    return { cols, W, D, scale: Math.min(sw / (W + 60), sh / (D * Math.sin(TILT) + 80)) }
   }
+  // The columns stay as they were unless another count fits clearly
+  // better, so one more room doesn't reflow the whole office.
+  const best = measure(pickCols(items.length, lastCols, cols => measure(cols).scale))
+  lastCols = best.cols
   let z = -best.D / 2 + OFFICE_MARGIN
   for (let i = 0; i < items.length; i += best.cols) {
     const row = items.slice(i, i + best.cols)
@@ -1704,21 +1719,28 @@ function sharpness(now, dt) {
 function declutter() {
   const rank = s => {
     const n = nodes.get(s.id)
-    return (selected === s.id || hovered === s.id ? 0 : n && !resting(n) ? 1 : 2) * 1e13 - recency(n ?? {})
+    // Who gives way doesn't change as threads work (it used to follow
+    // whoever acted last, so names flickered): by when each one started.
+    return (selected === s.id || hovered === s.id ? 0 : n && !resting(n) ? 1 : 2) * 1e13 + (n?.startedAt ?? 0)
   }
-  const overlaps = (r, list) => list.some(p => r.left < p.right + 4 && r.right > p.left - 4 && r.top < p.bottom + 2 && r.bottom > p.top - 2)
+  // A label that gave way needs clear space before it shows again, so one
+  // on the edge doesn't flip with every small camera move.
+  const overlaps = (r, list, pad = 4) => list.some(p => r.left < p.right + pad && r.right > p.left - pad && r.top < p.bottom + pad / 2 && r.bottom > p.top - pad / 2)
   // Room signs, and the hover bubble while it's up, outrank every name.
   const signs = [...rooms.values(), ...(coffee ? [coffee] : [])].map(t => t.label.el.getBoundingClientRect())
   if (!bubble.hidden) signs.push(bubble.getBoundingClientRect())
   const placed = []
   for (const s of [...sessionViews.values()].sort((a, b) => rank(a) - rank(b))) {
     const el = s.label.el
+    const was = el.classList.contains('covered') ? 'covered' : el.classList.contains('crowded') ? 'crowded' : ''
     el.classList.remove('crowded', 'covered')
-    const mine = selected === s.id || (hovered === s.id && bubble.hidden)
-    // The bubble already names the critter it's over.
-    if (hoverPick?.id === s.id && !bubble.hidden) { el.classList.add('covered'); continue }
-    if (!mine && overlaps(el.getBoundingClientRect(), signs)) { el.classList.add('covered'); continue }
-    if (!mine && overlaps(el.getBoundingClientRect(), placed)) el.classList.add('crowded')
+    // The label under the pointer always stays: hiding it would end the
+    // hover, hide the bubble, show the label, and round again (a flicker).
+    const mine = selected === s.id || labelHover === s.id || (hovered === s.id && bubble.hidden)
+    // The bubble already names the critter it's over (unless you're on its label).
+    if (!mine && hoverPick?.id === s.id && !bubble.hidden) { el.classList.add('covered'); continue }
+    if (!mine && overlaps(el.getBoundingClientRect(), signs, was === 'covered' ? 14 : 4)) { el.classList.add('covered'); continue }
+    if (!mine && overlaps(el.getBoundingClientRect(), placed, was === 'crowded' ? 14 : 4)) el.classList.add('crowded')
     placed.push(el.getBoundingClientRect())
   }
   const over = bubble.hidden ? null : bubble.getBoundingClientRect()
@@ -1819,7 +1841,14 @@ function bindPointer() {
     hovered = !p ? null : p.kind === 'session' ? p.id : agentViews.get(p.id)?.session ?? null
     renderer.domElement.style.cursor = p ? 'pointer' : ''
   })
-  renderer.domElement.addEventListener('pointerleave', () => { hoverPick = null; hovered = null })
+  // Onto a name tag isn't away: a tag that appears under the pointer must
+  // not end the hover that showed it (that loop made tags and the bubble
+  // flicker).
+  renderer.domElement.addEventListener('pointerleave', e => {
+    if (e.relatedTarget?.closest?.('.labels')) return
+    hoverPick = null
+    hovered = null
+  })
 }
 // Where things are on screen, for the help overlay (help.js): page
 // pixels, or null for what's out of sight. Picks a live thread in view,

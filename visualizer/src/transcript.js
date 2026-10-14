@@ -10,6 +10,7 @@
 import { nodes, sid, outputs } from './model.js'
 import { activity, escapeHtml, ago } from './words.js'
 import { markdown } from './markdown.js'
+import { turnsOf, isLong } from './turns.js'
 import { outputCard } from './assets.js'
 import { describe, stepSummary } from './plain.js'
 import { devView } from './prefs.js'
@@ -77,34 +78,81 @@ function bubble(entry, results) {
 // Developer view shows the raw lines on their own, as before.
 // A call with no result yet is still running only at the end of the
 // conversation; earlier, its result is just out of view.
-function stepBubble(tools, results, last) {
-  const calls = tools.map(e => ({ tool: e.name, summary: e.summary, ok: results.get(e.id)?.ok ?? (last ? undefined : true) }))
+// What a run of calls did, in words: done so far, then what it's doing now.
+function callsOf(tools, results, last) {
+  return tools.map(e => ({ tool: e.name, summary: e.summary, ok: results.get(e.id)?.ok ?? (last ? undefined : true) }))
+}
+function stepText(calls) {
   const running = calls.some(c => c.ok === undefined)
-  const bumps = calls.filter(c => c.ok === false).length
-  const state = running ? 'running' : calls.at(-1).ok === false ? 'bad' : 'ok'
-  // While it works: what it has done so far, then what it's doing now.
   const finished = calls.filter(c => c.ok !== undefined)
   const current = calls.find(c => c.ok === undefined)
   const now = current && describe(current.tool, current.summary).now
-  const text = !running ? stepSummary(calls)
+  return !running ? stepSummary(calls)
     : finished.length ? `${stepSummary(finished)}, now ${now.charAt(0).toLowerCase()}${now.slice(1)}` : now
-  const meta = [calls.length > 1 ? `${calls.length} steps` : '', bumps && state !== 'bad' ? `${bumps} ${bumps === 1 ? 'bump' : 'bumps'}` : ''].filter(Boolean).join(' · ')
-  return `<details class="tx steps ${state}" data-id="steps-${escapeHtml(tools[0].id)}"><summary><i class="tx-dot ${state}"></i><span class="step-text">${escapeHtml(text)}</span>${meta ? `<small>${meta}</small>` : ''}</summary><div class="step-lines">${tools.map(e => bubble(e, results)).join('')}</div></details>`
+}
+const stateOf = calls => (calls.some(c => c.ok === undefined) ? 'running' : calls.at(-1)?.ok === false ? 'bad' : 'ok')
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
+
+function stepBubble(tools, results, last) {
+  const calls = callsOf(tools, results, last)
+  const state = stateOf(calls)
+  const bumps = calls.filter(c => c.ok === false).length
+  const meta = [calls.length > 1 ? `${calls.length} steps` : '', bumps && state !== 'bad' ? plural(bumps, 'bump') : ''].filter(Boolean).join(' · ')
+  return `<details class="tx steps ${state}" data-id="steps-${escapeHtml(tools[0].id)}"><summary><i class="tx-dot ${state}"></i><span class="step-text">${escapeHtml(stepText(calls))}</span>${meta ? `<small>${meta}</small>` : ''}</summary><div class="step-lines">${tools.map(e => bubble(e, results)).join('')}</div></details>`
 }
 
-// Entries in order, with each run of tool calls gathered into one step.
+// A turn's work, folded to one line: everything it did, in words, and how
+// many steps and notes. Open, it's the notes Claude wrote along the way
+// and each run of calls as before. Open by itself while the turn runs.
+function workBlock(work, results, running, key, answered) {
+  const tools = work.filter(e => e.kind === 'tool')
+  const notes = work.filter(e => e.kind === 'say')
+  const calls = callsOf(tools, results, running)
+  // A bump along the way of a turn that went on to answer isn't a failure.
+  const state = running ? 'running' : answered || !tools.length ? 'ok' : stateOf(calls)
+  const bumps = calls.filter(c => c.ok === false).length
+  const text = tools.length ? stepText(calls) : `Wrote ${plural(notes.length, 'note')} along the way`
+  const meta = [tools.length ? plural(tools.length, 'step') : '', notes.length && tools.length ? plural(notes.length, 'note') : '', bumps ? plural(bumps, 'bump') : ''].filter(Boolean).join(' · ')
+  const inner = []
+  let run = []
+  const flush = last => { if (run.length) inner.push(stepBubble(run, results, last)); run = [] }
+  work.forEach((e, i) => {
+    if (e.kind === 'tool') { run.push(e); return }
+    flush(false)
+    inner.push(e.kind === 'say' ? `<div class="tx narr md">${markdown(e.text)}</div>` : bubble(e, results))
+  })
+  flush(running)
+  return `<details class="tx work ${state}" data-id="${escapeHtml(key)}"${running ? ' open' : ''}><summary><i class="tx-dot ${state}"></i><span class="step-text">${escapeHtml(text)}</span>${meta ? `<small>${meta}</small>` : ''}</summary><div class="work-lines">${inner.join('')}</div></details>`
+}
+
+// Its answer, in full; an earlier long one folds to its opening lines
+// until you ask for the rest.
+function replyBlock(reply, isLatest) {
+  const id = `reply-${reply.t ?? ''}-${reply.text.length}`
+  const folded = !isLatest && isLong(reply) && !view?.expanded.has(id)
+  const time = reply.t ? `<time>${ago(reply.t)}</time>` : ''
+  const body = `<div class="tx say md reply${folded ? ' folded' : ''}">${markdown(reply.text)}${time}</div>`
+  // The button sits outside the faded answer, so the fade doesn't take it too.
+  return folded ? `<div class="reply-wrap">${body}<button type="button" class="tx-more" data-expand="${escapeHtml(id)}">Show all</button></div>` : body
+}
+
+// The conversation as turns (turns.js): what you said, the work folded to
+// a line, anything it made or asked, then its answer. Developer view shows
+// every entry on its own, as before.
 function drawEntries(shown, results) {
   if (devView()) return shown.map(e => bubble(e, results)).join('')
-  const out = []
-  let run = []
-  const flush = last => { if (run.length) out.push(stepBubble(run, results, last)); run = [] }
-  for (const e of shown) {
-    if (e.kind === 'tool') { run.push(e); continue }
-    flush(false)
-    out.push(bubble(e, results))
-  }
-  flush(true)
-  return out.join('')
+  const turns = turnsOf(shown, results)
+  return turns.map((t, i) => {
+    const isLatest = i === turns.length - 1
+    const key = `work-${t.prompt?.t ?? ''}-${t.work[0]?.id ?? t.work[0]?.t ?? i}`
+    const parts = [
+      t.prompt ? bubble(t.prompt, results) : '',
+      t.work.length ? workBlock(t.work, results, t.running, key, Boolean(t.reply)) : '',
+      ...t.extras.map(e => bubble(e, results)),
+      t.reply ? replyBlock(t.reply, isLatest) : '',
+    ].join('')
+    return parts ? `<section class="turn">${parts}</section>` : ''
+  }).join('')
 }
 
 // Developer view changed: draw again in the other voice.
@@ -356,7 +404,15 @@ export function attach(root, n) {
           <button type="submit">Send</button>
           <p class="tx-hint">${escapeHtml(box.hint)} Enter sends, Shift+Enter starts a new line.</p>
         </form>`}`
-  view = { id: n.id, root, target: target(n), entries: [], pending: [], next: undefined, empty: 'Reading the transcript…', firstDraw: true }
+  view = { id: n.id, root, target: target(n), entries: [], pending: [], next: undefined, empty: 'Reading the transcript…', firstDraw: true, expanded: new Set() }
+  // "Show all" on a folded answer: it stays open as the conversation updates.
+  root.querySelector('.tx-log').addEventListener('click', e => {
+    const more = e.target.closest('[data-expand]')
+    if (!more || !view) return
+    view.expanded.add(more.dataset.expand)
+    view.html = null
+    draw()
+  })
   // A picture in the conversation opens in the lightbox (panels.js).
   root.querySelector('.tx-log').addEventListener('click', e => {
     const zoom = e.target.closest('[data-zoom]')
