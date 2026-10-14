@@ -60,23 +60,25 @@ function openBrowser(target) {
 }
 
 // Run the bridge in this process (Ctrl+C stops it), then open the page.
+// Run again while one is up, it restarts the office with this copy: the
+// old bridge hands over its live events and steps down (restart.mjs).
 async function serve() {
   const running = await health()
-  if (running) {
-    if (isDemo && !running.demo) {
-      console.log(`A bridge is already running on ${url}. Pick another port for the demo: --port ${port + 1}`)
-      process.exit(1)
-    }
-    console.log(`Agent Office is already running at ${url}`)
-    openBrowser(url)
-    return
+  if (running && isDemo && !running.demo) {
+    console.log(`A bridge is already running on ${url}. Pick another port for the demo: --port ${port + 1}`)
+    process.exit(1)
   }
-  process.argv = [process.argv[0], join(here, 'server.mjs'), '--port', String(port), ...(isDemo ? ['--demo'] : [])]
+  process.argv = [process.argv[0], join(here, 'server.mjs'), '--port', String(port), ...(isDemo ? ['--demo'] : []), ...(running ? ['--replace', '--restart'] : [])]
   await import('./server.mjs')
-  for (let i = 0; i < 40 && !(await health()); i++) await new Promise(r => setTimeout(r, 100))
+  // Ready once this process's bridge answers (not the old one).
+  for (let i = 0; i < 80 && (await health())?.pid !== process.pid; i++) await new Promise(r => setTimeout(r, 100))
+  if ((await health())?.pid !== process.pid) {
+    console.log(`The bridge on ${url} didn't make way. Stop it (Ctrl+C where it runs, or quit the session that started it), then run this again.`)
+    process.exit(1)
+  }
   console.log(isDemo
     ? `Playing sample activity at ${url} (Ctrl+C to stop)`
-    : `Agent Office is open at ${url}. Leave this running; Ctrl+C stops it.`)
+    : `Agent Office is ${running ? 'restarted' : 'open'} at ${url}. Leave this running; Ctrl+C stops it.`)
   openBrowser(url)
 }
 

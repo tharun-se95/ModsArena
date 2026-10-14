@@ -7,6 +7,21 @@ git tag (`v0.2.1`) with a GitHub Release, and the same version is in
 modsarena (`/plugin` → Marketplaces), a new one arrives on its own;
 otherwise `claude plugin update agent-office@modsarena` fetches it.
 
+## 0.11.2
+
+- **`/office` restarts the office.** Run it while the office is up and it
+  restarts with your current copy: the running bridge hands over what it
+  shows (so nothing resets) and steps down, whichever version it is and
+  however it was started. An older bridge that can't step down is found by
+  the port it holds, checked to be an Agent Office bridge, and stopped;
+  nothing else ever is.
+- **Replies read like replies.** Claude's answers in the conversation are
+  drawn from their markdown: headings, lists, bold, code, tables, quotes
+  and links, instead of raw `**` and `|`.
+- **A quieter panel in your critter's colour.** The clip tab and heavy
+  border are gone; an open thread or agent tints the panel's border, top
+  and active tab in its critter's colour.
+
 ## 0.11.1
 
 - **One right-hand panel.** The Projects list and a thread's clipboard

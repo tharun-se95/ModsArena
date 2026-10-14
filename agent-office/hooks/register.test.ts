@@ -1,5 +1,5 @@
 import { test, expect, mock } from 'claude-code/testing'
-import { summarize, contextTokens, projectOf, nodeProblem, isNewer, isStale, beforeTool, afterTool, diffStats, officeResult, parseOffice, welcomeText, OFFER_TEXT, OFFICE_USAGE } from './register'
+import { summarize, contextTokens, projectOf, nodeProblem, isNewer, isStale, isRestarted, beforeTool, afterTool, diffStats, officeResult, parseOffice, welcomeText, OFFER_TEXT, OFFICE_USAGE } from './register'
 
 test('summarize picks the most telling field and trims it', async () => {
   expect(summarize({ command: 'npm   test\n --watch' })).toBe('npm test --watch')
@@ -170,7 +170,7 @@ test('/office replaces a bridge from an older copy before opening the page', asy
   on('process.run', async (_$, e) => ({ value: { exitCode: 0, stdout: e.argv[0] === 'node' ? 'v22.3.0\n' : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   on('process.spawn', async function* (_$, e) {
     spawned.push([...e.argv])
-    bridge = { version: '9.9.9', managed: true } // the new bridge takes over
+    bridge = { version: '9.9.9', managed: true, pid: 4242 } as typeof bridge // the new bridge takes over
     return { value: { code: 0, signal: null } }
   })
   on('clock.sleep', async () => ({ value: undefined }))
@@ -182,6 +182,44 @@ test('/office replaces a bridge from an older copy before opening the page', asy
   const opened = await $.command.run({ command: 'office', args: '' })
   expect(opened.text).toContain('Agent Office')
   expect(spawned.some(argv => argv.includes('--replace') && argv.includes('--managed'))).toBe(true)
+})
+
+test('/office run again while the office is up restarts it with this copy', async ($, on) => {
+  // An up-to-date bridge you started yourself (not managed) holds the port.
+  let bridge: Record<string, unknown> = { version: '9.9.9', managed: false, pid: 100 }
+  const spawned: string[][] = []
+  on('fs.read', async () => ({ value: '{"name":"agent-office","version":"9.9.9"}' }))
+  on('http.fetch', async (_$, e) => {
+    if (e.url.endsWith('/healthz')) return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true, events: 0, viewers: 1, ...bridge }) } }
+    return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }
+  })
+  on('process.run', async (_$, e) => ({ value: { exitCode: 0, stdout: e.argv[0] === 'node' ? 'v22.3.0\n' : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('process.spawn', async function* (_$, e) {
+    spawned.push([...e.argv])
+    bridge = { version: '9.9.9', managed: true, pid: 200 } // the old one stepped down
+    return { value: { code: 0, signal: null } }
+  })
+  on('clock.sleep', async () => ({ value: undefined }))
+
+  const opened = await $.command.run({ command: 'office', args: '' })
+  expect(opened.text).toContain('Restarted Agent Office')
+  expect(spawned.some(argv => argv.includes('--replace') && argv.includes('--restart'))).toBe(true)
+})
+
+test('/office says so when the old bridge will not make way', async ($, on) => {
+  on('fs.read', async () => ({ value: '{"name":"agent-office","version":"9.9.9"}' }))
+  on('http.fetch', async (_$, e) => {
+    if (e.url.endsWith('/healthz')) return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true, version: '9.9.9', pid: 100 }) } }
+    return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }
+  })
+  on('process.run', async (_$, e) => ({ value: { exitCode: 0, stdout: e.argv[0] === 'node' ? 'v22.3.0\n' : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('process.spawn', async function* () { return { value: { code: 0, signal: null } } })
+  // A fake clock, moved past the command's 8-second wait.
+  const clock = mock.clock(on, { now: 1000 })
+  const asked = $.command.run({ command: 'office', args: '' })
+  for (let i = 0; i < 40; i++) await clock.advance(250)
+  const answer = await asked
+  expect(answer.text).toContain("didn't make way")
 })
 
 test('/office says plainly when Node is missing', async ($, on) => {
@@ -525,4 +563,18 @@ test('once auto-update is on, the welcome is just the welcome', async ($, on) =>
   await clock.settle()
   expect(toasts).toEqual([welcomeText(undefined)])
   expect(toasts[0]).not.toContain('auto-update')
+})
+
+test('isRestarted waits for a fresh bridge, not the one that was there', async () => {
+  // Nothing was running: any up-to-date bridge will do.
+  expect(isRestarted(undefined, { ok: true, version: '0.11.2', pid: 10 }, '0.11.2')).toBe(true)
+  expect(isRestarted(undefined, undefined, '0.11.2')).toBe(false)
+  // The old bridge still answering (same pid, or an old one that reports none) isn't it.
+  expect(isRestarted({ ok: true, pid: 10 }, { ok: true, version: '0.11.2', pid: 10 }, '0.11.2')).toBe(false)
+  expect(isRestarted({ ok: true, version: '0.9.0' }, { ok: true, version: '0.9.0' }, '0.11.2')).toBe(false)
+  // A new pid from this copy is.
+  expect(isRestarted({ ok: true, pid: 10 }, { ok: true, version: '0.11.2', managed: true, pid: 11 }, '0.11.2')).toBe(true)
+  expect(isRestarted({ ok: true, version: '0.9.0' }, { ok: true, version: '0.11.2', managed: true, pid: 11 }, '0.11.2')).toBe(true)
+  // A stale managed bridge from an older copy never counts.
+  expect(isRestarted({ ok: true, pid: 10 }, { ok: true, version: '0.9.0', managed: true, pid: 12 }, '0.11.2')).toBe(false)
 })
