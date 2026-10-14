@@ -23,6 +23,14 @@
 //   POST /jobs     start a job from the front desk, in a project the office
 //                  knows (the office page only; see jobs.mjs)
 //   POST /jobs/stop   stop a job the front desk started (the office page only)
+//   POST /resume   talk to a session that has ended: picks it up again in the
+//                  background with your message (the office page only)
+//   POST /projects open or make a project folder for a first job, saying
+//                  whether Claude Code trusts it (the office page only)
+//   GET  /agent-types?dir=   the custom agent types a project can use
+//   POST /agent-types   write a new one (the office page only; manage.mjs)
+//   POST /delete   delete a session's (or a project's) transcripts for good
+//                  (the office page only)
 //   GET  /inbox?session=   a session's mod picking up its messages
 //   POST /stop     stop the turn a session is running (the office page only; its mod does it)
 //   POST /answer   an answer to a question or plan a session is holding (the office page only)
@@ -41,13 +49,14 @@ import { extname, join, dirname, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { normalize, GAUGES, gaugeKey } from './normalize.mjs'
 import { findProject } from './projects.mjs'
-import { readHistory, tailContext } from './history.mjs'
+import { readHistory, tailContext, summarizeTranscript } from './history.mjs'
 import { startDemo, demoJob, answerDemo, stopDemo } from './demo.mjs'
 import { refusal, newToken, tokenMatches, TOKEN_HEADER, INBOX_HEADER, CONTROL_HEADER } from './guard.mjs'
 import * as chat from './chat.mjs'
 import { createJobs } from './jobs.mjs'
 import * as asks from './asks.mjs'
-import { findTranscript, readTranscript } from './transcript.mjs'
+import { findTranscript, readTranscript, forget } from './transcript.mjs'
+import { openProject, writeAgent, listAgents, removeTranscript } from './manage.mjs'
 import { isEngineNote } from './prompts.mjs'
 import * as autoUpdate from './autoupdate.mjs'
 import { RESTART_HEADER, stopOldBridge } from './restart.mjs'
@@ -175,8 +184,10 @@ function enrich(ev) {
 // starts jobs.
 const knownDirs = new Set()
 const know = (...dirs) => dirs.forEach(d => typeof d === 'string' && isAbsolute(d) && knownDirs.add(d))
+// Folders you opened as new projects from the front desk.
+const newDirs = new Set()
 async function isKnown(dir) {
-  if (knownDirs.has(dir)) return true
+  if (knownDirs.has(dir) || newDirs.has(dir)) return true
   // Past sessions count too; read them once, on demand.
   try {
     for (const s of await readHistory({ days: HISTORY_DAYS })) know(s.cwd, s.project?.id)
@@ -189,6 +200,75 @@ let demoAutoUpdate = { state: 'off', pending: false }
 const updates = () => (flag('demo') ? demoAutoUpdate : autoUpdate.brief(autoUpdate.read()))
 
 const jobs = createJobs({ publish: events => publish(events), isKnown, demo: flag('demo') ? demoJob() : undefined })
+
+// The folder a session ran in, from its transcript, for resuming it.
+async function sessionFolder(session) {
+  const path = await findTranscript(session)
+  return path ? (await summarizeTranscript(path).catch(() => null))?.cwd : undefined
+}
+
+// Deleting for good. A session still open in Claude Code (live here, its
+// transcript written lately) is left alone; one the front desk started or
+// picked up in the background is stopped first.
+const LATELY_MS = 20 * 60 * 1000
+async function isOpenElsewhere(session) {
+  const a = anchors.get(session)
+  if (!a || a.endedAt) return false
+  const path = await findTranscript(session)
+  const info = path && await stat(path).catch(() => null)
+  return !info || Date.now() - info.mtimeMs < LATELY_MS
+}
+
+function purge(session, agent) {
+  const mine = ev => ev.session === session && (agent === undefined || ev.agent === agent)
+  for (let i = log.length - 1; i >= 0; i--) if (mine(log[i])) log.splice(i, 1)
+  for (const [k, ev] of gauges) if (mine(ev)) gauges.delete(k)
+  if (agent === undefined) anchors.delete(session)
+  else anchors.get(session)?.events.delete(`agent|${agent}`)
+}
+
+async function deleteSession(session) {
+  // One the front desk runs in the background (working, or done and idle)
+  // is the office's own to stop; any other still open is yours.
+  const job = jobs.jobOf(session)
+  if (job) {
+    if (!['stopped', 'failed'].includes(job.state)) await jobs.stop({ id: job.id })
+  } else if (await isOpenElsewhere(session)) return { status: 409, error: 'it’s still open in Claude Code. End it there first (/exit), then delete it' }
+  const path = await findTranscript(session)
+  const removed = flag('demo') ? [] : path ? await removeTranscript(path) : []
+  forget(session)
+  purge(session)
+  publish([{ t: Date.now(), kind: 'session.removed', session }])
+  return { removed: removed.length }
+}
+
+async function deleteForGood(body) {
+  const { session, agent, project } = body ?? {}
+  const ID = /^[\w-]{1,100}$/
+  if (typeof project === 'string' && project) {
+    // Every transcript of the project's sessions; never the project's own files.
+    const sessions = new Set((await readHistory({ days: 36500, perProject: Infinity })).filter(s => s.project?.id === project).map(s => s.session))
+    for (const [id, a] of anchors) if (a.events.get('start')?.project?.id === project) sessions.add(id)
+    let removed = 0
+    const kept = []
+    for (const id of sessions) {
+      const out = await deleteSession(id)
+      if (out.error) kept.push(id)
+      else removed++
+    }
+    return { sessions: removed, kept: kept.length }
+  }
+  if (typeof session !== 'string' || !ID.test(session)) return { status: 400, error: 'which session?' }
+  if (agent !== undefined) {
+    if (typeof agent !== 'string' || !ID.test(agent)) return { status: 400, error: 'which agent?' }
+    const path = flag('demo') ? null : await findTranscript(session, agent)
+    const removed = path ? await removeTranscript(path, { session: false }) : []
+    purge(session, agent)
+    publish([{ t: Date.now(), kind: 'agent.removed', session, agent }])
+    return { removed: removed.length }
+  }
+  return deleteSession(session)
+}
 
 function publish(events) {
   for (const raw of events) {
@@ -282,6 +362,65 @@ const server = createServer(async (req, res) => {
       const body = JSON.parse(await readBody(req))
       const { status, error, job } = await (pathname === '/jobs' ? jobs.start(body) : jobs.stop(body))
       json(res, status, error ? { error } : { ok: true, ...(job && { job }) })
+    } catch (err) {
+      json(res, 400, { error: String(err.message ?? err) })
+    }
+    return
+  }
+
+  if (req.method === 'POST' && pathname === '/resume') {
+    if (!tokenMatches(req.headers[TOKEN_HEADER], TOKEN)) return json(res, 403, { error: 'missing or wrong token' })
+    try {
+      const body = JSON.parse(await readBody(req))
+      const { status, error, job } = await jobs.resume(body, sessionFolder)
+      json(res, status, error ? { error } : { ok: true, ...(job && { job }) })
+    } catch (err) {
+      json(res, 400, { error: String(err.message ?? err) })
+    }
+    return
+  }
+
+  if (req.method === 'POST' && pathname === '/projects') {
+    if (!tokenMatches(req.headers[TOKEN_HEADER], TOKEN)) return json(res, 403, { error: 'missing or wrong token' })
+    try {
+      const body = JSON.parse(await readBody(req))
+      if (flag('demo')) return json(res, 200, { ok: true, dir: String(body?.path ?? ''), created: false, trusted: true, demo: true })
+      const out = await openProject({ path: body?.path, create: body?.create === true })
+      if (out.error) return json(res, out.status, { error: out.error })
+      newDirs.add(out.dir)
+      json(res, 200, { ok: true, ...out })
+    } catch (err) {
+      json(res, 400, { error: String(err.message ?? err) })
+    }
+    return
+  }
+
+  if (req.method === 'GET' && pathname === '/agent-types') {
+    const dir = searchParams.get('dir') ?? ''
+    json(res, 200, { types: await listAgents(dir && (await isKnown(dir)) ? dir : undefined) })
+    return
+  }
+
+  if (req.method === 'POST' && pathname === '/agent-types') {
+    if (!tokenMatches(req.headers[TOKEN_HEADER], TOKEN)) return json(res, 403, { error: 'missing or wrong token' })
+    try {
+      const body = JSON.parse(await readBody(req))
+      const dir = typeof body?.dir === 'string' ? body.dir : ''
+      if (body?.scope !== 'user' && !(dir && await isKnown(dir))) return json(res, 403, { error: 'the office only adds agents to projects it knows' })
+      if (flag('demo')) return json(res, 200, { ok: true, name: body?.name, demo: true })
+      const out = await writeAgent(body, { dir })
+      json(res, out.status, out.error ? { error: out.error } : { ok: true, name: out.name, path: out.path, scope: out.scope })
+    } catch (err) {
+      json(res, 400, { error: String(err.message ?? err) })
+    }
+    return
+  }
+
+  if (req.method === 'POST' && pathname === '/delete') {
+    if (!tokenMatches(req.headers[TOKEN_HEADER], TOKEN)) return json(res, 403, { error: 'missing or wrong token' })
+    try {
+      const out = await deleteForGood(JSON.parse(await readBody(req)))
+      json(res, out.status ?? 200, out.error ? { error: out.error } : { ok: true, ...out })
     } catch (err) {
       json(res, 400, { error: String(err.message ?? err) })
     }
@@ -430,7 +569,7 @@ const server = createServer(async (req, res) => {
   }
 
   if (pathname === '/healthz') {
-    json(res, 200, { ok: true, name: 'agent-office', version: VERSION, managed: MANAGED, pid: process.pid, demo: flag('demo'), chat: true, jobs: true, answers: true, autoUpdate: updates(), events: log.length, viewers: clients.size })
+    json(res, 200, { ok: true, name: 'agent-office', version: VERSION, managed: MANAGED, pid: process.pid, demo: flag('demo'), chat: true, jobs: true, answers: true, resume: true, manage: true, autoUpdate: updates(), events: log.length, viewers: clients.size })
     return
   }
 

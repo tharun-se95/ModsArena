@@ -210,7 +210,8 @@ async function poll() {
       v.next = next
       // A message we sent shows up in the transcript: drop its placeholder.
       // Matched loosely, in case Claude Code frames it in words of its own.
-      for (const e of entries) if (e.kind === 'chat') v.pending = v.pending.filter(p => p.text !== e.text && !e.text.includes(p.text))
+      // A resumed session's message comes back as an ordinary prompt.
+      for (const e of entries) if (e.kind === 'chat' || e.kind === 'you') v.pending = v.pending.filter(p => p.text !== e.text && !e.text.includes(p.text))
       v.empty = 'Nothing said yet.'
     }
   } catch {
@@ -270,6 +271,20 @@ async function send(text) {
   // @name: to that agent of the thread instead (mentions.js). It answers in
   // its own conversation, so the note here just says where it went.
   const to = n.kind === 'session' ? mentions.resolve(n, text) : { node: n }
+  if (view.mode === 'resume') {
+    pending.status = 'Picking it up again…'
+    draw()
+    const result = await resume(n, pending.text)
+    pending.ok = result.ok
+    pending.status = result.status
+    // The demo has it in its own conversation already.
+    if (result.ok && !token && view) {
+      view.pending = view.pending.filter(p => p !== pending)
+      view.entries = demoEntries(n)
+    }
+    draw()
+    return
+  }
   if (to.node !== n) {
     const result = await sendTo(to.node, to.text)
     pending.ok = result.ok
@@ -367,6 +382,43 @@ export async function say(n, text) {
 
 export const canMessage = () => demo || Boolean(token)
 
+// Whether a thread has ended: a message to it picks it up again (resume).
+export const hasEnded = n => n?.kind === 'session' && (n.past || n.status === 'done')
+
+// Talk to a session that has ended: the bridge picks it up again in the
+// background (`claude --bg --resume`), in its own folder, with this as its
+// next prompt, and its critter comes back to its desk to answer.
+// Resolves to { ok, status }.
+export async function resume(n, text) {
+  if (!n || !text.trim()) return { ok: false, status: 'Nothing to send' }
+  if (!token) {
+    if (!demo) return { ok: false, status: 'Picking it up again needs the office opened from its bridge (run /office)' }
+    // Demo only, with no bridge: the front desk plays it (desk.js).
+    document.dispatchEvent(new CustomEvent('office:resume-demo', { detail: { session: n.session, dir: n.project ?? n.cwd, text: text.trim() } }))
+    const list = demoReplies.get(n.id) ?? []
+    list.push({ kind: 'you', text: text.trim(), t: Date.now() })
+    demoReplies.set(n.id, list)
+    return { ok: true, status: 'Picked up again in the background. It answers here.' }
+  }
+  try {
+    const res = await fetch('/resume', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-agent-office-token': token },
+      // `dir` only for a demo bridge, which has no transcript to read it from.
+      body: JSON.stringify({ session: n.session, text: text.trim(), dir: n.project ?? n.cwd }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(body.error ?? `the bridge answered ${res.status}`)
+    return { ok: true, status: 'Picked up again in the background. It answers here.' }
+  } catch (err) {
+    return { ok: false, status: `Couldn’t pick it up again: ${err.message}` }
+  }
+}
+
+// A message from anywhere in the office: to a live thread as its next
+// prompt, to an ended one by picking it up again.
+export const talk = (n, text) => (hasEnded(n) ? resume(n, text) : say(n, text))
+
 // Put the cursor in the open transcript's message box, if there is one.
 export function focusComposer() {
   const field = view?.root.querySelector('.tx-compose textarea')
@@ -380,7 +432,9 @@ export function focusComposer() {
 // What the message box says, or why there isn't one.
 function composer(n) {
   if (!demo && !token) return { off: 'Messaging needs the office opened from its bridge (run /office).' }
-  if (n.kind === 'session' && (n.past || n.status === 'done')) return { off: 'This session has ended. Resume it in Claude Code to talk to it again.' }
+  if (hasEnded(n)) {
+    return { resume: true, placeholder: 'Message it to pick it up again…', hint: 'It has ended: this picks it up again in the background, in its own folder, and it answers here. That uses tokens.' }
+  }
   if (n.kind === 'agent' && n.status === 'done') {
     return { placeholder: `Message ${n.label}…`, hint: 'It has finished: a message resumes it to answer, which uses tokens.' }
   }
@@ -392,19 +446,24 @@ function composer(n) {
 // the one already there.
 export function attach(root, n) {
   if (!root || !n) return
-  if (view?.id === n.id && view.root === root) return
-  stop()
   const box = composer(n)
+  const mode = box.off ? 'off' : box.resume ? 'resume' : 'chat'
+  if (view?.id === n.id && view.root === root && view.mode === mode) return
+  // The same thread, ended or picked up again: keep what you were typing,
+  // and what you just sent.
+  const same = view?.id === n.id ? view : null
+  const typed = same?.root.querySelector('.tx-compose textarea')?.value
+  stop()
   root.innerHTML = `
     <div class="tx-log" role="log" aria-live="polite" aria-label="Conversation with ${escapeHtml(nameOf(n))}"></div>
     ${box.off
       ? `<p class="tx-off">${escapeHtml(box.off)}</p>`
-      : `<form class="tx-compose">
+      : `<form class="tx-compose${box.resume ? ' resume' : ''}">
           <textarea rows="2" placeholder="${escapeHtml(box.placeholder)}" aria-label="${escapeHtml(box.placeholder)}"></textarea>
           <button type="submit">Send</button>
           <p class="tx-hint">${escapeHtml(box.hint)} Enter sends, Shift+Enter starts a new line.</p>
         </form>`}`
-  view = { id: n.id, root, target: target(n), entries: [], pending: [], next: undefined, empty: 'Reading the transcript…', firstDraw: true, expanded: new Set() }
+  view = { id: n.id, root, mode, target: target(n), entries: same?.entries ?? [], pending: same?.pending ?? [], next: same?.next, empty: 'Reading the transcript…', firstDraw: true, expanded: same?.expanded ?? new Set() }
   // "Show all" on a folded answer: it stays open as the conversation updates.
   root.querySelector('.tx-log').addEventListener('click', e => {
     const more = e.target.closest('[data-expand]')
@@ -422,7 +481,8 @@ export function attach(root, n) {
   })
   const form = root.querySelector('form')
   const field = form?.querySelector('textarea')
-  if (field && n.kind === 'session') mentions.attach(field, () => nodes.get(n.id))
+  if (field && typed) field.value = typed
+  if (field && n.kind === 'session' && mode === 'chat') mentions.attach(field, () => nodes.get(n.id))
   form?.addEventListener('submit', e => {
     e.preventDefault()
     const text = field.value

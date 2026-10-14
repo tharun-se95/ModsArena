@@ -23,6 +23,7 @@ import { who } from './critters.js'
 import { devView } from './prefs.js'
 import { openProjectEditor } from './project-editor.js'
 import * as actions from './actions.js'
+import * as manage from './manage.js'
 import * as mentions from './mentions.js'
 import * as milestones from './milestones.js'
 import { projectNote } from './spend.js'
@@ -335,7 +336,7 @@ function directory(running, selected) {
     <h2 class="sideh">Projects <small>${live.length ? `${working} working · ${live.length - working} with you` : 'none live'}</small></h2>
     ${projects.map(p => `
       <section class="project">
-        <p class="room"><button type="button" class="picon room-${roomKey(p.raw, p.id)}" data-edit-project="${escapeHtml(p.id)}" data-raw="${escapeHtml(p.raw)}" title="Rename it, or change its icon, walls and decor" aria-label="Rename ${escapeHtml(p.name)} or change its icon, walls and decor">${projectIcon(p.id, p.raw)}</button>${escapeHtml(p.name)}<small>${p.live.length ? plural(p.live.length, 'thread') : 'earlier'}</small></p>${projectNote(p.raw)}
+        <div class="room"><button type="button" class="picon room-${roomKey(p.raw, p.id)}" data-edit-project="${escapeHtml(p.id)}" data-raw="${escapeHtml(p.raw)}" title="Rename it, or change its icon, walls and decor" aria-label="Rename ${escapeHtml(p.name)} or change its icon, walls and decor">${projectIcon(p.id, p.raw)}</button><span class="room-name">${escapeHtml(p.name)}</span><small>${p.live.length ? plural(p.live.length, 'thread') : 'earlier'}</small><span class="room-acts">${manage.newThreadButton(p.id, p.name)}${manage.menu({ kind: 'project', project: p.id, label: p.name })}</span></div>${projectNote(p.raw)}
         ${p.live.map(n => threadRow(n, running, selected)).join('')}
         ${p.past.length ? `${p.live.length ? '<p class="earlier">Earlier</p>' : ''}${p.past.map(n => threadRow(n, running, selected)).join('')}` : ''}
       </section>`).join('') || '<p class="muted">No sessions yet. Start Claude Code anywhere and it appears here.</p>'}`
@@ -491,7 +492,10 @@ function head(n, running) {
     <p class="dmeta">${pill(state)} ${escapeHtml(sub)}</p>
     ${isAgent || !isLive(n) ? '' : `<p class="dsum">${escapeHtml(summaryOf(n, running))}</p>`}
     ${progressHtml(n.todos, { big: true })}
-    ${actions.bar(n, state)}`
+    ${actions.bar(n, state)}
+    <div class="dmenu">${manage.menu(isAgent
+      ? { kind: 'agent', session: n.session, agent: n.agent, label: who(n).title }
+      : { kind: 'session', session: n.session, project: n.project, label: title(n) }, { live: isAgent && n.status !== 'done' })}</div>`
 }
 
 // ---------------------------------------------------------------------------

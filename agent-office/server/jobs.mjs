@@ -89,6 +89,23 @@ export function startArgs({ title, prompt }) {
   return ['--bg', '-n', title, '--', prompt]
 }
 
+// Talking to a session that has ended: the same session, picked up again in
+// the background under its own id, with your message as its next prompt.
+export function resumeArgs({ session, text }) {
+  return ['--bg', '--resume', session, '--', text]
+}
+
+const SESSION_ID = /^[\w-]{1,100}$/
+
+// A request to resume a session, checked, or the reason it can't be.
+export function checkResume(body) {
+  const { session, text } = body ?? {}
+  if (typeof session !== 'string' || !SESSION_ID.test(session)) return { error: 'which session?' }
+  if (typeof text !== 'string' || !text.trim()) return { error: 'say something first' }
+  if (text.length > MAX_PROMPT) return { error: `the message is longer than ${MAX_PROMPT} characters` }
+  return { session, text: text.trim() }
+}
+
 // `claude --bg` answers "backgrounded · 1a2b3c4d · <name>".
 export function shortIdOf(output) {
   return /backgrounded\s*·\s*([0-9a-f]{6,16})\b/i.exec(output ?? '')?.[1]
@@ -183,7 +200,7 @@ export function createJobs({ publish, isKnown, demo }) {
         else if (was === 'blocked') say({ kind: 'ask.close', id: `front-desk-${job.short}`, answer: 'Answered' })
         if (state === 'done' && !job.answered) {
           job.answered = true
-          say({ kind: 'turn.complete', turnId: 'front-desk', reason: 'answer' })
+          say({ kind: 'turn.complete', turnId: job.turnId ?? 'front-desk', reason: 'answer' })
         }
         if (state === 'stopped' || state === 'failed') say({ kind: 'session.end', reason: state })
       }
@@ -216,8 +233,13 @@ export function createJobs({ publish, isKnown, demo }) {
       demo(job, req.prompt, update => { Object.assign(job, update); emit('job.update', job, update) })
       return { status: 200, job: { id: job.id } }
     }
-    const { code, out } = await run(startArgs(req), { cwd: dir })
-    const short = code === 0 ? shortIdOf(out) : undefined
+    return launch(job, startArgs(req), dir)
+  }
+
+  // Run `claude --bg ...` for a job and follow it.
+  async function launch(job, args, cwd, fallbackShort) {
+    const { code, out } = await run(args, { cwd })
+    const short = code === 0 ? shortIdOf(out) ?? fallbackShort : undefined
     if (!short) {
       job.state = 'failed'
       emit('job.update', job, { state: 'failed', error: explain(out, code) })
@@ -230,6 +252,45 @@ export function createJobs({ publish, isKnown, demo }) {
     void poll()
     return { status: 200, job: { id: job.id, short } }
   }
+
+  // Talk to a session that has ended: `claude --bg --resume <id>` in its
+  // own folder (`where` reads it from the session's transcript), followed
+  // like a job, so its critter comes back to its desk and answers there.
+  async function resume(body, where) {
+    const req = checkResume(body)
+    if (req.error) return { status: 400, error: req.error }
+    const running = [...jobs.values()].find(j => j.session === req.session && ['starting', 'working', 'blocked'].includes(j.state))
+    if (running) return { status: 409, error: 'it’s already running again; it answers in a moment' }
+    let dir = demo ? body?.dir : await where(req.session)
+    if (!demo) {
+      if (!dir) return { status: 404, error: 'couldn’t find that session’s transcript' }
+      try {
+        dir = await realpath(resolve(dir))
+        if (!(await stat(dir)).isDirectory()) throw new Error()
+      } catch {
+        return { status: 400, error: 'that session’s project folder isn’t there any more' }
+      }
+      if (!(await isKnown(dir))) return { status: 403, error: 'the office only resumes sessions in projects it knows' }
+    }
+    const title = req.text.replace(/\s+/g, ' ').slice(0, MAX_TITLE)
+    const job = { id: randomUUID(), dir: dir ?? '', title, kind: 'resume', prompt: req.text, session: req.session, turnId: `front-desk-${Date.now()}`, state: 'starting', t: Date.now() }
+    jobs.set(job.id, job)
+    if (jobs.size > KEEP) jobs.delete(jobs.keys().next().value)
+    emit('job.start', job, { dir: job.dir, title, type: 'resume', prompt: req.text, session: req.session, resumed: true, ...(demo && { demo: true }) })
+    // It is live again from now: its own plugin says so too once it starts.
+    const say = (...events) => publish(events.map(ev => ({ t: Date.now(), session: req.session, ...ev })))
+    say({ kind: 'session.start', cwd: job.dir || undefined, via: 'front-desk', resumed: true }, { kind: 'turn.start', turnId: job.turnId, text: req.text, via: 'front-desk' })
+    if (demo) {
+      demo(job, req.text, update => { Object.assign(job, update); emit('job.update', job, update) }, { resume: true })
+      return { status: 200, job: { id: job.id } }
+    }
+    const result = await launch(job, resumeArgs(req), dir, req.session.slice(0, 8))
+    if (result.error) say({ kind: 'session.end', reason: 'failed' })
+    return result
+  }
+
+  // The newest job on a session, if the front desk started or resumed it.
+  const jobOf = session => [...jobs.values()].reverse().find(j => j.session === session && j.short)
 
   async function stop(body) {
     const job = jobs.get(body?.id)
@@ -248,5 +309,5 @@ export function createJobs({ publish, isKnown, demo }) {
     return { status: 200 }
   }
 
-  return { start, stop, jobs }
+  return { start, resume, stop, jobOf, jobs }
 }

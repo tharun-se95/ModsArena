@@ -4,16 +4,23 @@
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdtemp, writeFile, readFile, chmod } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, chmod, stat } from 'node:fs/promises'
 import { request } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { startArgs, shortIdOf, explain, stateOf, check, childEnv, resolveClaude } from './jobs.mjs'
+import { startArgs, resumeArgs, checkResume, shortIdOf, explain, stateOf, check, childEnv, resolveClaude } from './jobs.mjs'
 
 test('a job starts as a background session, never with a permission mode or a bypass', () => {
   const args = startArgs({ title: 'Write a README', prompt: '--sneaky: write it' })
   assert.deepEqual(args, ['--bg', '-n', 'Write a README', '--', '--sneaky: write it'])
   for (const a of args.slice(0, 3)) assert.doesNotMatch(a, /permission|dangerous|bypass/i)
+})
+
+test('talking to an ended session resumes it in the background, your words after --', () => {
+  assert.deepEqual(resumeArgs({ session: 'abc-123', text: '--help me' }), ['--bg', '--resume', 'abc-123', '--', '--help me'])
+  assert.deepEqual(checkResume({ session: 'abc-123', text: '  hi ' }), { session: 'abc-123', text: 'hi' })
+  assert.ok(checkResume({ session: '../etc', text: 'hi' }).error)
+  assert.ok(checkResume({ session: 'abc', text: ' ' }).error)
 })
 
 // A pretend Windows disk: path -> file contents, for resolveClaude().
@@ -92,7 +99,7 @@ test('a new session never inherits the session that started the bridge', () => {
 
 const PORT = 7800 + Math.floor(Math.random() * 150)
 const base = `http://127.0.0.1:${PORT}`
-let bridge, dir, calls, token
+let bridge, dir, calls, token, root
 
 function call(method, path, { headers = {}, body } = {}) {
   return new Promise((resolve, reject) => {
@@ -108,7 +115,7 @@ function call(method, path, { headers = {}, body } = {}) {
 }
 
 before(async () => {
-  const root = await mkdtemp(join(tmpdir(), 'office-jobs-'))
+  root = await mkdtemp(join(tmpdir(), 'office-jobs-'))
   dir = await mkdtemp(join(tmpdir(), 'office-project-'))
   calls = join(root, 'calls.log')
   // A stand-in claude: logs its arguments, working folder and whether it
@@ -168,4 +175,60 @@ test('a job in a known project starts a background session there, and stops', as
   assert.equal((await call('POST', '/jobs/stop', { headers: auth(), body: { id: job.id } })).status, 200)
   const after = (await readFile(calls, 'utf8')).trim().split('\n').map(l => JSON.parse(l))
   assert.deepEqual(after.at(-1).args, ['stop', '1a2b3c4d'])
+})
+
+const read = async () => (await readFile(calls, 'utf8')).trim().split('\n').map(l => JSON.parse(l))
+
+test('an ended session is picked up again in its own folder, and can be deleted for good', async () => {
+  // Its transcript says where it ran.
+  await mkdir(join(root, 'projects', '-p'), { recursive: true })
+  const path = join(root, 'projects', '-p', 'old-1.jsonl')
+  await writeFile(path, JSON.stringify({ type: 'user', cwd: dir, origin: { kind: 'human' }, timestamp: '2026-10-01T10:00:00Z', message: { content: 'first ask' } }) + '\n')
+  await mkdir(join(root, 'projects', '-p', 'old-1', 'subagents'), { recursive: true })
+  await writeFile(join(root, 'projects', '-p', 'old-1', 'subagents', 'agent-x.jsonl'), '{}\n')
+  assert.equal((await call('POST', '/resume', { headers: { host: `127.0.0.1:${PORT}` }, body: { session: 'old-1', text: 'hi' } })).status, 403, 'no token')
+  const res = await call('POST', '/resume', { headers: auth(), body: { session: 'old-1', text: 'What did you change?' } })
+  assert.equal(res.status, 200, res.text)
+  const resumed = (await read()).find(c => c.args[1] === '--resume')
+  assert.deepEqual(resumed.args, ['--bg', '--resume', 'old-1', '--', 'What did you change?'])
+  assert.equal(resumed.cwd, dir)
+  assert.equal((await call('POST', '/resume', { headers: auth(), body: { session: 'nope-9', text: 'hi' } })).status, 404)
+
+  // Deleting for good: its transcript and its subagents', nothing else.
+  assert.equal((await call('POST', '/delete', { headers: { host: `127.0.0.1:${PORT}` }, body: { session: 'old-1' } })).status, 403, 'no token')
+  const del = await call('POST', '/delete', { headers: auth(), body: { session: 'old-1' } })
+  assert.equal(del.status, 200, del.text)
+  await assert.rejects(stat(path))
+  await assert.rejects(stat(join(root, 'projects', '-p', 'old-1')))
+  assert.ok(await stat(dir), 'the project folder stays')
+})
+
+test('a session still open in Claude Code isn’t deleted', async () => {
+  await mkdir(join(root, 'projects', '-p'), { recursive: true })
+  await writeFile(join(root, 'projects', '-p', 'live-1.jsonl'), JSON.stringify({ type: 'user', cwd: dir, timestamp: '2026-10-01T10:00:00Z', message: { content: 'hi' } }) + '\n')
+  await fetch(`${base}/event`, { method: 'POST', body: JSON.stringify({ kind: 'session.start', session: 'live-1', t: Date.now(), cwd: dir }) })
+  const res = await call('POST', '/delete', { headers: auth(), body: { session: 'live-1' } })
+  assert.equal(res.status, 409)
+  assert.ok(await stat(join(root, 'projects', '-p', 'live-1.jsonl')))
+})
+
+test('a new project: the folder is opened (or made) and its trust read from Claude Code', async () => {
+  const res = await call('POST', '/projects', { headers: auth(), body: { path: dir } })
+  assert.equal(res.status, 200, res.text)
+  assert.equal(res.json().trusted, false)
+  await writeFile(join(root, '.claude.json'), JSON.stringify({ projects: { [res.json().dir]: { hasTrustDialogAccepted: true } } }))
+  const again = await call('POST', '/projects', { headers: auth(), body: { path: dir } })
+  assert.equal(again.json().trusted, true)
+  assert.equal((await call('POST', '/projects', { headers: { host: `127.0.0.1:${PORT}` }, body: { path: dir } })).status, 403, 'no token')
+})
+
+test('a custom agent type is saved in a known project, never over another', async () => {
+  const body = { dir, scope: 'project', name: 'doc-writer', description: 'Writes docs', instructions: 'Plain words.' }
+  const res = await call('POST', '/agent-types', { headers: auth(), body })
+  assert.equal(res.status, 200, res.text)
+  assert.match(await readFile(join(dir, '.claude', 'agents', 'doc-writer.md'), 'utf8'), /name: doc-writer/)
+  assert.equal((await call('POST', '/agent-types', { headers: auth(), body })).status, 409)
+  assert.equal((await call('POST', '/agent-types', { headers: auth(), body: { ...body, dir: '/somewhere/else' } })).status, 403)
+  const listed = await (await fetch(`${base}/agent-types?dir=${encodeURIComponent(dir)}`)).json()
+  assert.ok(listed.types.some(t => t.name === 'doc-writer'))
 })

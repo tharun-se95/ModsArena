@@ -1227,6 +1227,91 @@
   }
   @media (prefers-reduced-motion: reduce) { .flag.zzz i { animation: none; } .card { transition: none; } }
 
+
+  /* ===== Making and clearing (manage.js): the ⋯ menu on a project, thread
+     or agent, its sheets, the new project's folder on the front desk, and
+     the Removed list in Settings. ===== */
+  .more { position: relative; display: inline-block; }
+  .more > summary { list-style: none; display: grid; place-items: center; width: 26px; height: 22px; border-radius: 7px; cursor: pointer; color: var(--muted); }
+  .more > summary::-webkit-details-marker { display: none; }
+  .more > summary svg { width: 16px; height: 16px; fill: currentColor; }
+  .more > summary:hover, .more[open] > summary { color: var(--ink); background: color-mix(in srgb, var(--line) 70%, transparent); }
+  .more > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .more-pop { position: absolute; z-index: 30; right: 0; top: calc(100% + 4px); min-width: 196px; display: flex; flex-direction: column; padding: 5px; border-radius: 12px; box-shadow: 0 12px 30px rgba(30, 24, 18, 0.2); }
+  .more-pop button { text-align: left; padding: 7px 10px; border-radius: 8px; font: 500 13px var(--sans); color: var(--ink); white-space: nowrap; }
+  .more-pop button:hover, .more-pop button:focus-visible { background: color-mix(in srgb, var(--accent) 10%, var(--paper)); outline: none; }
+  .more-pop .more-remove { border-top: 1px solid var(--line); border-radius: 0 0 8px 8px; margin-top: 3px; padding-top: 9px; }
+  .more-pop .more-thread:first-child + .more-remove, .more-pop .more-remove:first-child { border-top: 0; margin-top: 0; }
+  .more-pop .more-delete { color: var(--crit); }
+  .more-pop .more-delete:hover { background: color-mix(in srgb, var(--crit) 10%, var(--paper)); }
+  .project > .room .room-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .room-acts { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; opacity: 0.55; transition: opacity 0.15s; }
+  .project:hover .room-acts, .room-acts:focus-within, .room-acts:has(details[open]) { opacity: 1; }
+  .room-new { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 7px; color: var(--muted); }
+  .room-new svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+  .room-new:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .dmenu { position: absolute; top: 12px; right: 12px; }
+  #manage { width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); padding: 0; color: var(--ink); background: var(--paper); overflow-y: auto; }
+  #manage::backdrop { background: color-mix(in srgb, #1f1d1a 32%, transparent); backdrop-filter: blur(3px); }
+  #manage[open] { animation: desk-in 0.22s cubic-bezier(.2, .8, .3, 1); }
+  .mform { display: flex; flex-direction: column; gap: 14px; padding: 18px 20px 20px; }
+  .mhead { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: start; }
+  .mhead h2 { margin: 0; font: 600 20px var(--serif); }
+  .mhead p { margin: 3px 0 0; color: var(--muted); font-size: 13.5px; line-height: 1.45; }
+  .mhead.danger h2 { color: var(--crit); }
+  .mform fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+  .mform legend, .mfield > span { display: block; padding: 0; margin: 0 0 7px; font: 500 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .mfield > span small { text-transform: none; letter-spacing: 0; font: 400 11px var(--sans); }
+  .mfield input, .mfield textarea { width: 100%; padding: 9px 11px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: 14px/1.45 var(--sans); }
+  .mfield textarea { resize: vertical; font-family: var(--serif); font-size: 14.5px; }
+  .mfield input:focus-visible, .mfield textarea:focus-visible, #jpath:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .mkinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 7px; }
+  .mkinds legend { grid-column: 1 / -1; }
+  .mkind { display: flex; flex-direction: column; gap: 2px; padding: 9px 11px; border-radius: 11px; border: 1px solid var(--line); cursor: pointer; position: relative; }
+  .mkind input { position: absolute; opacity: 0; pointer-events: none; }
+  .mkind b { font: 600 13.5px var(--serif); }
+  .mkind small { color: var(--muted); font-size: 11.5px; line-height: 1.3; }
+  .mkind:has(input:checked) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--paper)); }
+  .mkind:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .mscope { display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; }
+  .mscope label { display: flex; align-items: baseline; gap: 7px; }
+  .mscope small { color: var(--muted); font-size: 11.5px; }
+  .mhint { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+  .mbody p { margin: 0 0 9px; font-size: 14px; line-height: 1.5; }
+  .mbody code, .jtrust code { font: 500 11.5px var(--mono); padding: 1px 5px; border-radius: 5px; background: color-mix(in srgb, var(--line) 70%, transparent); }
+  .msafe { padding: 8px 11px; border-radius: 10px; background: color-mix(in srgb, var(--ok) 13%, var(--paper)); border: 1px solid color-mix(in srgb, var(--ok) 40%, var(--line)); font-size: 13px !important; }
+  .msafe::before { content: "✓ "; color: var(--ok); font-weight: 700; }
+  .mwarn { color: var(--crit); font-size: 13px !important; }
+  .mfoot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .mnote { margin-right: auto; color: var(--muted); font-size: 12.5px; }
+  .mnote.bad { color: var(--crit); }
+  .mgo { padding: 9px 18px; border-radius: 999px; background: var(--accent); color: #fff; font-weight: 600; }
+  .mgo.danger { background: var(--crit); }
+  .mremove { padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line); font-size: 13px; }
+  .mremove:hover { border-color: var(--accent); color: var(--accent); }
+  .jnew i { font-weight: 700; color: var(--accent); }
+  .jnew { border-style: dashed; }
+  .jfolder { width: 100%; display: flex; flex-direction: column; gap: 7px; margin-top: 6px; padding: 12px; border-radius: 12px; border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--line)); background: color-mix(in srgb, var(--accent) 5%, var(--paper)); }
+  .jfolder > label:first-child { font: 500 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  #jpath { width: 100%; padding: 8px 11px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: 13.5px var(--mono); }
+  .jmake { display: flex; align-items: center; gap: 7px; font-size: 12.5px; }
+  .jtrust { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--mustard) 16%, var(--paper)); border: 1px solid color-mix(in srgb, var(--mustard) 55%, var(--line)); font-size: 12.5px; line-height: 1.5; }
+  .jtrust p { margin: 0; }
+  .jtrust code { white-space: normal; word-break: break-all; }
+  .jtrust .muted { color: var(--muted); }
+  .tx-compose.resume textarea { border-style: dashed; }
+  .set-removed { margin: 10px 0 0; font-size: 13px; }
+  .set-removed summary { cursor: pointer; }
+  .set-removed summary small { color: var(--muted); font: 500 11px var(--mono); }
+  .set-removed ul { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
+  .set-removed li { display: flex; align-items: center; gap: 8px; }
+  .set-removed li span { display: flex; flex-direction: column; min-width: 0; margin-right: auto; }
+  .set-removed li b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .set-removed li small { color: var(--muted); font-size: 11px; }
+  .set-removed button { flex: none; padding: 2px 10px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
+  .set-removed button:hover { border-color: var(--accent); color: var(--accent); }
+  @media (prefers-reduced-motion: reduce) { #manage[open] { animation: none; } }
+
   /* ===== Settings menu (settings.js): a gear in the top bar opens a small
      popover; settings.add() rows land in its .set-rows. ===== */
   .set-rows { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; }
@@ -1514,6 +1599,7 @@
       <hr class="menu-sep">
       <div class="set-rows"></div>
       <label class="switch"><input type="checkbox" role="switch" id="dev-view"><span><b>Developer view</b><small>Show the raw commands, file paths and exact numbers instead of plain words.</small></span></label>
+      <div id="removed-list"></div>
     </div>
     <aside class="hud paper" id="side" aria-label="Projects"></aside>
     <aside class="hud paper" id="library" aria-label="Library" hidden></aside>
@@ -1529,6 +1615,7 @@
       <button type="button" class="dv-btn" data-offer="later">Not now</button>
     </div>
     <dialog id="desk" class="paper" closedby="any" aria-labelledby="desk-title"></dialog>
+    <dialog id="manage" class="paper" closedby="any" aria-labelledby="manage-title"></dialog>
     <div id="toasts" aria-live="polite"></div>
     <section class="scene-list paper" aria-labelledby="scene-list-title">
       <h2 id="scene-list-title">The office in words</h2>

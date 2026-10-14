@@ -71,6 +71,31 @@ export function removeNode(id) {
   dirty = true
 }
 
+// Take a thread out of the office: it, its agents and their tool calls,
+// and its room if nothing else is left in it.
+export function removeSession(session) {
+  for (const n of [...nodes.values()]) if (n.kind !== 'project' && n.session === session) removeNode(n.id)
+  dropEmptyProjects()
+}
+
+// One agent out of a thread, with the agents it started and their tool calls.
+export function removeAgent(session, agent) {
+  const gone = new Set([aid(session, agent)])
+  for (let grew = true; grew;) {
+    grew = false
+    for (const l of links) {
+      if (l.kind === 'spawn' && gone.has(idOf(l.source)) && !gone.has(idOf(l.target))) { gone.add(idOf(l.target)); grew = true }
+    }
+  }
+  for (const n of [...nodes.values()]) if (gone.has(n.id) || (n.kind === 'tool' && gone.has(n.owner))) removeNode(n.id)
+}
+
+function dropEmptyProjects() {
+  for (const n of [...nodes.values()]) {
+    if (n.kind === 'project' && !links.some(l => idOf(l.source) === n.id)) removeNode(n.id)
+  }
+}
+
 export function reset() {
   for (const [id, n] of nodes) if (n.kind !== 'project' && !n.past) nodes.delete(id)
   links = links.filter(l => nodes.has(idOf(l.source)) && nodes.has(idOf(l.target)))
@@ -165,6 +190,13 @@ const handlers = {
     const node = ensureSession(ev)
     Object.assign(node, { status: 'active', cwd: ev.cwd, model: ev.model, startedAt: node.startedAt ?? ev.t })
     setProject(node, ev.project)
+  },
+  // Deleted for good from the office's bridge.
+  'session.removed'(ev) {
+    removeSession(ev.session)
+  },
+  'agent.removed'(ev) {
+    removeAgent(ev.session, ev.agent)
   },
   'session.end'(ev) {
     const node = ensureSession(ev)
@@ -460,9 +492,7 @@ export function applyHistory(summaries, show) {
     if (n.past && !seen.has(n.id)) removeNode(n.id)
   }
   // A project with nothing left in it goes too.
-  for (const n of [...nodes.values()]) {
-    if (n.kind === 'project' && !links.some(l => idOf(l.source) === n.id)) removeNode(n.id)
-  }
+  dropEmptyProjects()
   dirty = true
 }
 

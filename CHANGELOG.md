@@ -7,6 +7,33 @@ git tag (`v0.2.1`) with a GitHub Release, and the same version is in
 modsarena (`/plugin` → Marketplaces), a new one arrives on its own;
 otherwise `claude plugin update agent-office@modsarena` fetches it.
 
+## 0.12.0
+
+- **Talk to a session that has ended.** Its message box stays open: what
+  you send picks the same session up again in the background, in its own
+  folder (`claude --bg --resume`), and its critter comes back to its desk
+  to answer in the same conversation.
+- **New projects.** On the front desk, **New project** starts a job in a
+  folder the office hasn't seen yet, or makes one inside your home folder.
+  Claude Code only works in folders you've trusted, and the office never
+  trusts one for you: if it isn't yet, the desk shows the one command to
+  run once (`cd <folder> && claude`, then say yes), and the job starts when
+  you press Start again.
+- **New threads and helpers.** A **+** beside each project starts a new
+  thread there. A thread's **⋯** menu can **bring in a helper**: pick an
+  Explorer, a Planner, an All-rounder or one of your own agent types, say
+  the task, and the thread starts a subagent for it.
+- **Your own agent types.** **New agent type** on a project's **⋯** menu
+  describes a kind of agent once (name, when to use it, instructions, and
+  optionally its tools) for that project or all of them. It's saved where
+  Claude Code reads agents (`.claude/agents/<name>.md`), never over one
+  that's there.
+- **Remove or delete.** Every project, thread and agent has **Remove from
+  office**: it's put away, with Undo, and Settings lists what's removed to
+  bring back. **Delete for good…** asks once more, then deletes its saved
+  conversation (Claude Code's transcripts). A project's files are never
+  touched, and a session still open in a terminal is left alone.
+
 ## 0.11.3
 
 - **A conversation you can read.** The Conversation tab goes turn by
