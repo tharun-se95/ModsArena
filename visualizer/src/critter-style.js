@@ -1,11 +1,11 @@
-// Which critters fill the office: the robot crabs (crab.js) or the classic
-// blocks (character.js). A choice in Settings, remembered in this browser.
+// Which critters fill the office: the robot crabs (crab.js) or the Claude
+// bots, the classic blocky design (character.js). A choice in Settings, remembered in this browser.
 // Pure apart from prefs: no DOM, no Three.js.
 
 import { load, save } from './prefs.js'
 
 export const STYLES = ['crab', 'block']
-export const STYLE_LABELS = { crab: 'Crabs', block: 'Blocks' }
+export const STYLE_LABELS = { crab: 'Crabs', block: 'Claude bots' }
 export const DEFAULT_STYLE = 'crab'
 
 export const styleOf = value => (STYLES.includes(value) ? value : DEFAULT_STYLE)

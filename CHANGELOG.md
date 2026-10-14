@@ -7,6 +7,19 @@ git tag (`v0.2.1`) with a GitHub Release, and the same version is in
 modsarena (`/plugin` → Marketplaces), a new one arrives on its own;
 otherwise `claude plugin update agent-office@modsarena` fetches it.
 
+## 0.11.1
+
+- **One right-hand panel.** The Projects list and a thread's clipboard
+  share one frame: full height, half as wide again as before, and only
+  what's on it swaps as you pick a thread or agent. Drag its left edge to
+  resize it (it remembers); the office holds still while you drag and
+  settles once you let go, and a wide panel no longer pushes it down.
+- **A clearer tree.** Projects head their sections, threads hang off a
+  line from their project, each thread's team hangs off the thread, and
+  ended threads under Earlier are dimmed.
+- **Crabs or Claude bots.** Settings → Critters names the earlier blocky
+  design "Claude bots".
+
 ## 0.11.0
 
 - **Robot crabs.** The critters are now little robot crabs, after the

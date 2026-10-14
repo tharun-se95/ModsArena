@@ -116,7 +116,7 @@
   #moments li.note span { color: var(--accent); }
   #moments li.mail span::before { content: "✉ "; color: var(--teal); }
 
-  #side { top: 64px; right: 16px; width: 320px; max-height: calc(100% - 80px); overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 6px; }
+  #side { top: 64px; right: 16px; width: var(--panel-w, 480px); max-height: calc(100% - 80px); overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 6px; }
   #side.clipboard { padding-top: 26px; border-top: 0; margin-top: 10px; }
   #side.clipboard::before { content: ""; position: sticky; top: -26px; align-self: center; flex: none; width: 92px; height: 18px; margin: -36px 0 6px; border-radius: 6px 6px 10px 10px; background: linear-gradient(#a59a8c, #7d7266); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25); z-index: 1; }
   .sideh { display: flex; align-items: baseline; justify-content: space-between; font: 600 15px var(--serif); margin: 0 0 4px; }
@@ -638,12 +638,34 @@
   .agent-row .dot { width: 7px; height: 7px; margin: 0; }
   .aname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .astate { display: inline-flex; align-items: center; }
-  .folded { margin: 0; padding: 2px 8px 4px calc(8px + var(--depth) * 14px + 13px); font-size: 11px; color: var(--muted); }
+  .folded { margin: 0; padding: 2px 8px 4px calc(8px + var(--depth) * 14px + 13px); font-size: 11px; color: var(--muted); position: relative; }
+  .folded::before { content: ""; position: absolute; left: calc(var(--depth) * 14px - 2px); top: 0; height: 50%; width: 7px; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); border-bottom-left-radius: 4px; }
+
+  /* The directory as a tree: a project heads its section, its threads hang
+     off a line down from its icon, and each thread's team hangs off the
+     thread (above). Ended threads are dimmed, under "Earlier". */
+  .project { position: relative; }
+  .project > .room { margin: 14px 0 2px; font: 600 14.5px var(--serif); color: var(--ink); }
+  .project:first-of-type > .room { margin-top: 8px; }
+  .project > .room .picon { width: 22px; height: 22px; }
+  .project > .room-spend { margin: -2px 0 4px 30px; }
+  .project > .thread, .project > .earlier { position: relative; margin-left: 22px; }
+  .project > .thread::before, .project > .earlier::before { content: ""; position: absolute; left: -11px; top: -6px; bottom: 0; border-left: 1px solid var(--line); }
+  .project > .thread::after { content: ""; position: absolute; left: -11px; top: -6px; height: 23px; width: 15px; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); border-bottom-left-radius: 6px; }
+  .project > .thread:last-child::before { display: none; }
+  .project > .earlier { margin-top: 4px; margin-bottom: 0; padding: 4px 0 2px 8px; }
+  .project > .earlier::before { top: 0; }
+  .thread.past .entry { opacity: 0.62; }
+  .thread.past .entry:hover, .thread.past.on .entry { opacity: 0.9; }
+  .project > .thread { margin-top: 2px; }
+  .project + .project { margin-top: 10px; padding-top: 6px; border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
+
 
   /* The clipboard, crab-colored (clipsize.js sizes it): a shell-orange
-     board and clip, sandy paper, dark claw-tip accents. Bigger by default;
-     drag its left edge or corner to resize it. Up to 900px wide it's a
-     sheet along the bottom with a handle on top instead. */
+     board and clip, sandy paper, dark claw-tip accents. On a desk the
+     directory wears it too, and dragging its left edge resizes both. Up to
+     900px wide an open clipboard is a sheet along the bottom with a handle
+     on top instead. */
   :root { --crab-shell: #e0683e; --crab-shell-deep: #b44a27; --crab-sand: #fcf2e1; --crab-sand-line: #ecd8b8; --crab-claw: #2b211c; --crab-claw-ink: #2b211c; }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) { --crab-shell: #c85d36; --crab-shell-deep: #8f3c20; --crab-sand: #2a231d; --crab-sand-line: #463a2f; --crab-claw: #1a1310; --crab-claw-ink: #f2d6b6; }
@@ -654,18 +676,21 @@
   #side.clipboard .tabs { border-bottom-color: var(--crab-sand-line); }
   #side.clipboard .tab.on { color: var(--crab-claw-ink); border-bottom-color: var(--crab-claw-ink); }
   #side.clipboard h3 { color: var(--crab-claw-ink); opacity: 0.78; }
+  /* On a desk the directory and a clipboard are one frame: the same
+     crab-coloured board, full height and the width you drag it to, with
+     only what's on it swapping as you pick a thread or agent. */
   @media (min-width: 901px) {
-    #side.clipboard, #side.clipboard.talking { width: var(--clip-w, 416px); height: min(var(--clip-h, 720px), calc(100% - 80px)); }
+    #side, #side.clipboard, #side.clipboard.talking { width: var(--panel-w, 480px); height: calc(100% - 90px); max-height: none; margin-top: 10px; padding-top: 26px; background: var(--crab-sand); border: 6px solid var(--crab-shell); border-top-width: 6px; box-shadow: 0 0 0 1px var(--crab-shell-deep), 0 14px 34px rgba(70, 35, 15, 0.22); backdrop-filter: none; -webkit-backdrop-filter: none; }
+    #side::before { content: ""; position: sticky; top: -26px; align-self: center; flex: none; width: 92px; height: 18px; margin: -36px 0 6px; border-radius: 6px 6px 10px 10px; z-index: 1; background: radial-gradient(circle at 50% 45%, var(--crab-claw) 0 3px, transparent 3.5px), linear-gradient(var(--crab-shell), var(--crab-shell-deep)); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.25); }
+    #side .sideh { color: var(--crab-claw-ink); }
   }
   .clip-grip { position: absolute; z-index: 6; touch-action: none; border-radius: 8px; }
   .clip-grip[hidden] { display: none; }
   .clip-grip::after { content: ""; position: absolute; border-radius: 3px; background: var(--crab-claw); opacity: 0.35; transition: opacity 0.15s; }
   .clip-grip:hover::after, .clip-grip.dragging::after, .clip-grip:focus-visible::after { opacity: 0.8; }
   .clip-grip:focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: 1px; }
-  .clip-grip.edge { top: 104px; right: calc(16px + var(--clip-w, 416px) - 8px); width: 14px; height: calc(min(var(--clip-h, 720px), 100% - 80px) - 70px); cursor: ew-resize; }
+  .clip-grip.edge { top: 110px; right: calc(16px + var(--panel-w, 480px) - 8px); width: 14px; height: calc(100% - 90px - 70px); cursor: ew-resize; }
   .clip-grip.edge::after { left: 5px; top: 50%; width: 4px; height: 44px; margin-top: -22px; }
-  .clip-grip.corner { top: calc(74px + min(var(--clip-h, 720px), 100% - 80px) - 24px); right: calc(16px + var(--clip-w, 416px) - 24px); width: 30px; height: 30px; cursor: nesw-resize; }
-  .clip-grip.corner::after { left: 7px; bottom: 7px; width: 12px; height: 12px; border-radius: 0 0 0 4px; background: none; border-left: 3px solid var(--crab-claw); border-bottom: 3px solid var(--crab-claw); }
   :root.clip-resizing, :root.clip-resizing * { user-select: none; }
   :root.clip-resizing .clip-grip.edge, :root.clip-resizing #side { cursor: ew-resize; }
   @media (max-width: 900px) {
