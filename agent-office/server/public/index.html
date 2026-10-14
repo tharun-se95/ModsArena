@@ -464,6 +464,40 @@
   .tx.steps small { margin-left: 8px; font: 10.5px var(--mono); color: var(--muted); white-space: nowrap; }
   .tx.steps.bad .step-text { color: var(--crit); }
   .step-lines { margin: 3px 0 4px 3px; padding-left: 10px; border-left: 2px solid var(--line); display: flex; flex-direction: column; gap: 2px; }
+
+  /* The conversation in turns (transcript.js, turns.js): what you said, the
+     work folded to one line, then the answer in full, open text across the
+     panel. A quiet rule between turns; one time per message you sent and
+     per answer. */
+  .tx-log { gap: 0; padding: 2px 4px 10px; }
+  /* On the Conversation tab the header keeps to a line, for more conversation. */
+  #side.talking .dtitle { font-size: 16.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-wrap: nowrap; }
+  .turn { display: flex; flex-direction: column; gap: 8px; padding: 14px 0; }
+  .turn + .turn { border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+  .turn:first-child { padding-top: 6px; }
+  .turn > .tx.you { max-width: 85%; background: color-mix(in srgb, var(--panel-tint, var(--accent)) 16%, var(--paper)); border: 1px solid color-mix(in srgb, var(--panel-tint, var(--accent)) 28%, transparent); font-size: 13px; }
+  .turn > .tx.you time { text-align: right; }
+  .tx.reply { align-self: stretch; max-width: none; background: none; padding: 0 2px; border-radius: 0; font-size: 13.5px; line-height: 1.6; color: var(--ink); }
+  .tx.reply table { font-size: 12.5px; }
+  .tx.reply time { margin-top: 6px; }
+  .tx.reply.folded { max-height: 11.5em; overflow: hidden; position: relative; -webkit-mask-image: linear-gradient(#000 55%, transparent); mask-image: linear-gradient(#000 55%, transparent); padding-bottom: 0; }
+  .tx.reply.folded time { display: none; }
+  .tx-more { position: absolute; left: 50%; bottom: 0; transform: translateX(-50%); padding: 4px 12px; border-radius: 999px; font-size: 11.5px; font-weight: 500; color: var(--ink); background: var(--paper); border: 1px solid var(--line); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18); }
+  .tx-more:hover { border-color: var(--panel-tint, var(--accent)); }
+  .reply-wrap { position: relative; align-self: stretch; padding-bottom: 16px; }
+  .tx.work { align-self: stretch; max-width: none; font-size: 12px; line-height: 1.45; color: var(--muted); border: 1px solid color-mix(in srgb, var(--line) 80%, transparent); border-radius: 10px; padding: 6px 10px; background: color-mix(in srgb, var(--ink) 3%, transparent); }
+  .tx.work > summary { cursor: pointer; list-style: none; display: flex; align-items: baseline; }
+  .tx.work > summary::-webkit-details-marker { display: none; }
+  .tx.work > summary .step-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tx.work > summary:hover .step-text { color: var(--ink); }
+  .tx.work > summary small { margin-left: 8px; font: 10.5px var(--mono); white-space: nowrap; }
+  .tx.work > summary::after { content: "›"; margin-left: 8px; transition: transform .15s; }
+  .tx.work[open] > summary::after { transform: rotate(90deg); }
+  .tx.work[open] > summary .step-text { white-space: normal; }
+  .tx.work.bad > summary .step-text { color: var(--crit); }
+  .work-lines { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+  .tx.narr { max-width: none; font-size: 12.5px; line-height: 1.5; color: var(--ink); opacity: 0.86; padding-left: 9px; border-left: 2px solid color-mix(in srgb, var(--panel-tint, var(--line)) 55%, var(--line)); }
+  @media (prefers-reduced-motion: reduce) { .tx.work > summary::after { transition: none; } }
   .step-lines .tx.tool { font-size: 11px; }
   .bubble dd.words { font-family: var(--sans); font-size: 11.5px; white-space: normal; max-width: 170px; }
   body.dev .bubble dd.words { font-family: var(--mono); font-size: 10.5px; white-space: nowrap; }
