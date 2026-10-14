@@ -368,13 +368,15 @@ export function startDemo(publish, { busy = false } = {}) {
 // the bridge does from `claude agents --json`.
 let jobSeq = 0
 export function demoJob() {
-  return (job, prompt, update) => {
+  // `resume`: a past sample session picked up again, under its own id.
+  return (job, prompt, update, { resume = false } = {}) => {
     const n = ++jobSeq
     const short = `d${String(Date.now() % 1e7).padStart(7, '0')}`.slice(0, 8)
     const project = PROJECTS.find(p => p.id === job.dir) ?? PROJECTS[0]
+    const session = resume && job.session ? job.session : `${short}-demo-job-${n}`
     setTimeout(() => {
-      update({ state: 'working', short, session: `${short}-demo-job-${n}` })
-      runSession?.(`${short}-demo-job-${n}`, project, 0.7, { first: prompt, job: {
+      update({ state: 'working', short, session })
+      runSession?.(session, project, 0.7, { first: prompt, job: {
         onAsk: open => update({ state: open ? 'blocked' : 'working', ...(open && { waitingFor: 'permission prompt' }) }),
         onDone: () => update({ state: 'done' }),
       } })

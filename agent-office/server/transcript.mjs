@@ -25,6 +25,9 @@ const RESULT_LIMIT = 800
 
 const found = new Map() // session id -> its transcript path
 
+// Forget where a session's transcript was (it has been deleted).
+export const forget = session => found.delete(session)
+
 // The transcript file for a session (or one of its subagents), or null.
 export async function findTranscript(session, agent, root = projectsDir()) {
   if (!ID.test(session ?? '') || (agent !== undefined && !ID.test(agent))) return null

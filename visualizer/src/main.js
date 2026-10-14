@@ -30,6 +30,10 @@ import * as power from './power.js'
 import * as updates from './updates.js'
 import * as themes from './themes.js'
 import * as critters from './critter-style.js'
+import * as manage from './manage.js'
+import { createRemoved } from './removed.js'
+import * as prefs from './prefs.js'
+import { toast } from './toast.js'
 import './critter-color.js'
 
 const HISTORY_REFRESH_MS = 60000
@@ -195,7 +199,83 @@ mountClipSize()
 const pastToggle = document.getElementById('show-past')
 pastToggle.addEventListener('change', () => {
   showPast = pastToggle.checked
-  model.applyHistory(history, showPast)
+  applyHistory()
+})
+
+// ---------------------------------------------------------------------------
+// Removed from the office (removed.js): put away, not deleted. Their events
+// are held back, so bringing one back puts it where it was.
+
+const removed = createRemoved(prefs.load('removed', []))
+const held = []
+const HELD_KEEP = 20000
+const applyHistory = () => model.applyHistory(history.filter(s => !removed.hidesPast(s)), showPast)
+
+// Whether an event is for the office (else it's held back).
+function shown(ev) {
+  if (!removed.hides(ev)) return true
+  held.push(ev)
+  if (held.length > HELD_KEEP) held.shift()
+  return false
+}
+
+function removeFromOffice(t) {
+  const item = removed.add({
+    kind: t.kind, label: t.label, project: t.project, session: t.session, agent: t.agent,
+  })
+  prefs.save('removed', removed.toJSON())
+  if (t.kind === 'project') {
+    for (const n of [...model.nodes.values()]) if (n.kind === 'session' && n.project === t.project) model.removeSession(n.session)
+    model.removeNode(`p:${t.project}`)
+  } else if (t.kind === 'session') model.removeSession(t.session)
+  else model.removeAgent(t.session, t.agent)
+  if (selected && !model.nodes.has(selected)) pick(null)
+  refreshPanels()
+  drawRemoved()
+  const what = t.kind === 'project' ? 'Project' : t.kind === 'agent' ? 'Agent' : 'Thread'
+  toast({ icon: '↶', title: `${what} removed from the office.`, text: 'Undo', onClick: () => bringBack(item.key) })
+}
+
+function bringBack(key) {
+  if (!removed.restore(key)) return
+  prefs.save('removed', removed.toJSON())
+  const back = held.filter(ev => !removed.hides(ev))
+  if (back.length) {
+    const still = held.filter(ev => removed.hides(ev))
+    held.length = 0
+    held.push(...still)
+    for (const ev of back) {
+      model.apply(ev)
+      words.ingest(ev)
+    }
+  }
+  applyHistory()
+  refreshPanels()
+  drawRemoved()
+}
+
+// The Removed list sits in Settings, under its other rows.
+function drawRemoved() {
+  const el = document.getElementById('removed-list')
+  if (!el) return
+  const wasOpen = el.querySelector('details')?.open
+  el.innerHTML = manage.removedList(removed.list())
+  if (wasOpen && el.querySelector('details')) el.querySelector('details').open = true
+}
+document.getElementById('removed-list')?.addEventListener('click', e => {
+  const b = e.target.closest('[data-restore]')
+  if (b) bringBack(b.dataset.restore)
+})
+drawRemoved()
+
+manage.mount({
+  remove: removeFromOffice,
+  // Deleted for good: nothing left to bring back.
+  forget: t => {
+    const keys = t.kind === 'project' ? [`p|${t.project}`] : t.kind === 'agent' ? [`a|${t.session}|${t.agent}`] : [`s|${t.session}`]
+    if (keys.some(k => removed.restore(k))) { prefs.save('removed', removed.toJSON()); drawRemoved() }
+  },
+  ingest: ev => ingest(ev),
 })
 
 // ---------------------------------------------------------------------------
@@ -311,11 +391,12 @@ if (!isDemo) void updates.mount()
 // Sources
 
 function ingest(ev) {
+  desk.onEvent(ev)
+  if (!shown(ev)) return
   model.apply(ev)
   words.ingest(ev)
   table.pulse(ev)
   transcript.onEvent(ev)
-  desk.onEvent(ev)
 }
 
 document.addEventListener('office:event', e => ingest(e.detail))
@@ -326,7 +407,7 @@ async function loadHistory() {
   } catch {
     history = []
   }
-  model.applyHistory(history, showPast)
+  applyHistory()
 }
 
 function setStatus(text, state) {
@@ -345,12 +426,14 @@ function connect() {
     model.reset()
     words.reset()
     desk.reset()
+    held.length = 0
     for (const ev of JSON.parse(msg.data)) {
+      desk.onEvent(ev, true)
+      if (!shown(ev)) continue
       model.apply(ev)
       words.ingest(ev)
-      desk.onEvent(ev, true)
     }
-    model.applyHistory(history, showPast)
+    applyHistory()
     refreshPanels()
   })
   source.addEventListener('message', msg => forceEmpty || ingest(JSON.parse(msg.data)))
@@ -372,7 +455,11 @@ function playDemo() {
 // The front desk: new jobs from the office. Without a bridge (the hosted
 // preview) it plays them itself; a demo bridge plays them for it.
 let bridgeDemo = false
-desk.mount({ ingest, pick, isDemo: () => isDemo, bridgeDemo: () => bridgeDemo })
+desk.mount({
+  ingest, pick, isDemo: () => isDemo, bridgeDemo: () => bridgeDemo,
+  // A new project in a folder you'd removed from the office: it's back.
+  restoreProject: dir => { if (dir && removed.has(`p|${dir}`)) bringBack(`p|${dir}`) },
+})
 
 // A bridge started with --demo has sample sessions and no transcripts on
 // disk: its transcript tab plays the demo's too.

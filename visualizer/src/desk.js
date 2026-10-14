@@ -45,7 +45,7 @@ export const jobs = new Map() // job id -> { id, t, dir, title, kind, prompt, st
 // `quiet` while replaying what happened before the page opened: no toasts.
 export function onEvent(ev, quiet = false) {
   if (ev.kind === 'job.start') {
-    jobs.set(ev.job, { id: ev.job, t: ev.t, dir: ev.dir, title: ev.title, type: ev.type, prompt: ev.prompt, state: 'starting', demo: ev.demo })
+    jobs.set(ev.job, { id: ev.job, t: ev.t, dir: ev.dir, title: ev.title, type: ev.type, prompt: ev.prompt, state: 'starting', demo: ev.demo, ...(ev.session && { session: ev.session }) })
   }
   const job = jobs.get(ev.job)
   if (!job) return
@@ -72,6 +72,10 @@ let dir = null
 let sending = false
 let note = ''
 let pointing = false
+// A new project: a folder you type (or the office makes), and whether
+// Claude Code trusts it yet. { path, create, dir?, trusted?, checking? }
+const NEW = '__new'
+let fresh = { path: '', create: true }
 
 const rooms = () => {
   const out = new Map()
@@ -104,15 +108,42 @@ function templates() {
 
 function roomPicker() {
   const list = rooms()
-  if (!list.length) return '<p class="jhint">No rooms yet. Open Claude Code in a project once and its room appears here.</p>'
-  if (!list.some(r => r.dir === dir)) dir = list[0].dir
+  if (dir !== NEW && !list.some(r => r.dir === dir)) dir = list[0]?.dir ?? NEW
   return list.map(r => `
     <label class="jroom ${r.dir === dir ? 'on' : ''}" title="${escapeHtml(r.dir)}">
       <input type="radio" name="jroom" value="${escapeHtml(r.dir)}" ${r.dir === dir ? 'checked' : ''}>
       <i class="room-${roomKey(r.raw, r.dir)}" aria-hidden="true">${r.icon}</i><span>${escapeHtml(r.name)}</span>
       <small>${r.live ? `${r.live} working here` : 'quiet'}</small>
-    </label>`).join('')
+    </label>`).join('') + `
+    <label class="jroom jnew ${dir === NEW ? 'on' : ''}" title="Start in a folder the office hasn’t seen yet">
+      <input type="radio" name="jroom" value="${NEW}" ${dir === NEW ? 'checked' : ''}>
+      <i aria-hidden="true">+</i><span>New project</span>
+    </label>
+    ${dir === NEW ? newProject() : ''}`
 }
+
+// The new project's folder, and what Claude Code needs before it works there.
+function newProject() {
+  const cd = fresh.dir ? `cd ${quote(fresh.dir)} && claude` : ''
+  const trust = fresh.trusted === false ? `
+    <div class="jtrust" role="status">
+      <b>One more step: trust this folder in Claude Code</b>
+      <p>Claude Code only works in folders you’ve said yes to, and the office never says yes for you. Open a terminal, run this, answer <i>Yes, proceed</i> when it asks whether you trust the files, then type <code>/exit</code>:</p>
+      <p><code>${escapeHtml(cd)}</code><button type="button" class="jcopy" data-copy="${escapeHtml(cd)}">Copy</button></p>
+      <p class="muted">Then press <b>Start the job</b> again. Nothing in your Claude Code settings is changed by the office.</p>
+    </div>` : ''
+  return `
+    <div class="jfolder">
+      <label for="jpath">Its folder</label>
+      <input id="jpath" type="text" spellcheck="false" autocomplete="off" placeholder="~/code/my-new-app" value="${escapeHtml(fresh.path)}">
+      <label class="jmake"><input type="checkbox" id="jmake" ${fresh.create ? 'checked' : ''}> Make the folder if it isn’t there (inside your home folder)</label>
+      ${fresh.created ? `<p class="jhelp muted">Made ${escapeHtml(fresh.dir)}.</p>` : ''}
+      ${trust}
+    </div>`
+}
+
+// For copying into a terminal: one shell word, whatever the folder's name.
+const quote = path => (/^[\w@%+=:,./~-]+$/.test(path) ? path : `'${path.replace(/'/g, `'\\''`)}'`)
 
 function ticket(job) {
   const [words, pill] = STATE[job.state] ?? STATE.working
@@ -164,7 +195,7 @@ function sheet() {
       <footer class="jfoot">
         <span class="jnote" role="status">${escapeHtml(note)}</span>
         <button type="button" class="jcancel" data-jclose>Not now</button>
-        <button type="submit" class="jgo" ${!canStart || sending || !rooms().length ? 'disabled' : ''}>${sending ? 'Ringing the bell…' : 'Start the job'}</button>
+        <button type="submit" class="jgo" ${!canStart || sending ? 'disabled' : ''}>${sending ? 'Ringing the bell…' : 'Start the job'}</button>
       </footer>
       ${list.length ? `<section class="jtickets"><p class="jlabel">Started from the front desk</p><ul>${list.map(ticket).join('')}</ul></section>` : ''}
     </form>`
@@ -220,7 +251,11 @@ function bind() {
       if (!pointing) dialog.querySelector(`input[name="jkind"][value="${kind}"]`)?.focus()
     }
   }
-  for (const r of dialog.querySelectorAll('input[name="jroom"]')) r.onchange = () => { dir = r.value; draw() }
+  for (const r of dialog.querySelectorAll('input[name="jroom"]')) r.onchange = () => { dir = r.value; draw(); if (dir === NEW) dialog.querySelector('#jpath')?.focus() }
+  const path = dialog.querySelector('#jpath')
+  if (path) path.oninput = () => { if (path.value !== fresh.path) fresh = { path: path.value, create: fresh.create } }
+  const make = dialog.querySelector('#jmake')
+  if (make) make.onchange = () => { fresh.create = make.checked }
   for (const b of dialog.querySelectorAll('[data-template]')) b.onclick = () => fill(Number(b.dataset.template))
   for (const b of dialog.querySelectorAll('[data-jclose]')) b.onclick = () => dialog.close()
   for (const b of dialog.querySelectorAll('[data-jstop]')) b.onclick = () => stop(b.dataset.jstop)
@@ -237,18 +272,24 @@ async function submit() {
   const prompt = dialog.querySelector('#jprompt').value.trim()
   if (!prompt) { note = 'Say what the job is first.'; draw(); dialog.querySelector('#jprompt').focus(); return }
   if (!dir) return
+  if (dir === NEW && !fresh.path.trim()) { note = 'Say which folder the new project is in.'; draw(); dialog.querySelector('#jpath')?.focus(); return }
   const title = titleOf(prompt)
   sending = true
   note = ''
   draw()
   let ok = false
   try {
-    if (opts.isDemo()) ok = startLocalDemo({ dir, prompt, title, kind })
+    let where = dir
+    if (dir === NEW) {
+      where = await openFolder()
+      if (!where) { sending = false; draw(); return }
+    }
+    if (opts.isDemo()) ok = startLocalDemo({ dir: where, prompt, title, kind })
     else {
       const res = await fetch('/jobs', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-agent-office-token': token },
-        body: JSON.stringify({ dir, prompt, title, kind }),
+        body: JSON.stringify({ dir: where, prompt, title, kind }),
       })
       const body = await res.json().catch(() => ({}))
       ok = res.ok
@@ -260,10 +301,36 @@ async function submit() {
   sending = false
   if (ok) {
     note = ''
+    if (dir === NEW) {
+      opts.restoreProject?.(fresh.dir)
+      dir = fresh.dir
+      fresh = { path: '', create: true }
+    }
     dialog.querySelector('#jprompt').value = ''
     dialog.close()
     toast(`Ding! A new teammate is on the way to “${title}”.`)
   } else draw()
+}
+
+// Open (or make) the new project's folder through the bridge, and check
+// Claude Code trusts it. The folder, once it's ready for a job; else
+// undefined, with the sheet saying what's needed.
+async function openFolder() {
+  if (opts.isDemo()) {
+    // Demo only: there's no computer behind the preview to make folders on.
+    note = 'The demo can’t make folders. In your own office this opens (or makes) it and starts the job there.'
+    return undefined
+  }
+  const res = await fetch('/projects', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-agent-office-token': token },
+    body: JSON.stringify({ path: fresh.path.trim(), create: fresh.create }),
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) { note = body.error ? `Couldn’t open it: ${body.error}` : 'Couldn’t open that folder.'; return undefined }
+  fresh = { ...fresh, dir: body.dir, trusted: body.trusted, created: fresh.created || body.created }
+  if (!body.trusted) { note = ''; return undefined }
+  return body.dir
 }
 
 async function stop(id) {
@@ -296,6 +363,15 @@ function startLocalDemo({ dir: where, prompt, title, kind: type }) {
   return Boolean(job)
 }
 
+function resumeLocalDemo({ session, dir: where, text }) {
+  const id = `demo-job-${++localSeq}`
+  const emit = ev => opts.ingest({ t: Date.now(), job: id, ...ev })
+  emit({ kind: 'job.start', dir: where, title: text.slice(0, 60), type: 'resume', prompt: text, session, resumed: true, demo: true })
+  opts.ingest({ t: Date.now(), session, kind: 'session.start', cwd: where, via: 'front-desk' })
+  opts.ingest({ t: Date.now(), session, kind: 'turn.start', turnId: `front-desk-${id}`, text, via: 'front-desk' })
+  runDemoJob({ id, dir: where, session }, text, update => emit({ kind: 'job.update', ...update }), { resume: true })
+}
+
 // ---------------------------------------------------------------------------
 // Toasts and the top bar's button
 
@@ -322,9 +398,12 @@ function changed() {
   draw()
 }
 
-export function open(kindId) {
+// `kindId` picks the kind of job; `room` the project it goes to (a project
+// id), or 'new' for a new project.
+export function open(kindId, room) {
   if (!dialog) return
   if (kindId) kind = kindId
+  if (room) dir = room === 'new' ? NEW : room
   note = ''
   if (!dialog.open) dialog.showModal()
   draw()
@@ -343,7 +422,9 @@ export function mount(options) {
   dialog.addEventListener('keydown', () => { pointing = false })
   toastEl = document.getElementById('toasts')
   document.getElementById('newjob')?.addEventListener('click', () => open())
-  document.addEventListener('office:frontdesk', () => open())
+  document.addEventListener('office:frontdesk', e => open(e.detail?.kind, e.detail?.room))
+  // Demo only, with no bridge: a past sample thread picked up again.
+  document.addEventListener('office:resume-demo', e => resumeLocalDemo(e.detail))
   // Safari has no closedby yet: a click on the backdrop closes it there too.
   if (!('closedBy' in HTMLDialogElement.prototype)) {
     dialog.addEventListener('click', e => {
