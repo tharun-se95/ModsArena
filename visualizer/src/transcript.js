@@ -9,6 +9,7 @@
 
 import { nodes, sid, outputs } from './model.js'
 import { activity, escapeHtml, ago } from './words.js'
+import { markdown } from './markdown.js'
 import { outputCard } from './assets.js'
 import { describe, stepSummary } from './plain.js'
 import { devView } from './prefs.js'
@@ -42,7 +43,8 @@ function bubble(entry, results) {
     case 'chat':
       return `<div class="tx you chat"><span class="tx-from">${entry.from === 'agent-office' ? 'From the office' : `From ${escapeHtml(entry.from)}`}</span><p>${escapeHtml(entry.text)}</p>${time}</div>`
     case 'say':
-      return `<div class="tx say"><p>${escapeHtml(entry.text)}</p>${time}</div>`
+      // Claude's replies are markdown: drawn, not shown raw (markdown.js).
+      return `<div class="tx say md">${markdown(entry.text)}${time}</div>`
     case 'note':
       return `<div class="tx note">${escapeHtml(entry.text)}</div>`
     // What the work made, as the card the Outputs tab shows.
@@ -193,6 +195,8 @@ function demoEntries(n) {
     entries.push({ kind: 'tool', id, name: a.tool, summary: a.summary ?? '', t: a.t })
     entries.push({ kind: 'result', id, ok: a.ok, text: a.ok ? '' : 'Something went wrong (sample activity).' })
   })
+  // Its last reply, as Claude wrote it (markdown).
+  if (n.answer?.text) entries.push({ kind: 'say', text: n.answer.text, t: n.answer.t })
   // What it made, and what it asked you, where they happened.
   for (const o of outputs) {
     if (o.session !== n.session || (n.kind === 'agent' ? o.agent !== n.agent : o.agent) || o.type === 'plan') continue

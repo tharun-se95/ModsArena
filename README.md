@@ -18,7 +18,7 @@ A live office of everything Claude Code is doing on your machine. Each project g
 You need Claude Code and [Node](https://nodejs.org) 18 or newer. Two steps, in Claude Code:
 
 1. **Install:** `/plugin install agent-office --marketplace tharun-se95/ModsArena`
-2. **Open it:** type **`/office`**. It starts the office's bridge if it isn't running and opens the office in your browser. Every Claude Code session on your machine, in any project, joins the same office.
+2. **Open it:** type **`/office`**. It starts the office's bridge and opens the office in your browser. Run it again any time to restart the office with your current copy: the running bridge hands over what it shows and steps down, whichever version it is and however it was started. Every Claude Code session on your machine, in any project, joins the same office.
 
 That's all. The first time, Agent Office offers to keep itself up to date: type **`/office auto-update`** and new versions arrive on their own from the next time Claude Code starts (`/office auto-update off` turns that off again). You can also flip **Updates: automatic** in the office's Settings menu.
 
@@ -27,7 +27,7 @@ On Claude Code older than 2.1.275, install in two commands instead: `/plugin mar
 - Click a critter, then **Transcript**, to follow its conversation and message it. See [Talk to your agents](#talk-to-your-agents).
 - `/office status` says whether the bridge is running, what it has seen, what this session is doing, and whether updates are automatic.
 - `/office` appears once a session has started and the plugin's hooks are running. Where it isn't listed (before the first message in the desktop app, or anywhere the hooks don't run), the `agent-office:office` skill opens the office instead.
-- Without auto-update, `claude plugin update agent-office@modsarena` fetches a new version. Outside Claude Code, `npx github:tharun-se95/ModsArena auto-update` turns auto-update on too (it backs up your settings first and changes only that one switch). After an update, the next session (or `/office`) swaps the running bridge for the new one, unless the office is open in a browser; then `/office` does it.
+- Without auto-update, `claude plugin update agent-office@modsarena` fetches a new version. Outside Claude Code, `npx github:tharun-se95/ModsArena auto-update` turns auto-update on too (it backs up your settings first and changes only that one switch). After an update, the next session swaps the running bridge for the new one, unless the office is open in a browser; `/office` always does it.
 - The status line shows `◉ office N agents · M tools` while work is in flight.
 
 <details>
@@ -57,6 +57,7 @@ npx github:tharun-se95/ModsArena demo            # sample activity on http://127
 | --- | --- |
 | `/office` says Node is missing or too old | Install Node 18 or newer from [nodejs.org](https://nodejs.org), then run `/office` again. |
 | `/office auto-update` says the marketplace isn't in your settings | Agent Office was installed some other way (for one project only, or from a copy). Turn updates on from `/plugin` → **Marketplaces** → **modsarena** instead. |
+| `/office` says the bridge "didn't make way" | An old bridge holds the port and couldn't be stopped (on Windows, or one from another user). Stop it with Ctrl+C where it runs, or quit the session that started it, then run `/office` again. |
 | "The bridge didn't answer" | Something else may be using port 7337. Run `/office status`, or pick another port with `/plugin configure agent-office@modsarena` (option `port`). |
 | The page opens but the office is empty | It fills in as sessions work. Sessions that started before the bridge appear from their next event; past sessions from the last 14 days show as sleeping critters (tick **Past sessions**). |
 | The browser didn't open | Open the address `/office` printed, normally http://127.0.0.1:7337. |

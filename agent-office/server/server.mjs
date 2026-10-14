@@ -6,6 +6,8 @@
 //
 //   --managed   started by the plugin's mod, which may replace it after an update
 //   --replace   take over the port from a managed bridge already holding it
+//   --restart   with --replace: take over from whatever Agent Office bridge
+//               holds it, however it was started (/office run again)
 //
 //   POST /event    one event or an array (mod schema or classic hook stdin)
 //   GET  /stream   SSE: replays what places each thread, the recent log and
@@ -13,7 +15,8 @@
 //   GET  /history  past sessions read from ~/.claude/projects transcripts
 //   GET  /healthz  liveness probe the mod uses before spawning a bridge, with
 //                  this bridge's version, so a newer mod can replace it
-//   POST /shutdown a newer bridge taking over the port (managed bridges only)
+//   POST /shutdown a newer bridge taking over the port: managed bridges, or
+//                  any when /office asks for a restart; hands over the log
 //   GET  /transcript?session=&agent=&after=   a conversation, read from its transcript
 //   GET  /asset?session=&id=   a picture a session made or read, by the path its event named
 //   POST /chat     a message for a session or subagent (the office page only)
@@ -47,6 +50,7 @@ import * as asks from './asks.mjs'
 import { findTranscript, readTranscript } from './transcript.mjs'
 import { isEngineNote } from './prompts.mjs'
 import * as autoUpdate from './autoupdate.mjs'
+import { RESTART_HEADER, stopOldBridge } from './restart.mjs'
 
 const args = process.argv.slice(2)
 const flag = name => args.includes(`--${name}`)
@@ -426,16 +430,18 @@ const server = createServer(async (req, res) => {
   }
 
   if (pathname === '/healthz') {
-    json(res, 200, { ok: true, name: 'agent-office', version: VERSION, managed: MANAGED, demo: flag('demo'), chat: true, jobs: true, answers: true, autoUpdate: updates(), events: log.length, viewers: clients.size })
+    json(res, 200, { ok: true, name: 'agent-office', version: VERSION, managed: MANAGED, pid: process.pid, demo: flag('demo'), chat: true, jobs: true, answers: true, autoUpdate: updates(), events: log.length, viewers: clients.size })
     return
   }
 
   if (req.method === 'POST' && pathname === '/shutdown') {
     // A custom header: a web page can't send it to another origin unasked.
     if (req.headers[CONTROL_HEADER] !== '1') return json(res, 403, { error: 'missing control header' })
-    // One you started yourself (npx, node server.mjs) stays yours to stop.
-    if (!MANAGED) return json(res, 409, { error: 'not started by the plugin' })
-    json(res, 200, { ok: true })
+    // One you started yourself (npx, node server.mjs) stays yours to stop,
+    // unless you ran /office again, which asks for a restart.
+    if (!MANAGED && req.headers[RESTART_HEADER] !== '1') return json(res, 409, { error: 'not started by the plugin' })
+    // The live picture goes to the bridge taking over, so nothing resets.
+    json(res, 200, { ok: true, events: replay() })
     console.log('[agent-office] stepping down for a newer bridge')
     for (const client of clients) client.end()
     // Closing stops listening at once; open connections get a moment to end.
@@ -469,14 +475,33 @@ server.on('listening', () => {
 // Ask the bridge on the port to step down. This process is already running,
 // so it gets the port before the old bridge's own session can start that one
 // again.
+// With --restart it takes over from any Agent Office bridge: one that
+// can't step down (an older version, or one you started yourself before
+// this could ask) is stopped (restart.mjs). Returns the events it hands over.
 async function askToStepDown() {
+  const restart = flag('restart')
+  let pid
   try {
-    const res = await fetch(`http://127.0.0.1:${PORT}/shutdown`, { method: 'POST', headers: { [CONTROL_HEADER]: '1' } })
-    if (res.ok) replaceUntil = Date.now() + REPLACE_MS
+    const was = await fetch(`http://127.0.0.1:${PORT}/healthz`, { signal: AbortSignal.timeout(1500) }).then(r => r.json()).catch(() => null)
+    pid = was?.pid
+    const res = await fetch(`http://127.0.0.1:${PORT}/shutdown`, { method: 'POST', headers: { [CONTROL_HEADER]: '1', ...(restart && { [RESTART_HEADER]: '1' }) } })
+    if (res.ok) {
+      replaceUntil = Date.now() + REPLACE_MS
+      const body = await res.json().catch(() => ({}))
+      return Array.isArray(body.events) ? body.events : []
+    }
   } catch {
-    // Nothing there: the port is free.
+    // Nothing answers: the port is free, or held by something that isn't a bridge.
   }
+  if (restart && await stopOldBridge(PORT, pid)) {
+    console.log('[agent-office] stopped the older bridge on the port')
+    replaceUntil = Date.now() + REPLACE_MS
+  }
+  return []
 }
 
-if (flag('replace')) await askToStepDown()
+if (flag('replace')) {
+  const handed = await askToStepDown()
+  if (handed.length) publish(handed)
+}
 server.listen(PORT, HOST)

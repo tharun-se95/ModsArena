@@ -9,6 +9,7 @@
 //                          which turns into a clipboard for the thread or
 //                          agent you pick: Conversation, Team, Details
 
+import { markdown, plain } from './markdown.js'
 import { nodes, outputs, fill, warnings, sid, WARN_AT, threadState, agentState, teamOf, lineage, mailOf } from './model.js'
 import { moments, activity, escapeHtml, quote, ago, say, doingNow, momentText } from './words.js'
 import { pct, level, tintOf, sessionTint, roomKey } from './table.js'
@@ -125,7 +126,7 @@ function cardInfo(n, running) {
   const blurb = state === 'stuck'
     ? (n.lastReason === 'aborted' ? 'You stopped its last turn.' : n.lastReason === 'refusal' ? 'Its last turn ended on a refusal.' : 'Its last turn ended on an error.')
     : state === 'working' ? 'Back at work.'
-      : said ? quote(said) : n.turns ? 'Done with your last request.' : 'Ready for its first prompt.'
+      : said ? quote(plain(said)) : n.turns ? 'Done with your last request.' : 'Ready for its first prompt.'
   // A letter with an answer in it can be passed on: dragged onto a critter, or H.
   const letter = said && state !== 'working' ? ` draggable="true" data-handoff="letter|${escapeHtml(n.id)}"` : ''
   return `
@@ -475,7 +476,7 @@ function agentDetails(n) {
   return `
     ${gauge(n, agentState(n) !== 'done', 'its own')}
     ${facts ? `<p class="dmeta">${escapeHtml(facts)}</p>` : ''}
-    ${n.answer?.text ? `<h3>Last report</h3><p class="line">${escapeHtml(n.answer.text)}</p>` : ''}`
+    ${n.answer?.text ? `<h3>Last report</h3><div class="tx md report">${markdown(n.answer.text)}</div>` : ''}`
 }
 
 function head(n, running) {
@@ -584,6 +585,11 @@ export function render(args) {
   const n = selected && nodes.get(selected)
   const detail = n && (n.kind === 'agent' || n.kind === 'session')
   $('#side').classList.toggle('clipboard', Boolean(detail))
+  // An open thread or agent tints the panel in its critter's colour: a
+  // thread its lead's (yours, if you picked one), an agent its own.
+  const tint = detail ? (n.kind === 'agent' ? tintOf(n.type) : sessionTint(n.session)) : null
+  if (tint) $('#side').style.setProperty('--panel-tint', `var(--${tint})`)
+  else $('#side').style.removeProperty('--panel-tint')
   $('#side').classList.toggle('talking', Boolean(detail) && tab === 'transcript')
   patch($('#side'), !detail ? directory(running, selected) : clipboard(n, running))
   if (detail && tab === 'transcript') transcript.attach($('#side .transcript'), n)

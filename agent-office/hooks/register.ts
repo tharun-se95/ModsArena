@@ -110,7 +110,7 @@ function showStatus($: EngineInterface) {
   )
 }
 
-type Health = { ok?: boolean; version?: string; managed?: boolean; events?: number; viewers?: number }
+type Health = { ok?: boolean; version?: string; managed?: boolean; events?: number; viewers?: number; pid?: number }
 
 // What the bridge on the port says about itself, or undefined if none answers.
 async function health($: EngineInterface): Promise<Health | undefined> {
@@ -128,6 +128,15 @@ async function health($: EngineInterface): Promise<Health | undefined> {
 }
 
 const isHealthy = async ($: EngineInterface) => (await health($)) !== undefined
+
+// Whether the bridge answering now is a fresh one from this copy: some
+// bridge answers, it isn't the one that was there before (another pid, or
+// any pid where the old one reported none), and it isn't older than us.
+export function isRestarted(before: Health | undefined, now: Health | undefined, mine: string | undefined) {
+  if (!now || isStale(now, mine)) return false
+  if (!before) return true
+  return now.pid !== undefined && now.pid !== before.pid
+}
 
 // Whether version `a` is newer than `b` (plain x.y.z).
 export function isNewer(a: string, b: string): boolean {
@@ -174,13 +183,15 @@ async function nodeVersion($: EngineInterface) {
 }
 
 // The child lives as long as this loop, which lives as long as the module.
-// With `replace`, it asks a stale bridge on the port to step down and takes over.
-function startBridge($: EngineInterface, replace = false) {
+// With `replace`, it asks a stale bridge on the port to step down and takes
+// over; with `restart` too, it takes over from any Agent Office bridge
+// (/office run again), which hands over its live events.
+function startBridge($: EngineInterface, replace = false, restart = false) {
   link.lastSpawnAt = Date.now()
   void (async () => {
     try {
       const child = $.process.spawn({
-        argv: ['node', `${$.plugin.root}/server/server.mjs`, '--port', String(link.port), '--managed', ...(replace ? ['--replace'] : [])],
+        argv: ['node', `${$.plugin.root}/server/server.mjs`, '--port', String(link.port), '--managed', ...(replace ? ['--replace'] : []), ...(restart ? ['--restart'] : [])],
       })
       for await (const { text } of child) $.ui.log(text.trimEnd(), { to: 'debug' })
     } catch (err) {
@@ -586,28 +597,34 @@ export const register: Register = (on, options) => {
       return { text: result.text }
     }
 
+    // /office always (re)starts the bridge with this copy: running it again
+    // replaces whatever bridge holds the port, of any version, however it
+    // was started, and the old one hands over its live events.
     const found = await health($)
     const mine = await ownVersion($)
-    const isOutdated = link.autoStart && isStale(found, mine)
-    if (!found || isOutdated) {
-      if (!link.autoStart) return { text: `No bridge on ${url}. Start one with: node ${$.plugin.root}/server/server.mjs --port ${link.port}` }
-      const problem = nodeProblem(await nodeVersion($))
-      if (problem) return { text: problem }
-      startBridge($, isOutdated)
-      // Wait for this copy's bridge to answer, then carry on and open the page.
-      const until = Date.now() + BRIDGE_WAIT_MS
-      const isReady = async () => {
-        const now = await health($)
-        return now !== undefined && !isStale(now, mine)
-      }
-      while (!(await isReady())) {
-        if (Date.now() > until) return { text: `The bridge didn't answer on ${url}. Is port ${link.port} taken by something else? Try /office status, or set another port in this plugin's options.` }
-        await $.clock.sleep(250)
-      }
-      link.isBridgeUp = true
+    if (found && !link.autoStart) {
+      const isOpened = await openBrowser($)
+      return { text: isOpened ? `Opened Agent Office at ${url}` : `Agent Office is at ${url}` }
     }
+    if (!link.autoStart) return { text: `No bridge on ${url}. Start one with: node ${$.plugin.root}/server/server.mjs --port ${link.port}` }
+    const problem = nodeProblem(await nodeVersion($))
+    if (problem) return { text: problem }
+    startBridge($, Boolean(found), Boolean(found))
+    // Wait for the new bridge (not the old one) to answer, then open the page.
+    const now = () => Promise.resolve($.clock.now()).catch(() => Date.now())
+    const until = (await now()) + BRIDGE_WAIT_MS
+    while (!isRestarted(found, await health($), mine)) {
+      if ((await now()) > until) {
+        return { text: found
+          ? `The bridge on ${url} didn't make way for this one. Stop it (Ctrl+C where it runs, or quit the session that started it), then run /office again.`
+          : `The bridge didn't answer on ${url}. Is port ${link.port} taken by something else? Try /office status, or set another port in this plugin's options.` }
+      }
+      await $.clock.sleep(250)
+    }
+    link.isBridgeUp = true
     const isOpened = await openBrowser($)
-    return { text: isOpened ? `Opened Agent Office at ${url}` : `Agent Office is at ${url}` }
+    const did = found ? 'Restarted' : 'Opened'
+    return { text: isOpened ? `${did} Agent Office at ${url}` : `${did} Agent Office: it's at ${url}` }
   })
 
   on('session.end', async ($, e, next) => {
