@@ -21,10 +21,31 @@ const TOOLS = [
 ]
 const ANSWERS = [
   'Done. The retry wrapper is in, with tests. Should it also back off on 429s?',
-  'Found it: the build reads a stale cache key. I fixed it locally; want me to open a PR?',
+  [
+    'Found it: **the build reads a stale cache key.** I fixed it locally; nothing is pushed yet.',
+    '',
+    '**What was wrong:**',
+    '- `ci/cache.yml` keys the cache on `package.json`, not the lockfile, so a dependency bump reused old modules.',
+    '- Two tests (`session.test.ts`, `refund.test.ts`) only passed against those stale modules.',
+    '',
+    '| Run | Before | After |',
+    '| --- | --- | --- |',
+    '| Clean build | 4m 10s | 4m 12s |',
+    '| Flaky failures (last 20) | **6** | 0 |',
+    '',
+    'Want me to open a PR?',
+  ].join('\n'),
   'I added six tests for refunds. Partial refunds aren’t covered yet. Shall I add them?',
   'The chart tokens are migrated. Two charts still hard-code colors; fix those too?',
-  'Review done: one race in session.ts and two nits. I left them as comments.',
+  [
+    '**Review done.** One real problem and two nits, all left as comments:',
+    '',
+    '1. **Race in `session.ts`:** two refreshes can both rotate the token; the second one logs you out.',
+    '2. *Nit:* `retryDelay` reads better as `backoffMs`.',
+    '3. *Nit:* a stray `console.log` in `refund.ts`.',
+    '',
+    '> The race only shows under load, so the tests pass either way.',
+  ].join('\n'),
 ]
 // What you ask a thread next, once its first job is done.
 const FOLLOWUPS = {

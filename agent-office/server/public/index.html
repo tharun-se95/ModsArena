@@ -117,7 +117,6 @@
   #moments li.mail span::before { content: "✉ "; color: var(--teal); }
 
   #side { top: 64px; right: 16px; width: var(--panel-w, 480px); max-height: calc(100% - 80px); overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 6px; }
-  #side.clipboard { padding-top: 26px; border-top: 0; margin-top: 10px; }
   #side.clipboard::before { content: ""; position: sticky; top: -26px; align-self: center; flex: none; width: 92px; height: 18px; margin: -36px 0 6px; border-radius: 6px 6px 10px 10px; background: linear-gradient(#a59a8c, #7d7266); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25); z-index: 1; }
   .sideh { display: flex; align-items: baseline; justify-content: space-between; font: 600 15px var(--serif); margin: 0 0 4px; }
   .sideh small { font: 500 10.5px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
@@ -403,6 +402,29 @@
   .tx p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   .tx time { display: block; font: 10px var(--mono); color: var(--muted); margin-top: 2px; }
   .tx.you { align-self: flex-end; background: color-mix(in srgb, var(--accent) 14%, var(--paper)); padding: 7px 10px; border-radius: 12px 12px 4px 12px; }
+  /* A reply drawn from markdown (markdown.js). */
+  .tx.md p { white-space: normal; }
+  .tx.md > * + * { margin-top: 7px; }
+  .tx.md strong { font-weight: 650; color: var(--ink); }
+  .tx.md code { font: 11.5px var(--mono); padding: 0 3px; border-radius: 4px; background: color-mix(in srgb, var(--ink) 9%, transparent); overflow-wrap: anywhere; }
+  .tx.md .md-code { margin: 0; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--ink) 8%, transparent); overflow-x: auto; white-space: pre; }
+  .tx.md .md-code code { padding: 0; background: none; font-size: 11.5px; }
+  .tx.md ul, .tx.md ol { margin: 0; padding-left: 20px; }
+  .tx.md ul { list-style: disc; } .tx.md ol { list-style: decimal; } .tx.md li > ul { list-style: circle; }
+  .tx.md li::marker { color: var(--muted); }
+  .tx.md li + li { margin-top: 3px; }
+  .tx.md li > ul, .tx.md li > ol { margin-top: 3px; }
+  .tx.md .md-h { margin: 10px 0 0; font: 600 13.5px var(--serif); color: var(--ink); }
+  .tx.md .md-h:first-child { margin-top: 0; }
+  .tx.md blockquote { margin: 0; padding-left: 10px; border-left: 3px solid var(--line); color: var(--muted); }
+  .tx.md hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
+  .tx.md a { color: var(--accent-ink, var(--accent)); text-decoration: underline; text-underline-offset: 2px; }
+  .tx.md .md-table { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+  .tx.md table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  .tx.md th, .tx.md td { padding: 5px 8px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+  .tx.md tr:last-child td { border-bottom: 0; }
+  .tx.md th { font-weight: 600; background: color-mix(in srgb, var(--ink) 5%, transparent); white-space: nowrap; }
+  .tx.md.report { max-width: none; margin-bottom: 4px; }
   .tx.say { align-self: flex-start; background: color-mix(in srgb, var(--line) 45%, var(--paper)); padding: 7px 10px; border-radius: 12px 12px 12px 4px; }
   .tx-from { display: block; font: 500 10px var(--mono); letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); margin-bottom: 2px; }
   .tx.pending { opacity: 0.85; border: 1px dashed color-mix(in srgb, var(--accent) 50%, transparent); }
@@ -671,25 +693,24 @@
     :root:not([data-theme="light"]) { --crab-shell: #c85d36; --crab-shell-deep: #8f3c20; --crab-sand: #2a231d; --crab-sand-line: #463a2f; --crab-claw: #1a1310; --crab-claw-ink: #f2d6b6; }
   }
   :root[data-theme="dark"] { --crab-shell: #c85d36; --crab-shell-deep: #8f3c20; --crab-sand: #2a231d; --crab-sand-line: #463a2f; --crab-claw: #1a1310; --crab-claw-ink: #f2d6b6; }
-  #side.clipboard { background: var(--crab-sand); border: 6px solid var(--crab-shell); border-top-width: 6px; box-shadow: 0 0 0 1px var(--crab-shell-deep), 0 14px 34px rgba(70, 35, 15, 0.22); backdrop-filter: none; -webkit-backdrop-filter: none; }
-  #side.clipboard::before { background: radial-gradient(circle at 50% 45%, var(--crab-claw) 0 3px, transparent 3.5px), linear-gradient(var(--crab-shell), var(--crab-shell-deep)); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.25); }
-  #side.clipboard .tabs { border-bottom-color: var(--crab-sand-line); }
-  #side.clipboard .tab.on { color: var(--crab-claw-ink); border-bottom-color: var(--crab-claw-ink); }
-  #side.clipboard h3 { color: var(--crab-claw-ink); opacity: 0.78; }
-  /* On a desk the directory and a clipboard are one frame: the same
-     crab-coloured board, full height and the width you drag it to, with
-     only what's on it swapping as you pick a thread or agent. */
+  #side.clipboard { background: linear-gradient(color-mix(in srgb, var(--panel-tint, var(--line)) 14%, transparent), transparent 160px), var(--paper); border: 1.5px solid color-mix(in srgb, var(--panel-tint, var(--line)) 70%, var(--line)); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16); }
+  #side.clipboard::before { display: none; }
+  #side.clipboard .tabs { border-bottom-color: var(--line); }
+  #side.clipboard .tab.on { color: var(--ink); border-bottom-color: var(--panel-tint, var(--ink)); }
+  /* On a desk the directory and a clipboard are one frame: full height
+     and the width you drag it to, with only what's on it swapping as you
+     pick a thread or agent. A quiet border, neutral for the directory; an
+     open thread or agent tints it in its critter's colour (--panel-tint,
+     panels.js), with a faint wash of it across the top and its active tab. */
   @media (min-width: 901px) {
-    #side, #side.clipboard, #side.clipboard.talking { width: var(--panel-w, 480px); height: calc(100% - 90px); max-height: none; margin-top: 10px; padding-top: 26px; background: var(--crab-sand); border: 6px solid var(--crab-shell); border-top-width: 6px; box-shadow: 0 0 0 1px var(--crab-shell-deep), 0 14px 34px rgba(70, 35, 15, 0.22); backdrop-filter: none; -webkit-backdrop-filter: none; }
-    #side::before { content: ""; position: sticky; top: -26px; align-self: center; flex: none; width: 92px; height: 18px; margin: -36px 0 6px; border-radius: 6px 6px 10px 10px; z-index: 1; background: radial-gradient(circle at 50% 45%, var(--crab-claw) 0 3px, transparent 3.5px), linear-gradient(var(--crab-shell), var(--crab-shell-deep)); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.25); }
-    #side .sideh { color: var(--crab-claw-ink); }
+    #side, #side.clipboard, #side.clipboard.talking { width: var(--panel-w, 480px); height: calc(100% - 80px); max-height: none; margin-top: 0; padding-top: 14px; }
   }
   .clip-grip { position: absolute; z-index: 6; touch-action: none; border-radius: 8px; }
   .clip-grip[hidden] { display: none; }
-  .clip-grip::after { content: ""; position: absolute; border-radius: 3px; background: var(--crab-claw); opacity: 0.35; transition: opacity 0.15s; }
+  .clip-grip::after { content: ""; position: absolute; border-radius: 3px; background: var(--muted); opacity: 0.35; transition: opacity 0.15s; }
   .clip-grip:hover::after, .clip-grip.dragging::after, .clip-grip:focus-visible::after { opacity: 0.8; }
   .clip-grip:focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: 1px; }
-  .clip-grip.edge { top: 110px; right: calc(16px + var(--panel-w, 480px) - 8px); width: 14px; height: calc(100% - 90px - 70px); cursor: ew-resize; }
+  .clip-grip.edge { top: 104px; right: calc(16px + var(--panel-w, 480px) - 8px); width: 14px; height: calc(100% - 80px - 70px); cursor: ew-resize; }
   .clip-grip.edge::after { left: 5px; top: 50%; width: 4px; height: 44px; margin-top: -22px; }
   :root.clip-resizing, :root.clip-resizing * { user-select: none; }
   :root.clip-resizing .clip-grip.edge, :root.clip-resizing #side { cursor: ew-resize; }
@@ -698,7 +719,7 @@
     #side.clipboard, #side.clipboard.talking { max-height: none; height: var(--sheet-h, 60%); padding-top: 18px; }
     #side.clipboard::before { display: none; }
     .clip-grip.sheet { left: 50%; width: 120px; margin-left: -60px; height: 44px; bottom: calc(var(--sheet-base) + var(--sheet-h, 60%) - 26px); cursor: ns-resize; }
-    .clip-grip.sheet::after { left: 50%; top: 50%; width: 64px; height: 8px; margin: -4px 0 0 -32px; border-radius: 4px; opacity: 1; background: linear-gradient(var(--crab-shell), var(--crab-shell-deep)); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); }
+    .clip-grip.sheet::after { left: 50%; top: 50%; width: 64px; height: 8px; margin: -4px 0 0 -32px; border-radius: 4px; opacity: 1; background: var(--panel-tint, var(--muted)); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); }
     .clip-grip.sheet:hover::after, .clip-grip.sheet.dragging::after { opacity: 1; filter: brightness(1.1); }
   }
   @media (prefers-reduced-motion: reduce) { .clip-grip::after { transition: none; } }

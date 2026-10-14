@@ -2,6 +2,7 @@
 // doing, the files it touched, and the moments worth telling you about.
 // Pure bookkeeping over model.js; it knows nothing about Three.js.
 
+import { plain } from './markdown.js'
 import { nodes, sid, aid, mail } from './model.js'
 import { describe } from './plain.js'
 import { devView } from './prefs.js'
@@ -229,7 +230,7 @@ export function ingest(ev) {
       if (ev.agent) break
       const name = quote(sessionName(ev.session))
       if (ev.reason === 'answer' || !ev.reason) {
-        moment(ev, `${name} finished${ev.answer ? `: ${clipText(ev.answer, 110)}` : '.'}`, 'done')
+        moment(ev, `${name} finished${ev.answer ? `: ${clipText(plain(ev.answer), 110)}` : '.'}`, 'done')
       } else if (ev.reason === 'aborted') {
         moment(ev, `You stopped ${name}.`, 'quiet')
       } else {

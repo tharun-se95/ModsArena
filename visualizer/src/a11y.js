@@ -6,6 +6,7 @@
 // The list and the announcement are written only when their words change,
 // so a screen reader isn't read the same thing every refresh.
 
+import { plain } from './markdown.js'
 import { nodes, fill, threadState, agentState, openAsks } from './model.js'
 import { quote } from './words.js'
 
@@ -30,7 +31,7 @@ export function describe(n, { state, helpers = 0, percent } = {}) {
 export function letter(n, state, { question } = {}) {
   if (state === 'asking') return `New letter: ${title(n)} asks: ${question ?? 'a question for you'}`
   if (state === 'stuck') return `New letter: ${title(n)} needs a look. Its last turn didn’t finish.`
-  return `New letter: ${title(n)} is waiting on you.${n.answer?.text ? ` It said ${quote(n.answer.text.slice(0, 140))}` : ''}`
+  return `New letter: ${title(n)} is waiting on you.${n.answer?.text ? ` It said ${quote(plain(n.answer.text).slice(0, 140))}` : ''}`
 }
 
 // Threads that weren't waiting on you last time and are now, in order.

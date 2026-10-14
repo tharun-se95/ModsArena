@@ -11,6 +11,7 @@
 // Settings live in this browser's localStorage. Alerts are made by the
 // browser on this computer; nothing is sent anywhere.
 
+import { plain } from './markdown.js'
 import { nodes, threadState } from './model.js'
 import { goalTitle, projectName } from './names.js'
 import { sound } from './sound.js'
@@ -57,7 +58,7 @@ export function alertFor(n, state) {
     return { title: `A question from “${clip(name, 40)}”`, body: `${clip(q, 140)}${where}` }
   }
   if (state === 'stuck') return { title: `“${clip(name, 40)}” needs a look`, body: `Its last turn didn’t finish.${where}` }
-  return { title: `“${clip(name, 40)}” is waiting on you`, body: `${n.answer?.text ? clip(n.answer.text, 140) : 'Done with your last request.'}${where}` }
+  return { title: `“${clip(name, 40)}” is waiting on you`, body: `${n.answer?.text ? clip(plain(n.answer.text), 140) : 'Done with your last request.'}${where}` }
 }
 
 const clip = (s, n) => {
