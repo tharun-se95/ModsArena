@@ -309,5 +309,8 @@ export function createJobs({ publish, isKnown, demo }) {
     return { status: 200 }
   }
 
-  return { start, resume, stop, jobOf, jobs }
+  // Whether any job the office started is still running (the bridge stays up for it).
+  const anyLive = () => [...jobs.values()].some(j => ['starting', 'working', 'blocked'].includes(j.state))
+
+  return { start, resume, stop, jobOf, anyLive, jobs }
 }

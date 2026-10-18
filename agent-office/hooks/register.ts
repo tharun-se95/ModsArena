@@ -11,6 +11,12 @@ import type { EngineInterface, Register } from 'claude-code'
 //
 // Hooks run in a sandbox with no Node, so events are queued here and flushed
 // over `$.http.fetch` on a timer: a tool call never waits on the bridge.
+//
+// Only to your own bridge: it keeps a secret in your Claude Code folder
+// (server/secret.mjs), and must prove it knows it (sha256 of the secret and
+// a fresh nonce, from /healthz) before this sends it anything; then every
+// report and inbox check carries the secret. Another account's program on
+// the port gets nothing.
 
 type ClusterEvent = { kind: string; [field: string]: unknown }
 
@@ -37,6 +43,11 @@ const link = {
   queue: [] as ClusterEvent[],
   isFlushing: false,
   isBridgeUp: false,
+  // Your account's secret (read from ~/.claude/agent-office/secret), and
+  // whether the bridge on the port has proved it knows it, and when.
+  secret: undefined as string | undefined,
+  isTrusted: false,
+  trustedAt: 0,
   lastSpawnAt: 0,
   activeAgents: new Set<string>(),
   teammates: new Set<string>(),
@@ -110,21 +121,64 @@ function showStatus($: EngineInterface) {
   )
 }
 
-type Health = { ok?: boolean; version?: string; managed?: boolean; events?: number; viewers?: number; pid?: number }
+type Health = { ok?: boolean; name?: string; version?: string; managed?: boolean; events?: number; viewers?: number; pid?: number; proof?: string; isTrusted?: boolean }
 
-// What the bridge on the port says about itself, or undefined if none answers.
+const SECRET_HEADER = 'x-agent-office-secret'
+const TRUST_MS = 60000 // checked again this often, and whenever a send fails
+
+// Your account's secret, once the bridge has made it.
+async function secret($: EngineInterface) {
+  if (link.secret) return link.secret
+  const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE')) ?? ''
+  const dir = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? `${home}/.claude`
+  try {
+    const text = (await $.fs.read(`${dir}/agent-office/secret`)).trim()
+    if (/^[0-9a-f]{64}$/.test(text)) link.secret = text
+  } catch {
+    // Not made yet: the bridge makes it when it first starts.
+  }
+  return link.secret
+}
+
+export async function sha256(text: string) {
+  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))
+  return [...bytes].map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+// What the bridge on the port says about itself, or undefined if none
+// answers; `isTrusted` when it proved it knows your secret.
 async function health($: EngineInterface): Promise<Health | undefined> {
   try {
-    const res = await $.http.fetch(`${bridgeUrl()}/healthz`)
+    const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+    const res = await $.http.fetch(`${bridgeUrl()}/healthz?nonce=${nonce}`)
     if (!res.ok) return undefined
+    let found: Health
     try {
-      return JSON.parse(res.text) as Health
+      found = JSON.parse(res.text) as Health
     } catch {
-      return { ok: true }
+      return { ok: true, isTrusted: false }
     }
+    const mine = await secret($)
+    found.isTrusted = Boolean(mine && found.proof && found.proof === await sha256(`${mine}:${nonce}`))
+    return found
   } catch {
     return undefined
   }
+}
+
+// Whether to send to the bridge on the port now: it proved itself lately.
+async function trusted($: EngineInterface) {
+  if (link.isTrusted && Date.now() - link.trustedAt < TRUST_MS) return true
+  const found = await health($)
+  link.isTrusted = found?.isTrusted === true
+  link.trustedAt = Date.now()
+  return link.isTrusted
+}
+
+// The office page's address, signed in with your key when there is one.
+async function officeUrl($: EngineInterface) {
+  const mine = await secret($)
+  return mine ? `${bridgeUrl()}/?key=${await sha256(`${mine}:open`)}` : bridgeUrl()
 }
 
 const isHealthy = async ($: EngineInterface) => (await health($)) !== undefined
@@ -182,7 +236,7 @@ async function nodeVersion($: EngineInterface) {
   return ran?.exitCode === 0 ? ran.stdout : undefined
 }
 
-// The child lives as long as this loop, which lives as long as the module.
+// The child it starts hands the bridge to a detached process and exits.
 // With `replace`, it asks a stale bridge on the port to step down and takes
 // over; with `restart` too, it takes over from any Agent Office bridge
 // (/office run again), which hands over its live events.
@@ -191,7 +245,9 @@ function startBridge($: EngineInterface, replace = false, restart = false) {
   void (async () => {
     try {
       const child = $.process.spawn({
-        argv: ['node', `${$.plugin.root}/server/server.mjs`, '--port', String(link.port), '--managed', ...(replace ? ['--replace'] : []), ...(restart ? ['--restart'] : [])],
+        // --background: it outlives this session (server.mjs), so the office
+        // doesn't reset when the session that happened to start it ends.
+        argv: ['node', `${$.plugin.root}/server/server.mjs`, '--port', String(link.port), '--managed', '--background', ...(replace ? ['--replace'] : []), ...(restart ? ['--restart'] : [])],
       })
       for await (const { text } of child) $.ui.log(text.trimEnd(), { to: 'debug' })
     } catch (err) {
@@ -206,9 +262,11 @@ async function flush($: EngineInterface) {
   const batch = link.queue.map(ev => ({ session: link.session, ...ev }))
   link.queue = []
   try {
+    // Nothing goes to a program that hasn't proved it's your bridge.
+    if (!(await trusted($))) throw new Error('no bridge of yours on the port')
     const res = await $.http.fetch(`${bridgeUrl()}/event`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', [SECRET_HEADER]: link.secret ?? '' },
       body: JSON.stringify(batch),
     })
     if (!res.ok) throw new Error(`bridge answered ${res.status}`)
@@ -216,6 +274,7 @@ async function flush($: EngineInterface) {
   } catch {
     // Keep the batch for the next tick; start a bridge if allowed.
     link.isBridgeUp = false
+    link.isTrusted = false
     link.queue = [...batch, ...link.queue].slice(-QUEUE_LIMIT)
     if (link.autoStart && Date.now() - link.lastSpawnAt > RESPAWN_MS) startBridge($)
   } finally {
@@ -278,7 +337,9 @@ async function status($: EngineInterface) {
   const mine = await ownVersion($)
   if (found) {
     lines.push(`Bridge: running on ${url}${found.version ? ` (${found.version})` : ''}, ${found.events ?? 0} events so far, ${found.viewers ?? 0} page${found.viewers === 1 ? '' : 's'} open.`)
-    if (isStale(found, mine)) lines.push(`It's from an older Agent Office than this one (${mine}); /office restarts it.`)
+    if (!found.isTrusted && found.name === 'agent-office' && !found.proof) lines.push(`It's from an older Agent Office than this one${mine ? ` (${mine})` : ''}, which this session doesn't report to; /office restarts it.`)
+    else if (!found.isTrusted) lines.push(`It isn't your Agent Office (it couldn't prove it knows your account's secret), so this session sends it nothing. If another program uses port ${link.port}, set another port in this plugin's options.`)
+    else if (isStale(found, mine)) lines.push(`It's from an older Agent Office than this one (${mine}); /office restarts it.`)
     else if (mine && !found.version) lines.push(`It's from an older Agent Office than this one (${mine}). It stops when the session that started it ends.`)
   } else {
     const problem = nodeProblem(await nodeVersion($))
@@ -442,8 +503,9 @@ async function officeAnswer($: EngineInterface, id: string, settled: { isDone: b
   let failures = 0
   while (!settled.isDone && Date.now() < until) {
     try {
+      if (!(await trusted($))) return undefined
       const res = await $.http.fetch(`${bridgeUrl()}/answer/wait?${new URLSearchParams({ session: link.session, id })}`, {
-        headers: { 'x-agent-office-inbox': '1' },
+        headers: { 'x-agent-office-inbox': '1', [SECRET_HEADER]: link.secret ?? '' },
       })
       if (!res.ok) return undefined // a bridge from before answers existed
       const got = JSON.parse(res.text) as { answer?: OfficeAnswer; closed?: boolean }
@@ -509,8 +571,9 @@ async function checkInbox($: EngineInterface) {
   if (link.isCheckingInbox || !link.isBridgeUp || link.session === 'unknown') return
   link.isCheckingInbox = true
   try {
+    if (!(await trusted($))) return
     const res = await $.http.fetch(`${bridgeUrl()}/inbox?session=${encodeURIComponent(link.session)}`, {
-      headers: { 'x-agent-office-inbox': '1' },
+      headers: { 'x-agent-office-inbox': '1', [SECRET_HEADER]: link.secret ?? '' },
     })
     if (!res.ok) return
     const { messages } = JSON.parse(res.text) as { messages?: ChatMessage[] }
@@ -523,7 +586,7 @@ async function checkInbox($: EngineInterface) {
 }
 
 async function openBrowser($: EngineInterface) {
-  const url = bridgeUrl()
+  const url = await officeUrl($)
   for (const argv of [['open', url], ['xdg-open', url], ['cmd', '/c', 'start', url]]) {
     const ran = await $.process.run(argv, { timeoutMs: 5000 }).catch(() => undefined)
     if (ran?.exitCode === 0) return true
@@ -563,6 +626,8 @@ export const register: Register = (on, options) => {
 
     const found = await health($)
     link.isBridgeUp = found !== undefined
+    link.isTrusted = found?.isTrusted === true
+    link.trustedAt = Date.now()
     if (!link.isBridgeUp && link.autoStart) startBridge($)
     // After an update, swap out the old bridge, unless someone is watching it.
     else if (link.autoStart && isStale(found, await ownVersion($)) && !found?.viewers) startBridge($, true)
@@ -604,7 +669,7 @@ export const register: Register = (on, options) => {
     const mine = await ownVersion($)
     if (found && !link.autoStart) {
       const isOpened = await openBrowser($)
-      return { text: isOpened ? `Opened Agent Office at ${url}` : `Agent Office is at ${url}` }
+      return { text: isOpened ? `Opened Agent Office at ${url}` : `Agent Office is at ${await officeUrl($)} (that address signs this browser in)` }
     }
     if (!link.autoStart) return { text: `No bridge on ${url}. Start one with: node ${$.plugin.root}/server/server.mjs --port ${link.port}` }
     const problem = nodeProblem(await nodeVersion($))
@@ -624,7 +689,7 @@ export const register: Register = (on, options) => {
     link.isBridgeUp = true
     const isOpened = await openBrowser($)
     const did = found ? 'Restarted' : 'Opened'
-    return { text: isOpened ? `${did} Agent Office at ${url}` : `${did} Agent Office: it's at ${url}` }
+    return { text: isOpened ? `${did} Agent Office at ${url}` : `${did} Agent Office: it's at ${await officeUrl($)} (that address signs this browser in)` }
   })
 
   on('session.end', async ($, e, next) => {

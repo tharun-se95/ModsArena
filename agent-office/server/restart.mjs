@@ -39,8 +39,12 @@ export const commandOf = async pid => (await run('ps', ['-o', 'command=', '-p', 
 // /healthz said, when it says; else the port's listener. Returns the pid
 // it stopped, or undefined.
 export async function stopOldBridge(port, pid) {
-  const target = pid ?? await listenerPid(port)
+  const listener = await listenerPid(port)
+  const target = pid ?? listener
   if (!target || target === process.pid) return undefined
+  // Only the process that holds the port, whatever /healthz claimed, and
+  // only when it's an Agent Office bridge.
+  if (listener !== undefined && listener !== target) return undefined
   if (!isOurBridge(await commandOf(target))) return undefined
   try {
     process.kill(target, 'SIGTERM')

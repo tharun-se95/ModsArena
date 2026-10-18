@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process'
 import { mkdtemp, mkdir, writeFile, readFile, chmod, stat } from 'node:fs/promises'
 import { request } from 'node:http'
 import { tmpdir } from 'node:os'
+import { credentials } from './test-support.mjs'
 import { join } from 'node:path'
 import { startArgs, resumeArgs, checkResume, shortIdOf, explain, stateOf, check, childEnv, resolveClaude } from './jobs.mjs'
 
@@ -100,10 +101,11 @@ test('a new session never inherits the session that started the bridge', () => {
 const PORT = 7800 + Math.floor(Math.random() * 150)
 const base = `http://127.0.0.1:${PORT}`
 let bridge, dir, calls, token, root
+let signed = () => ({})
 
 function call(method, path, { headers = {}, body } = {}) {
   return new Promise((resolve, reject) => {
-    const req = request({ host: '127.0.0.1', port: PORT, method, path, headers }, res => {
+    const req = request({ host: '127.0.0.1', port: PORT, method, path, headers: { ...signed(), ...headers } }, res => {
       let text = ''
       res.on('data', c => { text += c })
       res.on('end', () => resolve({ status: res.statusCode, text, json: () => JSON.parse(text) }))
@@ -137,7 +139,8 @@ else if (a === 'stop') console.log('stopped 1a2b3c4d')
     if (await fetch(`${base}/healthz`).then(r => r.ok, () => false)) break
     await new Promise(r => setTimeout(r, 100))
   }
-  token = /agent-office-token" content="([0-9a-f]+)"/.exec(await (await fetch(base)).text())[1]
+  signed = credentials(root).both
+  token = /agent-office-token" content="([0-9a-f]+)"/.exec(await (await fetch(base, { headers: signed() })).text())[1]
 })
 
 after(() => bridge?.kill())
@@ -159,7 +162,7 @@ test('only in a project the office already knows', async () => {
 })
 
 test('a job in a known project starts a background session there, and stops', async () => {
-  await fetch(`${base}/event`, { method: 'POST', body: JSON.stringify({ kind: 'session.start', session: 's1', t: Date.now(), cwd: dir }) })
+  await fetch(`${base}/event`, { method: 'POST', headers: signed(), body: JSON.stringify({ kind: 'session.start', session: 's1', t: Date.now(), cwd: dir }) })
   const res = await call('POST', '/jobs', { headers: { ...auth(), origin: base }, body: { dir, prompt: 'Write a README', kind: 'write' } })
   assert.equal(res.status, 200, res.text)
   const { job } = res.json()
@@ -206,7 +209,7 @@ test('an ended session is picked up again in its own folder, and can be deleted 
 test('a session still open in Claude Code isn’t deleted', async () => {
   await mkdir(join(root, 'projects', '-p'), { recursive: true })
   await writeFile(join(root, 'projects', '-p', 'live-1.jsonl'), JSON.stringify({ type: 'user', cwd: dir, timestamp: '2026-10-01T10:00:00Z', message: { content: 'hi' } }) + '\n')
-  await fetch(`${base}/event`, { method: 'POST', body: JSON.stringify({ kind: 'session.start', session: 'live-1', t: Date.now(), cwd: dir }) })
+  await fetch(`${base}/event`, { method: 'POST', headers: signed(), body: JSON.stringify({ kind: 'session.start', session: 'live-1', t: Date.now(), cwd: dir }) })
   const res = await call('POST', '/delete', { headers: auth(), body: { session: 'live-1' } })
   assert.equal(res.status, 409)
   assert.ok(await stat(join(root, 'projects', '-p', 'live-1.jsonl')))
@@ -229,6 +232,6 @@ test('a custom agent type is saved in a known project, never over another', asyn
   assert.match(await readFile(join(dir, '.claude', 'agents', 'doc-writer.md'), 'utf8'), /name: doc-writer/)
   assert.equal((await call('POST', '/agent-types', { headers: auth(), body })).status, 409)
   assert.equal((await call('POST', '/agent-types', { headers: auth(), body: { ...body, dir: '/somewhere/else' } })).status, 403)
-  const listed = await (await fetch(`${base}/agent-types?dir=${encodeURIComponent(dir)}`)).json()
+  const listed = await (await fetch(`${base}/agent-types?dir=${encodeURIComponent(dir)}`, { headers: signed() })).json()
   assert.ok(listed.types.some(t => t.name === 'doc-writer'))
 })

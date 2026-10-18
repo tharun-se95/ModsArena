@@ -157,10 +157,33 @@ function feel(view, asleep, thinking, idleFor) {
   return moodOf(clock(), feeling, view.mood ??= { kind: null, k: 0 })
 }
 
+// Without WebGL (switched off, a VM, remote desktop, an old GPU driver) there
+// is no 3D office; everything else on the page still works, and the stage
+// says so. A context the GPU takes back pauses drawing until it's restored.
+let isOff = false
+let isLost = false
+export const isOn = () => !isOff
+
+function noOffice(el) {
+  isOff = true
+  const card = document.createElement('div')
+  card.className = 'no-webgl paper'
+  card.setAttribute('role', 'status')
+  card.innerHTML = '<b>The 3D office needs WebGL, which this browser has turned off.</b><span>Everything else works: what’s waiting on you, your projects and threads, and every conversation. To see the office, turn on hardware acceleration (or WebGL) in your browser’s settings, or open it in another browser.</span>'
+  el.append(card)
+  return false
+}
+
 export function mount(el, { pick }) {
   stage = el
   onPick = pick
-  renderer = new THREE.WebGLRenderer({ antialias: true })
+  try {
+    renderer = new THREE.WebGLRenderer({ antialias: true })
+  } catch {
+    return noOffice(el)
+  }
+  renderer.domElement.addEventListener('webglcontextlost', e => { e.preventDefault(); isLost = true })
+  renderer.domElement.addEventListener('webglcontextrestored', () => { isLost = false })
   renderer.setPixelRatio(Math.min(budget().pixelRatio, devicePixelRatio))
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
@@ -704,6 +727,7 @@ let framedOnce = false
 
 // Called by the page whenever the panels change size.
 export function setInsets(next) {
+  if (isOff) return
   const same = ['left', 'right', 'top', 'bottom'].every(k => Math.abs((insets[k] ?? 0) - next[k]) < 2)
   insets = next
   if (!same) frame()
@@ -712,6 +736,7 @@ export function setInsets(next) {
 // Zoom to the room a session (or a subagent's session) works in, or back
 // out to the whole office.
 export function focusOn(id) {
+  if (isOff) return
   const n = id && nodes.get(id)
   const host = n?.kind === 'agent' ? nodes.get(sid(n.session)) : n
   focusProject(host?.project ? `p:${host.project}` : null)
@@ -719,12 +744,14 @@ export function focusOn(id) {
 
 // The directory's entries show the same bubble as hovering the critter.
 export function setHover(id) {
+  if (isOff) return
   const n = id && nodes.get(id)
   hoverPick = n ? { kind: n.kind, id } : null
   hovered = n?.kind === 'session' ? id : null
 }
 
 export function focusProject(id) {
+  if (isOff) return
   const next = id && rooms.has(id) ? id : null
   if (next === focusedProject && camGoal) return
   focusedProject = next
@@ -852,6 +879,7 @@ function startBreak(a, s) {
 // Reconcile with the model
 
 export function sync(showPast) {
+  if (isOff) return
   if (clock() - grownAt > 1) grow()
   const list = chooseSessions(showPast)
   const shownSessions = new Set()
@@ -1030,6 +1058,7 @@ function fly(from, to, tint, t) {
 const calm = matchMedia('(prefers-reduced-motion: reduce)')
 
 export function pulse(ev) {
+  if (isOff) return
   const t = clock()
   if (ev.kind === 'job.start') ringBell(t)
   const owner = ev.agent ? aid(ev.session, ev.agent) : sid(ev.session)
@@ -1304,6 +1333,7 @@ function makeRoom() {
 }
 
 export function animate() {
+  if (isOff || isLost) return
   const now = clock()
   const dt = Math.min(0.1, now - last)
   last = now
@@ -1751,6 +1781,7 @@ function declutter() {
 
 // Saving battery (or not): the sharpness cap and the shadow map's size.
 export function setPower({ pixelRatio, shadowSize }) {
+  if (isOff) return
   if (!renderer) return
   renderer.setPixelRatio(Math.min(pixelRatio, devicePixelRatio))
   if (sun.shadow.mapSize.x !== shadowSize) {
@@ -1762,6 +1793,7 @@ export function setPower({ pixelRatio, shadowSize }) {
 }
 
 export function setSelected(id) {
+  if (isOff) return
   selected = id
 }
 
@@ -1854,6 +1886,7 @@ function bindPointer() {
 // pixels, or null for what's out of sight. Picks a live thread in view,
 // one of its helpers, its rug, a room's sign and the coffee corner.
 export function landmarks() {
+  if (isOff) return []
   const box = stage.getBoundingClientRect()
   const onScreen = p => {
     const q = p.clone().project(camera)
@@ -1887,6 +1920,7 @@ export function landmarks() {
 // The critter under a point on the page (a drop, say), or null.
 const dropRay = new THREE.Raycaster()
 export function critterAt(clientX, clientY) {
+  if (isOff) return null
   if (!renderer) return null
   const r = renderer.domElement.getBoundingClientRect()
   dropRay.setFromCamera(new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1), camera)
@@ -1901,6 +1935,7 @@ export function critterAt(clientX, clientY) {
 // copies it in the same task, before the browser clears it.
 
 export function capture() {
+  if (isOff) return null
   renderer.render(scene, camera)
   const src = renderer.domElement
   const ratio = renderer.getPixelRatio()

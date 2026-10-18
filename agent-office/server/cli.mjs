@@ -19,6 +19,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadSecret, openKey } from './secret.mjs'
 import { addHooks, removeHooks, hasHooks } from './settings-hooks.mjs'
 import * as autoUpdate from './autoupdate.mjs'
 
@@ -79,7 +80,8 @@ async function serve() {
   console.log(isDemo
     ? `Playing sample activity at ${url} (Ctrl+C to stop)`
     : `Agent Office is ${running ? 'restarted' : 'open'} at ${url}. Leave this running; Ctrl+C stops it.`)
-  openBrowser(url)
+  // Your own office opens signed in (secret.mjs); the demo needs no key.
+  openBrowser(isDemo ? url : `${url}/?key=${openKey(loadSecret())}`)
 }
 
 async function status() {

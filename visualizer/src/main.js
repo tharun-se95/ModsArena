@@ -3,6 +3,7 @@
 // the bridge's Server-Sent Events and /history; words.js turns the same
 // events into plain sentences.
 
+import { post, hasBridge, refreshToken } from './api.js'
 import { startDemo, demoHistory, answerDemo, stopDemo } from '../../agent-office/server/demo.mjs'
 import * as model from './model.js'
 import * as words from './words.js'
@@ -160,7 +161,9 @@ snapButton?.addEventListener('click', async () => {
   const live = [...model.nodes.values()].filter(n => n.kind === 'session' && !n.past && n.status !== 'done').length
   const agents = [...model.nodes.values()].filter(n => n.kind === 'agent' && n.status !== 'done').length
   const detail = [live && `${live} thread${live === 1 ? '' : 's'}`, agents && `${agents} agent${agents === 1 ? '' : 's'} at work`].filter(Boolean).join(' · ')
-  const saved = await snapshot.save(snapshot.frame({ ...table.capture(), colors, detail }))
+  const shot = table.capture()
+  // No 3D office (no WebGL): nothing to take a picture of.
+  const saved = shot ? await snapshot.save(snapshot.frame({ ...shot, colors, detail })) : false
   const label = snapButton.querySelector('span')
   label.textContent = saved ? 'Saved' : 'Couldn’t save'
   setTimeout(() => { label.textContent = 'Snapshot' }, 2200)
@@ -291,9 +294,8 @@ function running() {
 // sessions take any answer; a real session's question goes through the
 // bridge when its mod is waiting for one, and Claude Code's own dialog
 // stays up meanwhile.
-const officeToken = document.querySelector('meta[name="agent-office-token"]')?.content || ''
 answering.setRoute({
-  can: ask => isDemo || transcript.isDemo() || (Boolean(officeToken) && ask.answerable === true && ['question', 'plan'].includes(ask.type)),
+  can: ask => isDemo || transcript.isDemo() || (hasBridge() && ask.answerable === true && ['question', 'plan'].includes(ask.type)),
   canApprove: () => isDemo || transcript.isDemo(),
   send: async (ask, body) => {
     const session = ask.who?.session
@@ -303,11 +305,7 @@ answering.setRoute({
       setTimeout(refreshPanels, 50)
       return ok ? { ok } : { ok, status: 'that question has moved on' }
     }
-    const res = await fetch('/answer', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-agent-office-token': officeToken },
-      body: JSON.stringify({ session, id: ask.id, ...body }),
-    })
+    const res = await post('/answer', { session, id: ask.id, ...body })
     const got = await res.json().catch(() => ({}))
     return res.ok ? { ok: true } : { ok: false, status: got.error ?? `the bridge answered ${res.status}` }
   },
@@ -320,11 +318,7 @@ actions.setStopper(async n => {
     stopDemo(n.session) // Demo-only, with no bridge
     return { ok: true }
   }
-  const res = await fetch('/stop', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-agent-office-token': officeToken },
-    body: JSON.stringify({ session: n.session }),
-  })
+  const res = await post('/stop', { session: n.session })
   const got = await res.json().catch(() => ({}))
   return res.ok ? { ok: true } : { ok: false, status: got.error ?? `the bridge answered ${res.status}` }
 })
@@ -416,11 +410,25 @@ function setStatus(text, state) {
   el.className = `status ${state}`
 }
 
+// Each (re)connection: a bridge that restarted has a new token, which the
+// page fetches again; one from another version serves another page, so the
+// office reloads to match it.
+let bridgeVersion
+async function afterReconnect() {
+  await refreshToken()
+  try {
+    const { version } = await (await fetch('/healthz', { cache: 'no-store' })).json()
+    if (bridgeVersion && version && version !== bridgeVersion) location.reload()
+    bridgeVersion ??= version
+  } catch {}
+}
+
 function connect() {
   const source = new EventSource('/stream')
   source.addEventListener('open', () => { setStatus('Live', 'live'); welcome.found() })
   source.addEventListener('replay', msg => {
     heard = true
+    void afterReconnect()
     if (forceEmpty) return refreshPanels()
     // A fresh replay: start over so a reconnect never doubles anything.
     model.reset()

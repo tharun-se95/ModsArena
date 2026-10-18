@@ -2,11 +2,10 @@
 // Office arrive on their own. The bridge reads and writes the switch in your
 // Claude Code settings (agent-office/server/autoupdate.mjs); /healthz says
 // where it stands and POST /auto-update changes it, with the page's token
-// like chat. No bridge (the demo site), no row.
+// like chat (api.js). No bridge (the demo site), no row.
 
+import { post, hasBridge } from './api.js'
 import * as settings from './settings.js'
-
-const token = typeof document === 'undefined' ? '' : document.querySelector('meta[name="agent-office-token"]')?.content || ''
 
 // The row's words for where things stand: { state, pending } from the
 // bridge, plus `failed` when the last change didn't go through.
@@ -35,11 +34,7 @@ async function change(on) {
   // Shown at once; the bridge's answer settles it.
   now = { state: on ? 'on' : 'off', pending: true }
   try {
-    const res = await fetch('/auto-update', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-agent-office-token': token },
-      body: JSON.stringify({ on }),
-    })
+    const res = await post('/auto-update', { on })
     const answer = await res.json()
     now = answer.autoUpdate ? { ...answer.autoUpdate, failed: !res.ok } : { ...before, failed: true }
   } catch {
