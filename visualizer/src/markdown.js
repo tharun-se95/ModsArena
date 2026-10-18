@@ -6,17 +6,29 @@
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 
-// Inline marks within one escaped line. Code spans are set aside first so
-// nothing inside them is touched.
+// Inline marks within one line. Code spans, links and bare URLs are taken
+// from the raw text first and set aside as placeholders; the rest is
+// escaped and marked; then each placeholder becomes its HTML, built from
+// its own escaped parts. No pattern ever runs over HTML made here, so text
+// can't reshape a tag (a link inside a link, a quote breaking out of href).
+const TOKEN = /`([^`]+)`|\[([^\]]+)\]\((https?:\/\/[^\s()<>"']+)\)|(^|[\s(])(https?:\/\/[^\s<>"'()]*[^\s<>"'().,;:!?])/g
+const link = (url, label) => `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`
+
+const marks = s => s
+  .replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>').replace(/__([^_]+?)__/g, '<strong>$1</strong>')
+  .replace(/(^|[^*\w])\*([^*\s][^*]*?)\*(?!\w)/g, '$1<em>$2</em>').replace(/(^|[^_\w])_([^_\s][^_]*?)_(?!\w)/g, '$1<em>$2</em>')
+  .replace(/~~([^~]+)~~/g, '<del>$1</del>')
+
 export function inline(text) {
-  const codes = []
-  let s = esc(text).replace(/`([^`]+)`/g, (_, c) => `\u0000${codes.push(c) - 1}\u0000`)
-  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`)
-  s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+[^\s<).,;:!?])/g, (_, pre, url) => `${pre}<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`)
-  s = s.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>').replace(/__([^_]+?)__/g, '<strong>$1</strong>')
-  s = s.replace(/(^|[^*\w])\*([^*\s][^*]*?)\*(?!\w)/g, '$1<em>$2</em>').replace(/(^|[^_\w])_([^_\s][^_]*?)_(?!\w)/g, '$1<em>$2</em>')
-  s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>')
-  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`)
+  const parts = []
+  const hold = html => `\u0000${parts.push(html) - 1}\u0000`
+  const src = String(text ?? '').replace(/\u0000/g, '')
+  const held = src.replace(TOKEN, (_, code, label, url, pre, bare) => {
+    if (code !== undefined) return hold(`<code>${esc(code)}</code>`)
+    if (label !== undefined) return hold(link(url, marks(esc(label))))
+    return pre + hold(link(bare, esc(bare)))
+  })
+  return marks(esc(held)).replace(/\u0000(\d+)\u0000/g, (_, i) => parts[i])
 }
 
 const isRow = l => /^\s*\|.*\|\s*$/.test(l)

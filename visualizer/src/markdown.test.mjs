@@ -58,3 +58,31 @@ test('plain() turns a reply into one clean line for previews', () => {
   assert.equal(plain(src), 'Found it: the build reads a stale cache key. ci/cache.yml keys on package.json Run · Before Flaky · 6')
   assert.equal(plain('Plain words stay as they are.'), 'Plain words stay as they are.')
 })
+
+// Text from Claude can carry anything a repo or a web page put in front of
+// it: no input may produce a tag or an attribute the renderer didn't mean.
+const HOSTILE = [
+  '[a](https://x.com/(https://x/onmouseover=window.__pwned=1//)',
+  '[a](https://x.com/(https://x/autofocus/onfocus=alert(1)//)',
+  'https://x/" onmouseover="alert(1)',
+  "https://x/' onmouseover='alert(1)",
+  '[x](https://e.com?a=1&b="2") [y](javascript:alert(1)) [z](https://a.b/"><img src=x onerror=alert(1)>)',
+  '<img src=x onerror=alert(1)> **<b>bold</b>** `</code><script>x</script>`',
+  '[**a**](https://a.b/__x__) __[b](https://c.d/*e*)__ https://f.g/~~h~~',
+  '\u00000\u0000 [\u00001\u0000](https://a.b)',
+]
+
+test('no input can add a tag or an attribute', () => {
+  const allowed = /^<(\/?(p|strong|em|del|code|ul|ol|li|blockquote|br|hr|pre|table|thead|tbody|tr|th|td|div|h[3-6])( class="[\w-]+")?|a href="https?:\/\/[^"<>]*" target="_blank" rel="noopener noreferrer"|\/a)>$/
+  for (const src of HOSTILE) {
+    for (const html of [markdown(src), inline(src)]) {
+      for (const tag of html.match(/<[^>]*>/g) ?? []) assert.match(tag, allowed, `${src} -> ${tag}`)
+      assert.doesNotMatch(html, /<(?!\/?(p|strong|em|del|code|ul|ol|li|blockquote|br|hr|pre|table|thead|tbody|tr|th|td|div|h\d|a)\b)/, src)
+    }
+  }
+})
+
+test('links and marks still work together', () => {
+  assert.equal(inline('**see [docs](https://d.io/p)**'), '<strong>see <a href="https://d.io/p" target="_blank" rel="noopener noreferrer">docs</a></strong>')
+  assert.equal(inline('go to https://a.com/x, then'), 'go to <a href="https://a.com/x" target="_blank" rel="noopener noreferrer">https://a.com/x</a>, then')
+})

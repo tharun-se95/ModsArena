@@ -19,8 +19,18 @@ on:
 permissions:
   contents: write
 
+# One release at a time: two runs would race for the same tag.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  # Every check CI runs, on this exact commit, before anything is published.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   release:
+    needs: ci
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,7 +43,7 @@ jobs:
           else tag="v$(node scripts/version.mjs check)"; fi
           node scripts/version.mjs check "$tag"
           echo "TAG=$tag" >> "$GITHUB_ENV"
-      - run: node --test agent-office/server/*.test.mjs scripts/*.test.mjs
+      - run: node --test agent-office/server/*.test.mjs scripts/*.test.mjs visualizer/src/*.test.mjs
       - run: npm install -g @anthropic-ai/claude-code
       - run: claude plugin validate --strict .
       - run: claude plugin validate --strict agent-office
