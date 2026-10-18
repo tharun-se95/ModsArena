@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises'
 import { request } from 'node:http'
+import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -163,4 +164,42 @@ test('auto-update: /healthz says where it stands, and only the office page can s
   assert.equal(settings.theme, 'dark')
   assert.equal(settings.extraKnownMarketplaces.modsarena.autoUpdate, true)
   assert.deepEqual((await call('GET', '/healthz')).json().autoUpdate, { state: 'on', pending: true })
+})
+
+// A request line the URL parser can't read, sent raw.
+function raw(line) {
+  return new Promise(resolve => {
+    const socket = connect(PORT, '127.0.0.1', () => socket.end(`${line}\r\nHost: 127.0.0.1:${PORT}\r\n\r\n`))
+    let text = ''
+    socket.on('data', d => { text += d })
+    socket.on('close', () => resolve(text))
+    socket.on('error', () => resolve(text))
+  })
+}
+
+test('a malformed request is answered, and the bridge keeps serving', async () => {
+  for (const line of ['GET //[ HTTP/1.1', 'GET /%%% HTTP/1.1', 'POST //[ HTTP/1.1', 'GET http://[::1 HTTP/1.1']) await raw(line)
+  const health = await call('GET', '/healthz')
+  assert.equal(health.status, 200)
+})
+
+test('the page can only run its own script and can’t be framed', async () => {
+  const page = await call('GET', '/')
+  assert.equal(page.status, 200)
+  // node:http lowercases header names
+  const res = await new Promise(resolve => request({ host: '127.0.0.1', port: PORT, path: '/' }, resolve).end())
+  res.resume()
+  assert.match(res.headers['content-security-policy'], /script-src 'self'/)
+  assert.match(res.headers['content-security-policy'], /frame-ancestors 'none'/)
+  assert.doesNotMatch(res.headers['content-security-policy'], /unsafe-eval|script-src[^;]*unsafe-inline/)
+  assert.equal(res.headers['x-frame-options'], 'DENY')
+})
+
+test('the bridge refuses to listen beyond this computer', async () => {
+  const child = spawn(process.execPath, [join(import.meta.dirname, 'server.mjs'), '--port', String(PORT + 1), '--host', '0.0.0.0'], { stdio: ['ignore', 'ignore', 'pipe'] })
+  let err = ''
+  child.stderr.on('data', d => { err += d })
+  const code = await new Promise(resolve => child.on('close', resolve))
+  assert.equal(code, 2)
+  assert.match(err, /only listens on this computer/)
 })

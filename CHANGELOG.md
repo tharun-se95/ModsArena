@@ -7,6 +7,27 @@ git tag (`v0.2.1`) with a GitHub Release, and the same version is in
 modsarena (`/plugin` → Marketplaces), a new one arrives on its own;
 otherwise `claude plugin update agent-office@modsarena` fetches it.
 
+## 0.12.2
+
+A safety patch. Please update.
+
+- **Claude's replies can't run code in the office any more.** A link in a
+  reply crafted a certain way (text Claude read in a repo or on a web page
+  could carry one) could add script to the conversation view. Links are now
+  built from the raw text in one pass, so nothing a reply says can reshape
+  the page, and a test runs a set of hostile replies on every change.
+- **The page runs only its own script.** It now carries a strict
+  Content-Security-Policy and can't be framed by another page, so a mistake
+  like the one above can't run, and a page elsewhere can't trick a click.
+- **One bad request can't stop the office.** A malformed request (which a
+  page on another local port could send) used to crash the bridge for every
+  session. It's now answered with an error, and the bridge keeps serving.
+- **The office only listens on this computer.** `--host` refuses any
+  address other than 127.0.0.1, ::1 or localhost.
+- **Releases wait for CI.** A release now runs every CI check on its commit
+  first, one release at a time.
+- **SECURITY.md** says how to report a vulnerability privately.
+
 ## 0.12.1
 
 - **A message box like Claude Code's.** A chip on top says who it goes to

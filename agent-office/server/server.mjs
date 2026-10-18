@@ -70,6 +70,13 @@ const option = (name, fallback) => {
 
 const PORT = Number(option('port', process.env.AGENT_OFFICE_PORT ?? 7337))
 const HOST = option('host', '127.0.0.1')
+// Only ever on this computer: the page's token is in its HTML, and on any
+// other address anyone who can reach the port could read it and start jobs.
+const LOOPBACK = new Set(['127.0.0.1', '::1', 'localhost'])
+if (!LOOPBACK.has(HOST)) {
+  console.error(`[agent-office] --host ${HOST} refused: the office only listens on this computer (127.0.0.1, ::1 or localhost).`)
+  process.exit(2)
+}
 const HISTORY_DAYS = Number(option('history-days', 14))
 const LOG_LIMIT = 8000
 // A fresh secret each run, handed to the office page in its HTML.
@@ -317,6 +324,27 @@ function readBody(req) {
   })
 }
 
+// The page runs only its own script, can't be framed by another page (a
+// click there could start a job or delete something), and reaches only
+// this bridge, so nothing a reply says can run or phone home.
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' https://fonts.gstatic.com",
+  "img-src 'self' data: blob:",
+  "connect-src 'self'",
+  "frame-ancestors 'none'",
+  "base-uri 'none'",
+  "object-src 'none'",
+].join('; ')
+const PAGE_HEADERS = {
+  'content-security-policy': CSP,
+  'x-frame-options': 'DENY',
+  'x-content-type-options': 'nosniff',
+  'referrer-policy': 'no-referrer',
+}
+
 async function serveStatic(res, pathname) {
   const rel = pathname === '/' ? 'index.html' : pathname.slice(1)
   if (rel.includes('..')) return void res.writeHead(400).end()
@@ -325,7 +353,7 @@ async function serveStatic(res, pathname) {
     // The page gets this run's chat token; no other origin can read it.
     if (rel === 'index.html') body = body.toString('utf8').replace('<meta name="agent-office-token" content="">', `<meta name="agent-office-token" content="${TOKEN}">`)
     // No caching: after a pull, a refresh always shows the current build.
-    res.writeHead(200, { 'content-type': TYPES[extname(rel)] ?? 'application/octet-stream', 'cache-control': 'no-store' })
+    res.writeHead(200, { 'content-type': TYPES[extname(rel)] ?? 'application/octet-stream', 'cache-control': 'no-store', ...(rel.endsWith('.html') && PAGE_HEADERS) })
     res.end(body)
   } catch {
     res.writeHead(404).end('not found')
@@ -337,8 +365,24 @@ const json = (res, status, body) => {
   res.end(JSON.stringify(body))
 }
 
-const server = createServer(async (req, res) => {
-  const { pathname, searchParams } = new URL(req.url, 'http://localhost')
+// One bad request never takes the office down: anything a route throws is
+// answered with an error, and the bridge keeps serving.
+const server = createServer((req, res) => {
+  handle(req, res).catch(err => {
+    console.error('[agent-office] request failed:', err?.message ?? err)
+    if (!res.headersSent) json(res, 500, { error: 'something went wrong in the bridge' })
+    else res.end()
+  })
+})
+
+async function handle(req, res) {
+  let url
+  try {
+    url = new URL(req.url, 'http://localhost')
+  } catch {
+    return json(res, 400, { error: 'bad request' })
+  }
+  const { pathname, searchParams } = url
   const refused = refusal(req, PORT)
   if (refused) return json(res, 403, { error: refused })
 
@@ -591,7 +635,11 @@ const server = createServer(async (req, res) => {
 
   if (req.method === 'GET') return serveStatic(res, pathname)
   res.writeHead(405).end()
-})
+}
+
+// Last resort: log it and keep serving every session's office.
+process.on('unhandledRejection', err => console.error('[agent-office] unhandled:', err?.stack ?? err))
+process.on('uncaughtException', err => console.error('[agent-office] uncaught:', err?.stack ?? err))
 
 let replaceUntil = 0
 
@@ -603,7 +651,10 @@ server.on('error', err => {
     console.error(`[agent-office] port ${PORT} in use, assuming a bridge is already running`)
     process.exit(0)
   }
-  throw err
+  // It couldn't listen at all: say why in plain words and stop.
+  const why = err.code === 'EACCES' ? `this computer won't let it use port ${PORT} (try another with --port)` : err.message
+  console.error(`[agent-office] couldn't start the office: ${why}`)
+  process.exit(1)
 })
 
 server.on('listening', () => {
