@@ -1,0 +1,12 @@
+{
+  "name": "agent-office-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Browser end-to-end tests: the office against a real bridge and a stand-in claude.",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 ./*.test.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.56.1"
+  }
+}

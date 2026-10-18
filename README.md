@@ -5,43 +5,45 @@
 Claude Code mods and the tools around them.
 <br clear="left">
 
+[![CI](https://github.com/tharun-se95/ModsArena/actions/workflows/ci.yml/badge.svg)](https://github.com/tharun-se95/ModsArena/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/tharun-se95/ModsArena)](https://github.com/tharun-se95/ModsArena/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 ## <img src="agent-office/icon.svg" width="28" height="28" alt="" align="top"> Agent Office
 
-A live office of everything Claude Code is doing on your machine. Each project gets its own cozy room. Your chat sessions are colorful critters, each at its own desk whose monitor scrolls code while it works. Each subagent is a smaller critter standing behind the session that started it, and every tool call makes its caller hop. The page is laid out the way Claude organizes work: **projects** hold **threads** (your sessions), and each thread has its **lead** and the **agents** it spawned, nested. Threads waiting on you collect in an inbox, where you can reply without leaving the page. Click any critter to read its conversation as it happens and send it a message, without leaving the office.
+**Every Claude Code session on your computer, on one page.**
+
+- **See it all:** each project is a room, and each session is a critter at its desk, with its subagents behind it. A tool call makes its caller hop, and a ring shows how full its context is.
+- **Answer what's waiting:** sessions that need you collect in an inbox. Reply, or answer their questions, without finding the right terminal.
+- **Talk and run:** read any session's conversation as it happens, message it, pick up one that has ended, or start new work in a project.
 
 **[Try the demo in your browser](https://tharun-se95.github.io/ModsArena/)**: sample activity, nothing to install.
 
-![Agent Office: sessions at work in their rooms, a click gliding into one, and a hover showing what a session is doing](docs/agent-office.gif)
+![Agent Office: two project rooms, each with sessions at their desks, the inbox of threads waiting on you, and the projects directory](docs/agent-office.png)
 
-### Quick start
+### Requirements
 
-You need Claude Code and [Node](https://nodejs.org) 18 or newer. Two steps, in Claude Code:
+| | |
+| --- | --- |
+| Claude Code | A build with mods (plugins with hooks). Older builds can use [settings hooks](#settings-hooks) instead. |
+| Node | 20 or newer, from [nodejs.org](https://nodejs.org). |
+| Computer | macOS, Linux or Windows, the one Claude Code runs on. The office is a page on `127.0.0.1`, so it shows the sessions on that computer, not cloud ones. |
+| Browser | Any current one. Without WebGL the rooms don't draw, but the inbox, directory and conversations all work. |
 
-1. **Install:** `/plugin install agent-office --marketplace tharun-se95/ModsArena`
-2. **Open it:** type **`/office`**. It starts the office's bridge and opens the office in your browser. Run it again any time to restart the office with your current copy: the running bridge hands over what it shows and steps down, whichever version it is and however it was started. Every Claude Code session on your machine, in any project, joins the same office.
+### Install
 
-That's all. The first time, Agent Office offers to keep itself up to date: type **`/office auto-update`** and new versions arrive on their own from the next time Claude Code starts (`/office auto-update off` turns that off again). You can also flip **Updates: automatic** in the office's Settings menu.
+In Claude Code:
 
-On Claude Code older than 2.1.275, install in two commands instead: `/plugin marketplace add tharun-se95/ModsArena`, then `/plugin install agent-office@modsarena`. To turn on updates by hand: type `/plugin`, open **Marketplaces**, pick **modsarena** and choose **Enable auto-update**.
+1. **Add the marketplace:** `/plugin marketplace add tharun-se95/ModsArena`
+   It says the `modsarena` marketplace was added.
+2. **Install:** `/plugin install agent-office@modsarena`
+   It says `agent-office` is installed. Start a new session so it loads.
+3. **Open it:** type **`/office`**.
+   Your browser opens the office, signed in, and this session's critter sits at its desk. Every other Claude Code session on this computer, in any project, joins it from its next event. Past sessions from the last 14 days show as sleeping critters.
 
-- Click a critter, then **Transcript**, to follow its conversation and message it. See [Talk to your agents](#talk-to-your-agents).
-- `/office status` says whether the bridge is running, what it has seen, what this session is doing, and whether updates are automatic.
-- `/office` appears once a session has started and the plugin's hooks are running. Where it isn't listed (before the first message in the desktop app, or anywhere the hooks don't run), the `agent-office:office` skill opens the office instead.
-- Without auto-update, `claude plugin update agent-office@modsarena` fetches a new version. Outside Claude Code, `npx github:tharun-se95/ModsArena auto-update` turns auto-update on too (it backs up your settings first and changes only that one switch). After an update, the next session swaps the running bridge for the new one, unless the office is open in a browser; `/office` always does it.
-- The status line shows `◉ office N agents · M tools` while work is in flight.
+On Claude Code 2.1.275 or newer, steps 1 and 2 are one command: `/plugin install agent-office --marketplace tharun-se95/ModsArena`.
 
-<details>
-<summary><b>Your Claude Code doesn't have mods?</b> Use settings hooks instead.</summary>
-
-Older Claude Code builds can't load the plugin's hooks. Settings hooks get most of the picture: sessions, prompts, subagents, tool calls, and context from the transcript after each turn. The `/context` breakdown, per-subagent context, cost and rate limits need the plugin, and so does sending messages: transcripts still show, but the message box can't deliver.
-
-```sh
-npx github:tharun-se95/ModsArena install-hooks   # adds the hooks to ~/.claude/settings.json (backed up first)
-npx github:tharun-se95/ModsArena                 # starts the bridge and opens the office; leave it running
-```
-
-New Claude Code sessions report to it. `install-hooks --project` writes to `./.claude/settings.json` instead, `--port N` picks another port, and `uninstall-hooks` removes exactly what it added. Each hook pipes its input to the bridge with `curl`, waits at most a second, and never blocks or fails a tool call.
-</details>
+New to it? The office's **Tour** walks through it, and **?** explains what you're looking at. The [guide](docs/guide.md) covers everything it shows.
 
 <details>
 <summary><b>Just want to look?</b> Run the demo locally.</summary>
@@ -51,149 +53,97 @@ npx github:tharun-se95/ModsArena demo            # sample activity on http://127
 ```
 </details>
 
+### What you can do
+
+- **Watch:** click a critter (or its line in **Projects**) to follow its conversation live, see its team of agents, and see what fills its context.
+- **Answer:** **Waiting on you** lists every thread whose next move is yours. Type a reply, or tap an option on a question Claude asked you. Tool approvals still happen in Claude Code: the office can't do anything your permission settings don't already allow.
+- **Talk:** the message box under a conversation sends a message to that session or subagent. A session that has ended picks up again in the background (`claude --bg --resume`).
+- **Run:** start a new thread in a project, a new project in a folder, or a helper agent for a thread. Describe your own agent types once and reuse them.
+- **Tidy up:** **Remove from office** hides a project, thread or agent (with Undo; nothing on disk changes). **Delete for good…** deletes a thread's saved conversation, Claude Code's transcripts, and **can't be undone**. Your project's files are never touched.
+
+See [Talk to your agents](docs/guide.md#talk-to-your-agents) and [Run the office](docs/guide.md#run-the-office) for the details.
+
+### Privacy and security
+
+- **What it reads:** Claude Code's transcripts under `~/.claude/projects` (or `$CLAUDE_CONFIG_DIR`), which hold your full conversations, plus what your sessions report as they work. It keeps the last 8,000 events in memory and writes nothing about them to disk.
+- **Where it goes:** nowhere. The bridge listens on `127.0.0.1` only and makes no outbound requests: no telemetry, no analytics, no fonts or scripts from elsewhere. Updates come through Claude Code's own marketplace, not the office.
+- **Who can use it:** only your account. The bridge keeps a secret in `~/.claude/agent-office/`, readable by you alone. Your sessions must prove they know it, and so must the bridge before they report to it. The page opens with a key made from it, and then stays signed in with a cookie only the bridge can read. Web pages you visit can't reach it: every request is checked for its address and origin, and anything that changes something needs the page's token.
+- **What it changes:** only when you ask on the page. It sends messages to sessions, starts `claude` jobs (without a shell and without permission flags), saves agent types to `.claude/agents/`, and deletes transcripts you choose to delete.
+- **The hosted demo** runs in your browser on sample data. It has no bridge and sees nothing of yours.
+
+Found a vulnerability? See [SECURITY.md](SECURITY.md).
+
+### Updating
+
+Type **`/office auto-update`** once: new versions then arrive on their own each time Claude Code starts. (`/office auto-update off` turns that off.) Without it, `claude plugin update agent-office@modsarena` fetches the new version. After an update, run `/office` once to restart the office from it.
+
 ### Troubleshooting
+
+Start with **`/office status`**, or in a terminal **`npx github:tharun-se95/ModsArena doctor`**. Doctor checks Node, Claude Code, the bridge, your secret and the hooks, and says what to fix.
 
 | You see | Do this |
 | --- | --- |
-| `/office` says Node is missing or too old | Install Node 18 or newer from [nodejs.org](https://nodejs.org), then run `/office` again. |
-| `/office auto-update` says the marketplace isn't in your settings | Agent Office was installed some other way (for one project only, or from a copy). Turn updates on from `/plugin` → **Marketplaces** → **modsarena** instead. |
-| `/office` says the bridge "didn't make way" | An old bridge holds the port and couldn't be stopped (on Windows, or one from another user). Stop it with Ctrl+C where it runs, or quit the session that started it, then run `/office` again. |
-| "The bridge didn't answer" | Something else may be using port 7337. Run `/office status`, or pick another port with `/plugin configure agent-office@modsarena` (option `port`). |
-| The page opens but the office is empty | It fills in as sessions work. Sessions that started before the bridge appear from their next event; past sessions from the last 14 days show as sleeping critters (tick **Past sessions**). |
-| The browser didn't open | Open the address `/office` printed: it carries your key, so it opens signed in. |
-| The page says "Open the office from Claude Code" | That browser isn't signed in yet. Run `/office` (or `npx github:tharun-se95/ModsArena`) once and it opens there signed in; it stays signed in after that. |
-| Something isn't right with the bridge | `/office status` says how it's doing; the bridge's log is `~/.claude/agent-office/bridge.log`. Start Claude Code with `AGENT_OFFICE_DEBUG=1` for a line per request. |
-| No sound | Browsers only allow sound after you click the page once. Check the **Sound** button in the top bar. |
-| A message says "Waiting for the session to pick it up" | The session doesn't have the plugin loaded (settings hooks can't receive messages), or it has ended. Messages are picked up within a second by a session running the plugin. |
-| A message says "Queued as the next prompt" but nothing happens | The session is mid-turn; it reads your message as soon as that turn ends. |
-| `/office status` says the bridge is from an older Agent Office | Run `/office`: it restarts the bridge from the version you have now. Sessions don't report to a bridge older than 0.13 (it can't prove it's yours) until you do. |
-| `/office status` says the bridge "isn't your Agent Office" | Something else on this computer (another account, another program) holds port 7337. Pick another port with `/plugin configure agent-office@modsarena` (option `port`). |
-| Plugin options say "not yet set" | The defaults (port 7337, start the bridge automatically) are fine; you only need to set them to change them. |
+| `/office` isn't listed | Start a new session after installing: plugins load when a session starts. Where it still isn't listed (before the first message in the desktop app), ask Claude to open the office: the `agent-office:office` skill does it. |
+| `/office` says Node is missing or too old | Install Node 20 or newer from [nodejs.org](https://nodejs.org), restart Claude Code, then run `/office` again. |
+| "The bridge didn't answer" | Something else may be using port 7337. Run doctor, or pick another port with `/plugin configure agent-office@modsarena` (option `port`). |
+| `/office` says the bridge "didn't make way" | An old bridge holds the port and couldn't be stopped. Quit the session that started it (or press Ctrl+C where it runs), then run `/office` again. |
+| `/office status` says the bridge is from an older Agent Office | Run `/office`: it restarts the bridge from the version you have now. |
+| `/office status` says the bridge "isn't your Agent Office" | Another account or program holds port 7337. Pick another port (option `port`). |
+| The page says "Open the office from Claude Code" | That browser isn't signed in yet. Run `/office` once and it opens there signed in. |
+| The browser didn't open | Open the address `/office` printed: it carries your key. |
+| The office is empty | It fills in as sessions work. Sessions that started before the bridge appear from their next event. |
+| A message says "Waiting for the session to pick it up" | That session doesn't have the plugin loaded (settings hooks can't receive messages). |
+| A new project says to trust the folder first | Claude Code only works in folders you've trusted, and the office won't trust one for you. Run the command it shows (`cd <folder> && claude`, then say yes), then press Start again. |
+| A job fails to start | Check `claude --version` works in a new terminal: jobs run the `claude` on your PATH. |
+| A thread shows "Login expired" | Claude Code's sign-in ran out. Run `/login` in Claude Code. |
+| No sound | Browsers only play sound after you click the page once. Check **Sound** in the top bar. |
+| Something else | The bridge's log is `~/.claude/agent-office/bridge.log`. Start Claude Code with `AGENT_OFFICE_DEBUG=1` for a line per request. |
 
-### What you're looking at
+Still stuck? [Open an issue](https://github.com/tharun-se95/ModsArena/issues/new/choose) with doctor's output.
 
-| In the office | What it is |
+### Uninstall
+
+1. In Claude Code: `/plugin uninstall agent-office@modsarena`, then `/plugin marketplace remove modsarena` if you don't want the marketplace either.
+2. If you installed settings hooks: `npx github:tharun-se95/ModsArena uninstall-hooks` (add `--project` for a project's settings).
+3. A running bridge stops by itself after 30 idle minutes, or at once with Ctrl+C where it runs.
+
+What stays behind, to delete if you like:
+
+| Path | What it is |
 | --- | --- |
-| The office | Carpet tiles, outer walls with tall windows, plants that sway, a water cooler and a robot vacuum doing laps of the open floor, all around the rooms. The windows follow your local time (dawn, day, golden hour, dusk, night), the lamps glow brighter after dark, and the wall clock shows the time. The floor arranges itself to fill your window. |
-| Coffee corner | A shared kitchenette: a counter with a steaming coffee machine and a row of mugs, a fridge, and a round table with stools. Finished subagents walk here along the aisles, pick up a mug, take a few sips, and then head off. |
-| Room | A project: a git repository (worktrees included) or a folder outside one. Each room has a wooden floor, walls in its own color, and furniture (a bookshelf, a window, plants, a lamp, sometimes a couch). What a room holds and its wall color come from the project's name, so it always looks the same. Its sessions sit in a small grid. Click the sign over the back wall to zoom in, and press Esc to see every room again. |
-| Crab on a rug, with a gold gem | A live chat session, named by its first prompt. Each session gets its own color, worn on its claws and legs. Its glowing visor face shows how it's doing: happy, thinking, laughing, sad, surprised when its context is nearly full, sleepy at rest. Its desk's monitor scrolls code while it works, dims while it waits, and is off for past sessions. Its legs tap and its claws clack while it works, and the gem glows and spins faster. It hops on each prompt and each tool call, and it turns toward the subagent that acted last. |
-| Ring on the rug around it | How full that context window is: green, then amber past 60%, then red past 85%. A pulsing red ring, and both arms up, mean it's past 80% and will compact soon. |
-| Smaller crabs behind its desk | Subagents, standing in a row behind the desk (then a second row, then either side), so they never overlap. Each type has its own color and kit: **Explore** is sky blue with a backpack; **Plan** is lilac in a beret; **code-reviewer** is pink in round glasses; **test-runner** is mustard with headphones; and **general-purpose** is the plain green crab. Prefer the classic blocky Claude bots? **Settings → Critters** switches back. Your own agent types get a color from their name. They drop in when started (the session waves hello), and when finished they wave goodbye and walk to the coffee corner. |
-| Grey critter with closed eyes | A past session from the last 14 days, read from its transcript. Each room shows the three most recent, and its sign counts the rest. Untick **Past sessions** to hide them. |
-| Bead rising off a critter | A tool call, colored by what it does: reads sky blue, edits coral, searches green, web lookups lilac, shell commands mustard, handoffs teal. A red bead means the call failed. |
-| Ripple across the rug | The session just compacted its context. |
-| A session walking in | A session that starts while you watch walks in from the front of the office to its desk. |
-| Confetti | The session just finished a turn. |
-| Red "!" and a wobble | A tool call just failed. |
-| "zzz" | A session that's been idle for two minutes has dozed off, and past sessions are asleep. |
-| Steam over a desk mug | That session is working right now. |
-| A wave | Two critters passing each other on the way in or to coffee say hi. |
+| `~/.claude/agent-office/` | Your secret, its `headers` file and the bridge's log |
+| `~/.claude/settings.json.agent-office.bak` | The backup `install-hooks` or `auto-update` made of your settings |
+| `.claude/agents/<name>.md` | Agent types you created from the office (they're Claude Code's now) |
+| The browser's site data for `127.0.0.1:7337` | What you removed from the office, and your view settings |
 
-**Sounds:** soft key taps when a tool runs, a two-note chime when a turn finishes, a bonk when a call fails, a pop when a helper arrives, a chirp when critters wave, a clink at the coffee corner and a hush on compaction. They're synthesized in the browser (no audio files), start after your first click or key press, and the **Sound** button in the header mutes them (it remembers your choice).
+### Settings hooks
 
-Hover any critter (or its line in the directory) for a bubble with what it is and what it's doing: its status, the tool it's running, its context use, model and tool calls, and who it works for. Session names and room signs stay small and quiet; a name that would collide with another, with a sign or with the bubble steps aside.
+Claude Code builds without mods can't load the plugin's hooks. Settings hooks get most of the picture: sessions, prompts, subagents, tool calls, and context from the transcript after each turn. They need `curl`. The `/context` breakdown, per-subagent context, cost and rate limits need the plugin, and so does messaging sessions.
 
-Floating over the office (and framed around, so the office always sits in the space they leave free):
-
-- **Waiting on you** (top left): a letter for each thread whose next move is yours, longest waiting first, with what it last said and a reply line. Type and press Enter: the reply becomes that thread's next prompt. A thread whose last turn ended on an error is marked **Needs a look**; context windows past 80% are listed under the letters.
-- **Activity** (bottom left): the moments so far, filterable to **Messages** (who messaged whom: the lead to its agents, agents to each other, a claude.ai project's coordinator to its thread) or **Problems**.
-- **Projects** (right): each project's threads with their state (**Working**, **Waiting on you**, **Needs a look**), context use and what each is doing, and under each thread its live team, nested the way the lead spawned them.
-
-Click a critter, a letter or a line and the camera glides to its room while the directory turns into a clipboard, with a trail back up (project › thread › agent) and three tabs:
-
-- **Conversation:** its transcript, live, with a box to message it (see below).
-- **Team:** the lead and every agent it spawned, nested, with each one's state (working, waiting on its own background work, idle, done, stopped), and the messages between them.
-- **Details:** context use and what fills it (the `/context` breakdown); turns, tool calls, errors, cost, model and rate limits; the files it has read and edited, its recent actions in plain words, and what you asked it.
-
-**Keys:** <kbd>j</kbd>/<kbd>k</kbd> (or the arrows) walk every thread and agent in order, <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> switch tabs, <kbd>r</kbd> replies (to what's open, or to the thread that has waited longest), and <kbd>Esc</kbd> goes up a level.
-
-A session that a [claude.ai project](https://code.claude.com/docs/en/claude-projects) runs on your computer (through Remote Control) is marked as a **thread**, and its coordinator's messages show up as mail. Threads that run in the cloud never touch your machine, so the office can't see them.
-
-On a narrow screen the inbox becomes a strip under the top bar and the directory a sheet at the bottom.
-
-### Talk to your agents
-
-Open a critter's clipboard: the **Conversation** tab is its transcript, live. Your prompts sit on the right and its replies on the left. Tool calls are one line each, green or red once they finish; click one to see what came back. It's read from the transcript Claude Code keeps, so past sessions and subagents have one too.
-
-The box at the bottom sends it a message:
-
-- **To a session:** the message becomes its next prompt, marked as from Agent Office. If the session is mid-turn, it waits until that turn ends.
-- **To a subagent:** the message goes to that subagent directly. A finished one is resumed to answer, which uses tokens.
-- **Past sessions** show their transcript but no message box. Resume one in Claude Code to talk to it again.
-- **Hand it on:** drag a letter from **Waiting on you** (a thread's last answer), or anything a thread made (a picture, pull request, artifact or file card), onto any critter. A note opens with the message worded for it; edit it if you like and send. From the keyboard, focus the card and press **H** to pick who gets it.
-- **@mentions:** in a reply, type **@** to pick one of the thread's agents by name; the message goes to that agent instead of the thread.
-- **Quick actions** under a thread's name: **Explain what you did** and **Wrap up** send a ready-worded message; **Stop** (it asks once more) ends the turn a session is running, as Esc would in Claude Code. A single subagent can't be stopped from the office.
-
-Enter sends and Shift+Enter starts a new line.
-
-![The Transcript tab: a session's prompts, replies and tool calls, a message from the office, and the session's answer](docs/agent-office-chat.png)
-
-The message stays on the clipboard with its status until it shows up in the transcript, and the reply appears below it. Tool approvals still pop up in Claude Code itself: chat can't do anything your permission settings don't already allow. It needs the plugin; the settings-hooks fallback can't receive messages. In the demo, messages get a sample reply.
-
-**Answering from the office.** When Claude asks you a question (with options to pick from), it shows up as a card in **Waiting on you** and in the critter's speech bubble. Tap an option, or type your own answer, and the thread carries on. Claude Code's own question stays open in the terminal the whole time, so you can answer wherever is handier: whichever answer comes first counts. A plan waiting for approval can be sent back from the office with a note ("keep planning"), but approving one has to happen in Claude Code, since only Claude Code can switch Claude out of planning. This needs the plugin, like messages.
-
-**How it's kept safe.** The bridge only listens on `127.0.0.1`, but any web page you visit can send requests there, so:
-
-- **Host check:** every request must be addressed to the bridge itself. This stops a page pointing its own hostname at your machine to read the answers (DNS rebinding).
-- **Origin check:** browser requests that change anything must come from the office page.
-- **Token:** sending a message also needs a secret token the bridge makes fresh each time it starts and gives only to the office page.
-- **Your account only:** the bridge keeps a secret in `~/.claude/agent-office/` that only your account can read. Your sessions send it with what they report, and the bridge proves it knows it before they send anything, so another account on a shared computer can neither feed the office nor pose as it. The page opens with a key made from it (`/office` puts it in the address), and the browser then stays signed in with a cookie only the bridge can read.
-- **Only its own script:** the page carries a strict Content-Security-Policy, can't be framed by another page, and loads nothing from anywhere else (its fonts ship with it).
-
-See [SECURITY.md](SECURITY.md) to report a vulnerability.
-
-### How each thing is measured
-
-| What | Mod (live) | Settings hooks (fallback) | Past sessions |
-| --- | --- | --- | --- |
-| Project | `$.session.repo()` root, named by the bridge from `origin` | git root of `cwd` | git root of the transcript's `cwd` |
-| Session context | `session.measure` (live), `turn.step` (every request) | transcript tail on each `Stop` | last main-loop request in the transcript |
-| What fills it | `$.session.usage({ breakdown })` after each turn | no | no |
-| Subagent context | `turn.step` inside the agent's loop | no | `subagents/*.jsonl` |
-| Compactions | `session.compact`, with tokens before and after | `PreCompact` | `compact_boundary` rows |
-| Cost and rate limits | `session.measure` | no | the transcript's `cost-state` row |
-
-A request's context is what it was answered over: uncached input plus cache reads plus cache writes. The transcripts don't record the window size, so the bridge reads 1M for models with `[1m]` in their id or for any reading past 200k, and 200k otherwise.
-
-### How it works
-
-```
-Claude Code ──(mod hooks / settings hooks)──► bridge :7337 ──(SSE)──► the office (browser, Three.js)
-~/.claude/projects/*/*.jsonl ─────────────────►   └─ GET /history
+```sh
+npx github:tharun-se95/ModsArena install-hooks   # adds the hooks to ~/.claude/settings.json (backed up first)
+npx github:tharun-se95/ModsArena                 # starts the bridge and opens the office; leave it running
 ```
 
-- **`agent-office/`** is the Claude Code plugin (a mod), listed in this repository's marketplace (`.claude-plugin/marketplace.json`). It hooks `session.start`, `session.measure`, `session.compact`, `turn.step`, `turn.start`, `turn.complete`, `agent.spawn` and `tool.call`. Every tool call is attributed to the agent loop that made it (`agentId`), and every subagent to its parent (`parentAgentId`). Hooks run in a sandbox without Node, so events are queued in memory and flushed to the bridge every 250 ms with `$.http.fetch`. Context readings are coalesced so only the newest is sent, and a tool call never waits on the visualizer. On session start the mod also starts the bridge (`$.process.spawn`, with `--background`, so it runs on after that session ends and stops by itself after 30 idle minutes) if none is running, and `/office` waits for it before opening the page.
-- **`agent-office/server/`** is the bridge, plus `cli.mjs` (what `npx github:tharun-se95/ModsArena` runs) and `settings-hooks.mjs` (the settings-hooks installer). It uses only Node built-ins and has no dependencies. It accepts events on `POST /event` and keeps the last 8,000, plus the newest context reading per session and agent. It streams them to browsers over Server-Sent Events and replays the backlog when a browser connects. `GET /history` summarizes recent transcripts, cached by file modification time. `GET /transcript` follows one session's or subagent's transcript from a byte offset (`transcript.mjs`). `POST /chat` queues a message from the office, and the session's mod collects it from `GET /inbox` (`chat.mjs`, with the checks in `guard.mjs`). `POST /answer` takes an answer to a question a session is holding, under the same checks, and the session's mod waits for it on `GET /answer/wait` (`asks.mjs`). One bridge serves every session on the machine. `GET /healthz` reports its version; a bridge the mod started (`--managed`) steps down on `POST /shutdown` when a newer copy's bridge starts with `--replace`, so an update doesn't leave the old one serving the old page. It strips any credentials from remote URLs before showing them.
-- **`visualizer/`** is the page's source, in plain Three.js: `model.js` turns events into projects, sessions, agents and tools; `words.js` turns the same events into sentences; `table.js` lays out the office and animates the critters (`office.js` builds the rooms, desks, coffee corner and office shell; `character.js` builds each critter, `crab.js` the robot crabs, with their kits from `crab-kits.js`); and `panels.js` writes the columns around it. Colors come from CSS tokens on the page, so it follows your light or dark setting. It's built into `agent-office/server/public/app.js`, which is committed, so running it needs only Node; CI checks the committed file matches its source.
+`install-hooks --project` writes to `./.claude/settings.json` instead, and `--port N` picks another port. Each hook sends its input to the bridge, waits at most a second, and never blocks or fails a tool call.
 
 ### Options
 
-The plugin has two options. Change them with `/plugin configure agent-office@modsarena`, or under `pluginConfigs` in settings:
+Change them with `/plugin configure agent-office@modsarena`:
 
 | Option | Default | |
 | --- | --- | --- |
 | `port` | `7337` | The port the bridge listens on |
-| `autoStart` | `true` | Start the bundled bridge when none answers |
+| `autoStart` | `true` | Start the bridge when a session starts and none answers |
 
-The bridge on its own: `node agent-office/server/server.mjs [--port 7337] [--history-days 14] [--demo]`.
+### Learn more
 
-### Develop
+- [The guide](docs/guide.md): everything in the office, talking to agents, running work, and how it works inside
+- [Compatibility and stability](docs/compatibility.md): what's supported, and what won't change without a major version
+- [CONTRIBUTING.md](CONTRIBUTING.md): build, test and release
+- [CHANGELOG.md](CHANGELOG.md)
 
-```sh
-git clone https://github.com/tharun-se95/ModsArena && cd ModsArena
-claude --plugin-dir ./agent-office               # load the plugin from your checkout
-cd visualizer && npm install && npm run build    # rebuild the page (or: npm run watch)
-claude plugin validate --strict .                # the marketplace
-claude plugin validate --strict agent-office     # the plugin, as the engine will load it
-claude plugin test agent-office                  # mod tests (hooks/register.test.ts)
-npm test                                         # bridge, CLI and page model: schema, history, transcripts, settings hooks
-node scripts/build-demo-site.mjs                 # the hosted demo, into site/
-```
-
-CI (`.github/workflows/ci.yml`) runs all of these on every pull request. `.github/workflows/pages.yml` publishes the demo to GitHub Pages from `main`. To release: bump `version` in `agent-office/.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` (`metadata.version`; the plugin's entry has none, so `plugin.json` is the one Claude Code reads) and both `package.json` files, add a `CHANGELOG.md` section, merge, then either tag `main` (`git tag v0.2.1 && git push origin v0.2.1`) or run **Actions → Release → Run workflow** on `main`, which creates the tag itself. `.github/workflows/release.yml` checks the tag against every manifest (`node scripts/version.mjs check`) and publishes a GitHub Release with that section as its notes; `marketplace update` picks the new version up.
-
-The bridge's event schema is documented at the top of `agent-office/server/normalize.mjs`. Any other producer, such as an OpenTelemetry receiver, can `POST` the same shapes.
+Agent Office is a community project. It isn't made or endorsed by Anthropic.
 
 ## License
 

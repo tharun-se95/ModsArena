@@ -36,5 +36,10 @@ agent-office@modsarena`) is how you get them.
 - Deletes only ever remove Claude Code's transcripts under
   `~/.claude/projects`, never project files.
 
-Nothing is sent anywhere else by the bridge. The page loads its fonts from
-Google Fonts, for now.
+- Only your account can feed it or open it: the bridge keeps a secret in
+  `~/.claude/agent-office/` readable by you alone, sessions send it, the
+  bridge proves it knows it before they do, and the page opens with a key
+  made from it and stays signed in with an HttpOnly cookie.
+
+Nothing is sent anywhere else: the bridge makes no outbound requests, and the
+page loads nothing from anywhere but the bridge (its fonts ship with it).

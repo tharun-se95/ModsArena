@@ -26,7 +26,7 @@ const INBOX_MS = 1000
 const QUEUE_LIMIT = 2000
 const RESPAWN_MS = 15000
 const BRIDGE_WAIT_MS = 8000
-const MIN_NODE = 18
+const MIN_NODE = 20
 const WELCOMED = 'welcomed'
 // When the toast last offered auto-update, and whether you said no to it.
 const UPDATES_OFFERED = 'updatesOfferedAt'

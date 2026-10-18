@@ -10,23 +10,38 @@ on:
 permissions:
   contents: read
 
+# Actions are pinned to the commit their tag pointed at (Dependabot keeps
+# them current), and so is the Claude Code CLI the plugin is checked with.
+env:
+  CLAUDE_CODE_VERSION: 2.1.302
+
 jobs:
   bridge:
-    name: Bridge, CLI and version tests
-    runs-on: ubuntu-latest
+    name: Bridge, CLI and version tests (${{ matrix.os }}, Node ${{ matrix.node }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [22]
+        include:
+          - { os: ubuntu-latest, node: 20 }
+          - { os: ubuntu-latest, node: 24 }
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
+      # bash on every OS, so the globs expand the same way.
       - run: node --test agent-office/server/*.test.mjs scripts/*.test.mjs visualizer/src/*.test.mjs
+        shell: bash
 
   page:
     name: Page is built from its source
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -43,15 +58,60 @@ jobs:
           fi
       - run: node scripts/build-demo-site.mjs
 
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+
+  e2e:
+    name: The office in a browser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - run: npm ci
+        working-directory: e2e
+      - run: npx playwright install --with-deps chromium
+        working-directory: e2e
+      - run: npm test
+        working-directory: e2e
+
   plugin:
     name: Plugin and marketplace validate, mod tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-      - run: npm install -g @anthropic-ai/claude-code
+      - run: npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
       - run: claude plugin validate --strict .
       - run: claude plugin validate --strict agent-office
       - run: claude plugin test agent-office
+
+  version:
+    name: Version is bumped for what users install
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      # main is what the marketplace serves: a merge that changes the plugin
+      # without a new version never reaches anyone with auto-update on.
+      - run: node scripts/version.mjs check
+      - run: node scripts/version.mjs bumped "origin/${{ github.base_ref }}"

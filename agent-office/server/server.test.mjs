@@ -273,3 +273,22 @@ test('the bridge proves it knows the secret, without giving it away', async () =
   assert.equal(health.proof, proof(secret, 'abc123'))
   assert.doesNotMatch(JSON.stringify(health), new RegExp(secret))
 })
+
+test('the demo, which opens without signing in, never shows your own sessions', async () => {
+  const port = PORT + 2
+  const child = spawn(process.execPath, [join(import.meta.dirname, 'server.mjs'), '--port', String(port), '--demo'], {
+    env: { ...process.env, CLAUDE_CONFIG_DIR: config }, stdio: 'ignore',
+  })
+  try {
+    let res
+    for (let i = 0; i < 50 && !res; i++) {
+      res = await fetch(`http://127.0.0.1:${port}/history`).then(r => (r.ok ? r : undefined), () => undefined)
+      if (!res) await new Promise(r => setTimeout(r, 100))
+    }
+    const { sessions } = await res.json()
+    assert.ok(sessions.length > 0, 'sample sessions')
+    assert.ok(!sessions.some(s => s.session === 'sess-1' || /hello office/.test(JSON.stringify(s))), 'none of yours')
+  } finally {
+    child.kill()
+  }
+})

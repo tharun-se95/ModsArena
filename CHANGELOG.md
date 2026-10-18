@@ -7,6 +7,46 @@ git tag (`v0.2.1`) with a GitHub Release, and the same version is in
 modsarena (`/plugin` → Marketplaces), a new one arrives on its own;
 otherwise `claude plugin update agent-office@modsarena` fetches it.
 
+## 0.14.0
+
+Ready for people who've never seen it. Agent Office now needs **Node 20 or
+newer** (Node 18 is past its end of life).
+
+- **The demo never shows your sessions.** `npx github:tharun-se95/ModsArena
+  demo` opens without signing in, but it also listed your own past sessions
+  (their titles and projects) next to the sample ones. It now shows sample
+  activity only.
+- **`doctor`.** `npx github:tharun-se95/ModsArena doctor` checks what Agent
+  Office needs, one line each: Node, Claude Code, the bridge (and that it's
+  yours), your secret, and the hooks. It says what to fix, and prints a
+  report to paste into a bug report.
+- **Easier on your laptop.** The office draws at most 60 frames a second.
+  When nothing has happened for 30 seconds, or you're in another window, it
+  idles at 15. **Save battery** turns itself on while a laptop runs on
+  battery (in Chrome and Edge), until you choose in Settings.
+- **Windows.** `/office` can now find and restart an old bridge on Windows
+  too.
+- **A new README.** It covers what the office is, what it needs, how to
+  install it (with what you should see at each step), and what you can do
+  with it. It adds what it reads and what it never sends anywhere,
+  updating, troubleshooting, and how to uninstall, with what's left
+  behind. The full tour moved to [docs/guide.md](docs/guide.md), which now
+  covers running work and deleting conversations.
+- **[Compatibility and stability](docs/compatibility.md):** what Agent
+  Office runs on, and what won't change without a major version.
+- **For contributors:**
+  - [CONTRIBUTING.md](CONTRIBUTING.md) and issue templates (a bug report
+    asks for doctor's output).
+  - Every pull request now runs:
+    - the office end to end in a real browser;
+    - the bridge tests on Linux, macOS and Windows, and on Node 20, 22
+      and 24;
+    - lint;
+    - a check that changes users install bump the version.
+  - The demo site publishes only after CI passes.
+  - Actions are pinned to commits, with Dependabot keeping them current.
+  - A daily canary checks the plugin against the newest Claude Code.
+
 ## 0.13.0
 
 Trust and stability. After updating, run `/office` once: it restarts the

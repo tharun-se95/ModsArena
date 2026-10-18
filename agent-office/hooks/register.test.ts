@@ -137,8 +137,8 @@ test('context readings, requests and compactions reach the bridge', async ($, on
 })
 
 test('nodeProblem explains a missing or old Node, and passes a current one', async () => {
-  expect(nodeProblem(undefined)).toContain('Node 18 or newer')
-  expect(nodeProblem('v16.20.0\n')).toContain('v16.20.0')
+  expect(nodeProblem(undefined)).toContain('Node 20 or newer')
+  expect(nodeProblem('v18.20.0\n')).toContain('v18.20.0')
   expect(nodeProblem('v22.3.0\n')).toBe(undefined)
 })
 
@@ -250,7 +250,7 @@ test('/office says plainly when Node is missing', async ($, on) => {
   on('http.fetch', async () => ({ value: { status: 503, ok: false, headers: {}, text: '' } }))
   on('process.run', async () => { throw new Error('spawn node ENOENT') })
   const answer = await $.command.run({ command: 'office', args: '' })
-  expect(answer.text).toContain('needs Node 18 or newer')
+  expect(answer.text).toContain('needs Node 20 or newer')
 })
 
 test('messages from the office reach the session and its subagents', async ($, on) => {
@@ -530,7 +530,7 @@ test('/office auto-update turns it on with the bridge\'s module, and /office sta
 test('/office auto-update says plainly when Node is missing', async ($, on) => {
   on('process.run', async () => { throw new Error('spawn node ENOENT') })
   const answer = await $.command.run({ command: 'office', args: 'auto-update' })
-  expect(answer.text).toContain('needs Node 18 or newer')
+  expect(answer.text).toContain('needs Node 20 or newer')
 })
 
 function startHost(on: Parameters<Parameters<typeof test>[1]>[1], toasts: string[]) {

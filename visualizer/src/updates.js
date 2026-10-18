@@ -4,7 +4,7 @@
 // where it stands and POST /auto-update changes it, with the page's token
 // like chat (api.js). No bridge (the demo site), no row.
 
-import { post, hasBridge } from './api.js'
+import { post } from './api.js'
 import * as settings from './settings.js'
 
 // The row's words for where things stand: { state, pending } from the

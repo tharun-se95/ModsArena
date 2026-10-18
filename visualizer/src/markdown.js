@@ -22,12 +22,15 @@ const marks = s => s
 export function inline(text) {
   const parts = []
   const hold = html => `\u0000${parts.push(html) - 1}\u0000`
+  // NUL marks a held piece; the text can't carry its own.
+  // eslint-disable-next-line no-control-regex
   const src = String(text ?? '').replace(/\u0000/g, '')
   const held = src.replace(TOKEN, (_, code, label, url, pre, bare) => {
     if (code !== undefined) return hold(`<code>${esc(code)}</code>`)
     if (label !== undefined) return hold(link(url, marks(esc(label))))
     return pre + hold(link(bare, esc(bare)))
   })
+  // eslint-disable-next-line no-control-regex
   return marks(esc(held)).replace(/\u0000(\d+)\u0000/g, (_, i) => parts[i])
 }
 

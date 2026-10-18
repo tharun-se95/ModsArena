@@ -342,14 +342,19 @@ function refreshPanels() {
 // ?debug keeps the last 600 frames' main-thread cost (ms) for profiling.
 const frameCost = params.has('debug') ? [] : null
 
-// A tab you can't see draws nothing; "Save battery" draws 30 frames a
-// second (power.js). The loop starts again when the tab comes back.
+// A tab you can't see draws nothing; otherwise the frame rate follows
+// power.js: 60 at most, 30 saving battery, 15 when idle or unfocused. The
+// loop starts again when the tab comes back.
 let rafId = 0
 let lastFrame = -Infinity
+let lastActive = performance.now()
+const wake = () => { lastActive = performance.now() }
+for (const type of ['pointermove', 'pointerdown', 'wheel', 'keydown', 'focus']) addEventListener(type, wake, { passive: true })
+navigator.getBattery?.().then(power.followBattery, () => {})
 
 function frame(t) {
   rafId = requestAnimationFrame(frame)
-  if (!power.due(t, lastFrame, power.budget().fps)) return
+  if (!power.due(t, lastFrame, power.fpsNow({ now: t, lastActive, focused: document.hasFocus() }))) return
   // Nothing to draw while the phone shows Projects over the office.
   if (!phone.sceneShown()) return
   lastFrame = t
@@ -374,7 +379,7 @@ setInterval(() => { if (!document.hidden) refreshPanels() }, PANEL_REFRESH_MS)
 
 settings.add({
   id: 'low-power', type: 'toggle', label: 'Save battery',
-  hint: 'Draws 30 frames a second, a little softer, with simpler shadows',
+  hint: 'Draws 30 frames a second, a little softer, with simpler shadows. On by itself while a laptop runs on battery, until you choose',
   get: power.isSaving, set: power.setSaving,
 })
 power.onChange(table.setPower)
@@ -385,6 +390,7 @@ if (!isDemo) void updates.mount()
 // Sources
 
 function ingest(ev) {
+  wake()
   desk.onEvent(ev)
   if (!shown(ev)) return
   model.apply(ev)

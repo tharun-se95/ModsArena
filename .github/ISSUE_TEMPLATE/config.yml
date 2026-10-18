@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a vulnerability
+    url: https://github.com/tharun-se95/ModsArena/security/advisories/new
+    about: Privately, so it can be fixed before anyone else knows.
+  - name: Try the demo
+    url: https://tharun-se95.github.io/ModsArena/
+    about: See the office with sample activity, nothing to install.

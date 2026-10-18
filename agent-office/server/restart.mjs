@@ -23,17 +23,40 @@ export function isOurBridge(command) {
 export const parsePids = text => String(text ?? '').split(/\s+/).map(Number).filter(n => Number.isInteger(n) && n > 0)
 
 const run = (cmd, args) => new Promise(resolve => {
-  execFile(cmd, args, { timeout: 3000 }, (err, stdout) => resolve(err ? '' : stdout))
+  execFile(cmd, args, { timeout: 5000, windowsHide: true }, (err, stdout) => resolve(err ? '' : stdout))
 })
 
-// Which process listens on the port (macOS and Linux; Windows has no lsof).
+// The pid listening on 127.0.0.1:port in `netstat -ano` output (Windows).
+export function parseNetstat(text, port) {
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    const cols = line.trim().split(/\s+/)
+    if (cols[0] !== 'TCP' || !/LISTEN/i.test(cols[3] ?? '')) continue
+    if (cols[1] === `127.0.0.1:${port}` || cols[1] === `0.0.0.0:${port}` || cols[1] === `[::1]:${port}`) {
+      const pid = Number(cols[4])
+      if (Number.isInteger(pid) && pid > 0) return pid
+    }
+  }
+  return undefined
+}
+
+// Which process listens on the port: lsof on macOS and Linux, netstat on
+// Windows.
 export async function listenerPid(port) {
-  if (process.platform === 'win32') return undefined
+  if (process.platform === 'win32') {
+    const pid = parseNetstat(await run('netstat', ['-ano', '-p', 'TCP']), port)
+    return pid === process.pid ? undefined : pid
+  }
   const pids = parsePids(await run('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t']))
   return pids.find(p => p !== process.pid)
 }
 
-export const commandOf = async pid => (await run('ps', ['-o', 'command=', '-p', String(pid)])).trim()
+export async function commandOf(pid) {
+  if (process.platform === 'win32') {
+    const query = `(Get-CimInstance Win32_Process -Filter "ProcessId=${Number(pid)}").CommandLine`
+    return (await run('powershell', ['-NoProfile', '-NonInteractive', '-Command', query])).trim()
+  }
+  return (await run('ps', ['-o', 'command=', '-p', String(pid)])).trim()
+}
 
 // Stop the bridge holding the port, if it is ours. `pid` is what its
 // /healthz said, when it says; else the port's listener. Returns the pid

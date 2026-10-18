@@ -55,7 +55,7 @@ import { fileURLToPath } from 'node:url'
 import { normalize, GAUGES, gaugeKey } from './normalize.mjs'
 import { findProject } from './projects.mjs'
 import { readHistory, tailContext, summarizeTranscript, projectsDir } from './history.mjs'
-import { startDemo, demoJob, answerDemo, stopDemo } from './demo.mjs'
+import { startDemo, demoJob, answerDemo, stopDemo, demoHistory } from './demo.mjs'
 import { refusal, newToken, tokenMatches, TOKEN_HEADER, INBOX_HEADER, CONTROL_HEADER } from './guard.mjs'
 import * as chat from './chat.mjs'
 import { createJobs } from './jobs.mjs'
@@ -228,6 +228,7 @@ const newDirs = new Set()
 async function isKnown(dir) {
   if (knownDirs.has(dir) || newDirs.has(dir)) return true
   // Past sessions count too; read them once, on demand.
+  if (flag('demo')) return knownDirs.has(dir)
   try {
     for (const s of await readHistory({ days: HISTORY_DAYS })) know(s.cwd, s.project?.id)
   } catch {}
@@ -727,7 +728,8 @@ async function handle(req, res) {
     try {
       // A year at most: every transcript in range is read.
       const days = Math.min(365, Math.max(1, Number(searchParams.get('days') ?? HISTORY_DAYS) || HISTORY_DAYS))
-      json(res, 200, { sessions: await readHistory({ days }) })
+      // The demo opens without signing in, so it never reads your transcripts.
+      json(res, 200, { sessions: flag('demo') ? demoHistory() : await readHistory({ days }) })
     } catch (err) {
       json(res, 500, { error: String(err.message ?? err) })
     }

@@ -36,7 +36,7 @@ export async function findTranscript(session, agent, root = projectsDir()) {
   if (!ID.test(session ?? '') || (agent !== undefined && !ID.test(agent))) return null
   let path = found.get(session)
   if (!path) {
-    let dirs = []
+    let dirs
     try { dirs = await readdir(root) } catch { return null }
     for (const dir of dirs) {
       const candidate = join(root, dir, `${session}.jsonl`)

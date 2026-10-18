@@ -134,8 +134,14 @@ else if (a === 'agents') console.log(JSON.stringify([{ id: '1a2b3c4d', sessionId
 else if (a === 'stop') console.log('stopped 1a2b3c4d')
 `)
   await chmod(fake, 0o755)
+  // Windows runs no script directly: hand it an npm-style claude.cmd that
+  // wraps the stand-in, which resolveClaude() unwraps to `node fake`.
+  if (process.platform === 'win32') {
+    await writeFile(`${fake}.js`, await readFile(fake, 'utf8'))
+    await writeFile(`${fake}.cmd`, `@ECHO off\r\n"%~dp0\\node.exe" "%~dp0\\claude.js" %*\r\n`)
+  }
   bridge = spawn(process.execPath, [join(import.meta.dirname, 'server.mjs'), '--port', String(PORT)], {
-    env: { ...process.env, CLAUDE_CONFIG_DIR: root, AGENT_OFFICE_CLAUDE: fake, CLAUDE_CODE_SESSION_ID: 'the-session-that-started-it' }, stdio: 'ignore',
+    env: { ...process.env, CLAUDE_CONFIG_DIR: root, AGENT_OFFICE_CLAUDE: process.platform === 'win32' ? `${fake}.cmd` : fake, CLAUDE_CODE_SESSION_ID: 'the-session-that-started-it' }, stdio: 'ignore',
   })
   for (let i = 0; i < 50; i++) {
     if (await fetch(`${base}/healthz`).then(r => r.ok, () => false)) break
