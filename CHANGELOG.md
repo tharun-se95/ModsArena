@@ -7,6 +7,37 @@ git tag (`v0.2.1`) with a GitHub Release, and the same version is in
 modsarena (`/plugin` → Marketplaces), a new one arrives on its own;
 otherwise `claude plugin update agent-office@modsarena` fetches it.
 
+## 1.0.0
+
+Agent Office 1.0. Nothing changes in how it works from 0.15; what changes is
+the promise:
+
+- **A stable surface.** These change only in a new major version, with
+  anything going away marked deprecated here at least one minor release
+  before:
+  - the event schema producers send;
+  - how a producer talks to the bridge (its secret and its proof);
+  - the plugin's options (`port`, `autoStart`);
+  - `/office` and the CLI's commands;
+  - where Agent Office keeps its files.
+
+  The full list is in the
+  [stability policy](docs/compatibility.md#stability).
+- **What it runs on, and how that's checked.** Every change is tested:
+  - on Linux, macOS and Windows;
+  - on Node 20, 22 and 24;
+  - in a real browser;
+  - against a pinned Claude Code.
+
+  A daily canary also tests the newest Claude Code. See
+  [compatibility](docs/compatibility.md).
+- **Fixes go to the latest release.** Keep `/office auto-update` on to
+  always have them. To report a vulnerability, see
+  [SECURITY.md](SECURITY.md).
+
+If you're coming from before 0.13, run `/office` once after updating: it
+restarts the office's bridge from the new version.
+
 ## 0.15.0
 
 The release candidate for 1.0: nothing new to learn, fewer ways to lose
