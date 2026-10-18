@@ -121,7 +121,7 @@ function showStatus($: EngineInterface) {
   )
 }
 
-type Health = { ok?: boolean; name?: string; version?: string; managed?: boolean; events?: number; viewers?: number; pid?: number; proof?: string; isTrusted?: boolean }
+type Health = { ok?: boolean; name?: string; version?: string; managed?: boolean; events?: number; viewers?: number; pid?: number; proof?: string; isTrusted?: boolean; errors?: number; uptimeS?: number }
 
 const SECRET_HEADER = 'x-agent-office-secret'
 const TRUST_MS = 60000 // checked again this often, and whenever a send fails
@@ -340,6 +340,7 @@ async function status($: EngineInterface) {
     if (!found.isTrusted && found.name === 'agent-office' && !found.proof) lines.push(`It's from an older Agent Office than this one${mine ? ` (${mine})` : ''}, which this session doesn't report to; /office restarts it.`)
     else if (!found.isTrusted) lines.push(`It isn't your Agent Office (it couldn't prove it knows your account's secret), so this session sends it nothing. If another program uses port ${link.port}, set another port in this plugin's options.`)
     else if (isStale(found, mine)) lines.push(`It's from an older Agent Office than this one (${mine}); /office restarts it.`)
+    if (found.isTrusted && found.errors) lines.push(`It has hit ${found.errors} error${found.errors === 1 ? '' : 's'} since it started; ~/.claude/agent-office/bridge.log says what.`)
     else if (mine && !found.version) lines.push(`It's from an older Agent Office than this one (${mine}). It stops when the session that started it ends.`)
   } else {
     const problem = nodeProblem(await nodeVersion($))

@@ -80,3 +80,14 @@ test('deleting a transcript removes it and its subagents, only under the project
   await assert.rejects(stat(join(root, '-w-app', 's1')))
   assert.ok(await stat(join(root, '-w-app')))
 })
+
+test('a symlinked .claude/agents can’t send the file outside the project', async () => {
+  const { symlink } = await import('node:fs/promises')
+  const dir = await mkdtemp(join(tmpdir(), 'office-agents-link-'))
+  const elsewhere = await mkdtemp(join(tmpdir(), 'office-elsewhere-'))
+  await mkdir(join(dir, '.claude'), { recursive: true })
+  await symlink(elsewhere, join(dir, '.claude', 'agents'))
+  const out = await writeAgent({ name: 'sneaky', description: 'x', instructions: 'y', scope: 'project' }, { dir })
+  assert.equal(out.status, 400)
+  await assert.rejects(stat(join(elsewhere, 'sneaky.md')))
+})

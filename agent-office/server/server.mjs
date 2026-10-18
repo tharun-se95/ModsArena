@@ -49,12 +49,12 @@
 import { createServer } from 'node:http'
 import { readFileSync, openSync, statSync, renameSync, mkdirSync } from 'node:fs'
 import { spawn } from 'node:child_process'
-import { readFile, stat } from 'node:fs/promises'
-import { extname, join, dirname, isAbsolute } from 'node:path'
+import { readFile, stat, realpath } from 'node:fs/promises'
+import { extname, join, dirname, isAbsolute, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { normalize, GAUGES, gaugeKey } from './normalize.mjs'
 import { findProject } from './projects.mjs'
-import { readHistory, tailContext, summarizeTranscript } from './history.mjs'
+import { readHistory, tailContext, summarizeTranscript, projectsDir } from './history.mjs'
 import { startDemo, demoJob, answerDemo, stopDemo } from './demo.mjs'
 import { refusal, newToken, tokenMatches, TOKEN_HEADER, INBOX_HEADER, CONTROL_HEADER } from './guard.mjs'
 import * as chat from './chat.mjs'
@@ -85,6 +85,7 @@ if (!LOOPBACK.has(HOST)) {
 }
 const HISTORY_DAYS = Number(option('history-days', 14))
 const LOG_LIMIT = 8000
+const CLIENT_BUFFER_MAX = 8 * 1024 * 1024
 // A fresh secret each run, handed to the office page in its HTML.
 const TOKEN = newToken()
 // This account's secret (secret.mjs): your sessions send it, the bridge
@@ -106,6 +107,8 @@ const VERSION = (() => {
   }
 })()
 const MANAGED = flag('managed')
+// AGENT_OFFICE_DEBUG=1: a log line per request (keys and nonces left out).
+const DEBUG = process.env.AGENT_OFFICE_DEBUG === '1'
 const REPLACE_MS = 5000
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -188,6 +191,23 @@ function replay() {
   const kept = [...anchors.values()].flatMap(a => [...a.events.values()]).filter(ev => !inLog.has(ev)).sort((a, b) => a.t - b.t)
   return [...kept, ...log, ...gauges.values()]
 }
+
+// The replay as a page receives it, kept under REPLAY_MAX bytes: the oldest
+// of the log goes first (what places each thread, and the gauges, stay).
+const REPLAY_MAX = 16 * 1024 * 1024
+function replayText() {
+  let text = JSON.stringify(replay())
+  for (let drop = Math.ceil(log.length / 4); text.length > REPLAY_MAX && drop <= log.length; drop *= 2) {
+    const inLog = new Set(log)
+    const kept = [...anchors.values()].flatMap(a => [...a.events.values()]).filter(ev => !inLog.has(ev)).sort((a, b) => a.t - b.t)
+    text = JSON.stringify([...kept, ...log.slice(drop), ...gauges.values()])
+  }
+  return text
+}
+
+// What /healthz reports about how the bridge is doing, for /office status
+// and bug reports.
+const stats = { startedAt: Date.now(), errors: 0, dropped: 0, badPosts: 0, slowPages: 0 }
 
 // The bridge names projects itself, so live and past sessions of one
 // repository land in one room whatever the producer called it.
@@ -306,17 +326,43 @@ function publish(events) {
     // A finished agent's last reading has nothing left to show.
     if (ev.kind === 'agent.end') gauges.delete(gaugeKey({ kind: 'agent.context', session: ev.session, agent: ev.agent }))
     const frame = `data: ${JSON.stringify(ev)}\n\n`
-    for (const res of clients) res.write(frame)
+    for (const res of clients) {
+      // A page that stopped reading (asleep, frozen) isn't buffered forever;
+      // it reconnects and gets a fresh replay.
+      if (res.writableLength > CLIENT_BUFFER_MAX) {
+        stats.slowPages++
+        clients.delete(res)
+        res.end()
+      } else res.write(frame)
+    }
   }
   if (log.length > LOG_LIMIT) log.splice(0, log.length - LOG_LIMIT)
   pruneAnchors()
 }
 
+// Classic hook payloads often make no event (tools the office doesn't
+// show), so they don't count as dropped.
+const hasClassic = payload => (Array.isArray(payload) ? payload : [payload]).some(p => typeof p?.hook_event_name === 'string')
+
+async function ownTranscript(path) {
+  try {
+    const [root, real] = await Promise.all([realpath(projectsDir()), realpath(path)])
+    const rel = relative(root, real)
+    if (!real.endsWith('.jsonl') || rel.startsWith('..') || isAbsolute(rel)) return undefined
+    return (await stat(real)).isFile() ? real : undefined
+  } catch {
+    return undefined
+  }
+}
+
 // Settings hooks carry no context figures, but they name the transcript.
 async function contextFromTranscript(payloads) {
   for (const p of Array.isArray(payloads) ? payloads : [payloads]) {
-    if (p?.hook_event_name !== 'Stop' || !p.transcript_path) continue
-    const context = await tailContext(p.transcript_path)
+    if (p?.hook_event_name !== 'Stop' || typeof p.transcript_path !== 'string') continue
+    // Only a transcript Claude Code keeps, never any file a post names.
+    const path = await ownTranscript(p.transcript_path)
+    if (!path) continue
+    const context = await tailContext(path)
     if (context) publish([{ t: Date.now(), kind: 'agent.context', session: String(p.session_id), ...context }])
   }
 }
@@ -417,7 +463,9 @@ const json = (res, status, body) => {
 // One bad request never takes the office down: anything a route throws is
 // answered with an error, and the bridge keeps serving.
 const server = createServer((req, res) => {
+  if (DEBUG) res.on('finish', () => console.log(`[agent-office] ${req.method} ${req.url.replace(/([?&](key|nonce)=)[^&]*/g, '$1…')} ${res.statusCode}`))
   handle(req, res).catch(err => {
+    stats.errors++
     console.error('[agent-office] request failed:', err?.message ?? err)
     if (!res.headersSent) json(res, 500, { error: 'something went wrong in the bridge' })
     else res.end()
@@ -646,10 +694,13 @@ async function handle(req, res) {
     try {
       const payload = JSON.parse(await readBody(req))
       const events = normalize(payload)
+      const sent = Array.isArray(payload) ? payload.length : 1
+      if (!hasClassic(payload)) stats.dropped += Math.max(0, sent - events.length)
       publish(events)
       json(res, 200, { accepted: events.length })
       void contextFromTranscript(payload)
     } catch (err) {
+      stats.badPosts++
       res.writeHead(400).end(String(err.message ?? err))
     }
     return
@@ -661,7 +712,7 @@ async function handle(req, res) {
       'cache-control': 'no-cache',
       connection: 'keep-alive',
     })
-    res.write(`event: replay\ndata: ${JSON.stringify(replay())}\n\n`)
+    res.write(`event: replay\ndata: ${replayText()}\n\n`)
     clients.add(res)
     busy()
     const ping = setInterval(() => res.write(': ping\n\n'), 15000)
@@ -674,7 +725,8 @@ async function handle(req, res) {
 
   if (req.method === 'GET' && pathname === '/history') {
     try {
-      const days = Number(searchParams.get('days') ?? HISTORY_DAYS)
+      // A year at most: every transcript in range is read.
+      const days = Math.min(365, Math.max(1, Number(searchParams.get('days') ?? HISTORY_DAYS) || HISTORY_DAYS))
       json(res, 200, { sessions: await readHistory({ days }) })
     } catch (err) {
       json(res, 500, { error: String(err.message ?? err) })
@@ -686,7 +738,7 @@ async function handle(req, res) {
     const nonce = searchParams.get('nonce')
     // Proof it knows this account's secret, so a session never reports to
     // another account's program on the port.
-    json(res, 200, { ok: true, name: 'agent-office', ...(nonce && nonce.length <= 200 && { proof: proof(SECRET, nonce) }), version: VERSION, managed: MANAGED, pid: process.pid, demo: flag('demo'), chat: true, jobs: true, answers: true, resume: true, manage: true, autoUpdate: updates(), events: log.length, viewers: clients.size })
+    json(res, 200, { ok: true, name: 'agent-office', ...(nonce && nonce.length <= 200 && { proof: proof(SECRET, nonce) }), version: VERSION, managed: MANAGED, pid: process.pid, demo: flag('demo'), chat: true, jobs: true, answers: true, resume: true, manage: true, autoUpdate: updates(), events: log.length, viewers: clients.size, uptimeS: Math.round((Date.now() - stats.startedAt) / 1000), node: process.version, platform: process.platform, errors: stats.errors, dropped: stats.dropped, badPosts: stats.badPosts, slowPages: stats.slowPages })
     return
   }
 

@@ -21,6 +21,8 @@ test('talking to an ended session resumes it in the background, your words after
   assert.deepEqual(resumeArgs({ session: 'abc-123', text: '--help me' }), ['--bg', '--resume', 'abc-123', '--', '--help me'])
   assert.deepEqual(checkResume({ session: 'abc-123', text: '  hi ' }), { session: 'abc-123', text: 'hi' })
   assert.ok(checkResume({ session: '../etc', text: 'hi' }).error)
+  assert.ok(checkResume({ session: '--dangerously-skip-permissions', text: 'hi' }).error, 'never an option')
+  assert.deepEqual(startArgs({ title: '--help me', prompt: 'x' }).slice(0, 3), ['--bg', '-n', 'help me'])
   assert.ok(checkResume({ session: 'abc', text: ' ' }).error)
 })
 

@@ -54,7 +54,7 @@ function bubble(entry, results) {
       return `<div class="tx problem" role="alert"><b>${escapeHtml(entry.title)}</b><p>${escapeHtml(entry.fix)}</p><small>Claude Code said: ${escapeHtml(entry.line)}</small>${time}</div>`
     // What the work made, as the card the Outputs tab shows.
     case 'output':
-      return `<div class="tx made ${entry.output.type}">${outputCard(entry.output)}</div>`
+      return `<div class="tx made ${escapeHtml(entry.output.type)}">${outputCard(entry.output)}</div>`
     // A checklist update (TodoWrite): where it stands, folded.
     case 'todo': {
       const done = entry.items.filter(i => i.status === 'completed').length

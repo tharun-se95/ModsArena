@@ -36,6 +36,7 @@ const STATE = {
   done: ['Done', 'done'],
   stopped: ['Stopped', 'failed'],
   failed: ['Didn’t start', 'failed'],
+  lost: ['Lost track', 'failed'],
 }
 const LIVE = new Set(['starting', 'working', 'blocked'])
 
@@ -154,7 +155,8 @@ function ticket(job) {
     ? `<p class="jhelp">It stopped to ask for your OK. To see what and answer, open a terminal and run <code>${escapeHtml(attach)}</code><button type="button" class="jcopy" data-copy="${escapeHtml(attach)}">Copy</button></p>`
     : job.state === 'failed' && job.error ? `<p class="jhelp bad">${escapeHtml(job.error)}</p>`
       : live && attach ? `<p class="jhelp muted">Running in the background. To watch it or step in: <code>${escapeHtml(attach)}</code></p>`
-        : job.state === 'done' && attach ? `<p class="jhelp muted">To read its answer or ask for more: <code>${escapeHtml(attach)}</code></p>` : ''
+        : job.state === 'done' && attach ? `<p class="jhelp muted">To read its answer or ask for more: <code>${escapeHtml(attach)}</code></p>`
+          : job.state === 'lost' ? '<p class="jhelp muted">Claude Code no longer lists it, so the office stopped following it. <code>claude agents</code> shows the background sessions it knows.</p>' : ''
   const session = job.session && nodes.get(`s:${job.session}`) ? `s:${job.session}` : [...nodes.values()].find(n => n.kind === 'session' && jobFor(n) === job)?.id
   return `
     <li class="jticket ${job.state}">

@@ -26,7 +26,7 @@ export const hostOf = url => { try { return new URL(url).host.replace(/^www\./, 
 
 // What Open does: follow its link, or show it full size here.
 export function openOf(o) {
-  if (o.url) return { href: o.url }
+  if (/^https?:\/\//i.test(o.url ?? '')) return { href: o.url }
   if (o.type === 'image' || (o.type === 'plan' && o.text)) return { zoom: keyOf(o) }
   return null
 }
@@ -60,7 +60,7 @@ export function card(o, { where = '', now = Date.now(), copied = null } = {}) {
   const open = openOf(o)
   const copy = copyOf(o)
   const sub = [o.url ? hostOf(o.url) : o.path, where, ago(o.t)].filter(Boolean).join(' · ')
-  const diff = o.meta?.additions !== undefined ? `<span class="diff"><ins>+${o.meta.additions}</ins> <del>−${o.meta.deletions ?? 0}</del></span>` : ''
+  const diff = o.meta?.additions !== undefined ? `<span class="diff"><ins>+${Number(o.meta.additions) || 0}</ins> <del>−${Number(o.meta.deletions) || 0}</del></span>` : ''
   const isCopied = copied === keyOf(o)
   const openBtn = !open ? ''
     : open.href ? `<a class="dv-btn primary" href="${escapeHtml(open.href)}" target="_blank" rel="noopener">Open<span aria-hidden="true"> ↗</span></a>`

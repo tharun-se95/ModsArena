@@ -96,15 +96,60 @@ function fromClassic(p, now) {
   }
 }
 
+// What the bridge keeps of an event, whoever sent it: plain values only
+// (strings capped, numbers finite, lists and nesting bounded), ids that are
+// ids, a `type` from its kind's list, links that are web links, picture
+// paths that are absolute, and no picture data (only the bridge serves
+// pictures, from /asset). The page escapes everything it shows too; this is
+// so nothing odd ever reaches it, or the log every page replays.
+const ID = /^[\w.:@-]{1,160}$/
+const ID_FIELDS = ['agent', 'parent', 'id', 'turnId', 'job', 'from', 'to']
+const TYPES = {
+  'asset.add': new Set(['image', 'artifact', 'pr', 'link', 'file', 'plan']),
+  'ask.open': new Set(['question', 'plan', 'permission']),
+}
+const TEXT_MAX = 20000
+const LIST_MAX = 200
+const KEYS_MAX = 100
+const DEPTH_MAX = 6
+
+function plainValue(v, depth) {
+  if (typeof v === 'string') return v.length > TEXT_MAX ? v.slice(0, TEXT_MAX) : v
+  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined
+  if (typeof v === 'boolean' || v === null) return v
+  if (depth >= DEPTH_MAX || typeof v !== 'object') return undefined
+  if (Array.isArray(v)) return v.slice(0, LIST_MAX).map(x => plainValue(x, depth + 1)).filter(x => x !== undefined)
+  const out = {}
+  for (const [k, x] of Object.entries(v).slice(0, KEYS_MAX)) {
+    if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue
+    const kept = plainValue(x, depth + 1)
+    if (kept !== undefined) out[k] = kept
+  }
+  return out
+}
+
+export function clean(p, now = Date.now()) {
+  if (!KINDS.has(p?.kind) || typeof p.session !== 'string' || !ID.test(p.session)) return undefined
+  const ev = plainValue(p, 0)
+  ev.t = typeof p.t === 'number' && Number.isFinite(p.t) ? p.t : now
+  for (const k of ID_FIELDS) if (k in ev && !(typeof ev[k] === 'string' && ID.test(ev[k]))) delete ev[k]
+  const types = TYPES[ev.kind]
+  if (types && !types.has(ev.type)) return undefined
+  if ('url' in ev && !(typeof ev.url === 'string' && /^https?:\/\/[^\s"'<>]+$/i.test(ev.url))) delete ev.url
+  if ('path' in ev && !(typeof ev.path === 'string' && /^(\/|[A-Za-z]:[\\/])/.test(ev.path))) delete ev.path
+  delete ev.src
+  return ev
+}
+
 export function normalize(payload, now = Date.now()) {
   const items = Array.isArray(payload) ? payload : [payload]
   const out = []
   for (const p of items) {
     if (!p || typeof p !== 'object') continue
-    if (typeof p.hook_event_name === 'string') {
-      out.push(...fromClassic(p, now))
-    } else if (KINDS.has(p.kind) && typeof p.session === 'string') {
-      out.push({ t: now, ...p })
+    const found = typeof p.hook_event_name === 'string' ? fromClassic(p, now) : [p]
+    for (const ev of found) {
+      const kept = clean(ev, now)
+      if (kept) out.push(kept)
     }
   }
   return out

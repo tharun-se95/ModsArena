@@ -69,3 +69,22 @@ test('reading picks up where it left off, and waits out a half-written line', as
   const third = await readTranscript(path, second.next)
   assert.deepEqual(third.entries.map(e => e.kind), ['tool'])
 })
+
+test('a huge transcript is read a couple of megabytes at a time', async () => {
+  const { mkdtemp, writeFile } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const dir = await mkdtemp(join(tmpdir(), 'office-big-'))
+  const row = JSON.stringify({ type: 'assistant', timestamp: '2026-10-01T00:00:00Z', message: { content: [{ type: 'text', text: 'x'.repeat(1000) }] } }) + '\n'
+  const path = join(dir, 's.jsonl')
+  await writeFile(path, row.repeat(6000)) // about 6 MB
+  let next = 0
+  let rows = 0
+  for (let i = 0; i < 10; i++) {
+    const got = await readTranscript(path, next)
+    assert.ok(got.next - next <= 2 * 1024 * 1024)
+    rows += got.entries.length
+    if (got.next === next) break
+    next = got.next
+  }
+  assert.equal(rows, 6000)
+})

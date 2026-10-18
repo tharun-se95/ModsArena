@@ -7,6 +7,43 @@ git tag (`v0.2.1`) with a GitHub Release, and the same version is in
 modsarena (`/plugin` → Marketplaces), a new one arrives on its own;
 otherwise `claude plugin update agent-office@modsarena` fetches it.
 
+## 0.13.0
+
+Trust and stability. After updating, run `/office` once: it restarts the
+office and opens it signed in.
+
+- **The office is yours alone.** On a shared computer every account can
+  reach 127.0.0.1, so the bridge now keeps a secret in
+  `~/.claude/agent-office/` that only your account can read. Your sessions
+  send it with everything they report, and they send nothing until the
+  bridge on the port has proved it knows it, so another account's program
+  there gets nothing. The page opens with a key made from it (`/office` and
+  the CLI put it in the address) and the browser then stays signed in; any
+  other browser gets a page saying how to open it.
+- **The office no longer resets when a session ends.** The bridge used to
+  stop with whichever session happened to start it. It now runs on its
+  own, keeps a log (`~/.claude/agent-office/bridge.log`), and stops by
+  itself after 30 minutes with nobody watching and nothing reporting.
+- **An open office survives a restart.** After the bridge restarts, the page
+  picks up the new connection and keeps sending; after an update it reloads
+  to match the new version.
+- **No WebGL, no problem.** Where the browser can't draw 3D (switched off,
+  a VM, remote desktop), the office says so and everything else works: the
+  inbox, your projects and threads, every conversation.
+- **Everything that reaches the page is checked.** The bridge keeps only
+  plain, well-formed fields from each event (web links only, ids that are
+  ids, capped lengths), and the page escapes every one it shows.
+- **Steadier under load.** One `claude agents` check at a time, jobs Claude
+  Code no longer lists are marked lost instead of polled forever, history
+  scans are shared between pages and capped at a year, huge transcripts are
+  read in 2 MB steps, and a page that stops reading is let go.
+- **Nothing loads from elsewhere.** The fonts ship with the office.
+- **Easier to diagnose.** `/office status` reports errors and where the log
+  is; `AGENT_OFFICE_DEBUG=1` logs every request.
+- Smaller hardening: resumed session ids and job titles can never be read as
+  options, a symlinked `.claude/agents` can't redirect a new agent file,
+  and a restart stops only the process that actually holds the port.
+
 ## 0.12.2
 
 A safety patch. Please update.

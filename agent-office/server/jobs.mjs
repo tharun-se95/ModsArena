@@ -23,6 +23,7 @@ const MAX_PROMPT = 8000
 const MAX_TITLE = 80
 const KINDS = new Set(['write', 'research', 'fix', 'review', 'plan', 'other'])
 const POLL_MS = 3000
+const LOST_AFTER = 20 // polls without a sign of it (about a minute)
 const RUN_MS = 60000
 const KEEP = 50
 
@@ -85,8 +86,9 @@ export function childEnv(env = process.env) {
 
 // The command that starts a job. Never a permission mode, never a bypass:
 // the session asks you the way it always does.
+// The title can't start with a dash, or claude would read it as an option.
 export function startArgs({ title, prompt }) {
-  return ['--bg', '-n', title, '--', prompt]
+  return ['--bg', '-n', title.replace(/^-+\s*/, '') || 'job', '--', prompt]
 }
 
 // Talking to a session that has ended: the same session, picked up again in
@@ -95,7 +97,8 @@ export function resumeArgs({ session, text }) {
   return ['--bg', '--resume', session, '--', text]
 }
 
-const SESSION_ID = /^[\w-]{1,100}$/
+// A session id never starts with a dash (it goes after --resume).
+const SESSION_ID = /^\w[\w-]{0,99}$/
 
 // A request to resume a session, checked, or the reason it can't be.
 export function checkResume(body) {
@@ -168,8 +171,20 @@ export function createJobs({ publish, isKnown, demo }) {
 
   const emit = (kind, job, extra = {}) => publish([{ t: Date.now(), kind, job: job.id, ...extra }])
 
+  // One `claude agents` at a time: a slow one never piles up behind the timer.
+  let isPolling = false
   async function poll() {
-    const live = [...jobs.values()].filter(j => j.short && !['done', 'stopped', 'failed'].includes(j.state))
+    if (isPolling) return
+    isPolling = true
+    try {
+      await pollOnce()
+    } finally {
+      isPolling = false
+    }
+  }
+
+  async function pollOnce() {
+    const live = [...jobs.values()].filter(j => j.short && !['done', 'stopped', 'failed', 'lost'].includes(j.state))
     if (!live.length) { clearInterval(poller); poller = null; return }
     const { code, out } = await run(['agents', '--json', '--all'], { timeout: 15000 })
     if (code !== 0) return
@@ -178,6 +193,14 @@ export function createJobs({ publish, isKnown, demo }) {
     for (const job of live) {
       const say = (...events) => publish(events.map(ev => ({ t: Date.now(), session: job.session, ...ev })))
       const entry = list.find(e => e.id === job.short || e.sessionId?.startsWith(job.short))
+      // Not listed for a minute: Claude Code no longer knows it (or lists it
+      // in a way this can't read). Stop asking, and say so on its ticket.
+      job.misses = entry ? 0 : (job.misses ?? 0) + 1
+      if (job.misses >= LOST_AFTER) {
+        job.state = 'lost'
+        emit('job.update', job, { state: 'lost' })
+        continue
+      }
       const state = stateOf(entry)
       if (entry?.sessionId && !job.session) {
         job.session = entry.sessionId
