@@ -20,6 +20,11 @@ what you were doing.
   port in the moment between the old one stepping down and the new one
   starting, the new one now asks that one to step down too, instead of
   giving up and losing what it was handed.
+- **Folders reached through a link.** A project whose folder is a symlink
+  (or, on a Mac, anything under `/var`, which is really `/private/var`)
+  could be refused when you resumed one of its sessions ("the office only
+  resumes sessions in projects it knows"), and a new project in a trusted
+  folder could still ask you to trust it. Both now go by either spelling.
 - **Settings hooks checked on Windows.** CI now runs the settings hooks'
   exact command through bash against a real bridge on Linux, macOS and
   Windows (Git Bash, which Claude Code runs hooks with there), with and

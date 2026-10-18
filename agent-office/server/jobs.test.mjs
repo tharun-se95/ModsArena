@@ -4,7 +4,7 @@
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdtemp, mkdir, writeFile, readFile, chmod, stat } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, chmod, stat, realpath } from 'node:fs/promises'
 import { request } from 'node:http'
 import { tmpdir } from 'node:os'
 import { credentials } from './test-support.mjs'
@@ -180,7 +180,7 @@ test('a job in a known project starts a background session there, and stops', as
   const log = await read()
   const started = log.find(c => c.args[0] === '--bg')
   assert.deepEqual(started.args, ['--bg', '-n', 'Write a README', '--', 'Write a README'])
-  assert.equal(started.cwd, dir)
+  assert.equal(started.cwd, await realpath(dir))
   assert.equal(started.inherited, null)
   assert.ok(log.some(c => c.args[0] === 'agents'))
   assert.equal((await call('POST', '/jobs/stop', { headers: auth(), body: { id: job.id } })).status, 200)
@@ -202,7 +202,7 @@ test('an ended session is picked up again in its own folder, and can be deleted 
   assert.equal(res.status, 200, res.text)
   const resumed = (await read()).find(c => c.args[1] === '--resume')
   assert.deepEqual(resumed.args, ['--bg', '--resume', 'old-1', '--', 'What did you change?'])
-  assert.equal(resumed.cwd, dir)
+  assert.equal(resumed.cwd, await realpath(dir))
   assert.equal((await call('POST', '/resume', { headers: auth(), body: { session: 'nope-9', text: 'hi' } })).status, 404)
 
   // Deleting for good: its transcript and its subagents', nothing else.

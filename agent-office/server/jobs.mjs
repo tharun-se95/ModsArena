@@ -289,13 +289,15 @@ export function createJobs({ publish, isKnown, demo }) {
     let dir = demo ? body?.dir : await where(req.session)
     if (!demo) {
       if (!dir) return { status: 404, error: 'couldn’t find that session’s transcript' }
+      const said = dir
       try {
         dir = await realpath(resolve(dir))
         if (!(await stat(dir)).isDirectory()) throw new Error()
       } catch {
         return { status: 400, error: 'that session’s project folder isn’t there any more' }
       }
-      if (!(await isKnown(dir))) return { status: 403, error: 'the office only resumes sessions in projects it knows' }
+      // Known under either spelling, as for a new job.
+      if (!(await isKnown(said)) && !(await isKnown(dir))) return { status: 403, error: 'the office only resumes sessions in projects it knows' }
     }
     const title = req.text.replace(/\s+/g, ' ').slice(0, MAX_TITLE)
     const job = { id: randomUUID(), dir: dir ?? '', title, kind: 'resume', prompt: req.text, session: req.session, turnId: `front-desk-${Date.now()}`, state: 'starting', t: Date.now() }

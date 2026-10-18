@@ -81,8 +81,11 @@ export async function openProject({ path, create = false } = {}, { home = homedi
     await mkdir(dir, { recursive: true })
     created = true
   }
-  dir = await realpath(dir)
-  return { dir, created, trusted: isTrusted(dir, config ?? readConfig()) }
+  // Trusted under either spelling: the one you gave, or where it really is
+  // (a symlinked folder, macOS's /var → /private/var, Windows' short names).
+  const settings = config ?? readConfig()
+  const real = await realpath(dir)
+  return { dir: real, created, trusted: isTrusted(real, settings) || isTrusted(dir, settings) }
 }
 
 // ---------------------------------------------------------------------------
