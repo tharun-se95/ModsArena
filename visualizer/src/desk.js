@@ -8,6 +8,7 @@
 // Jobs run in the background under your own permission settings, so the
 // sheet says plainly where to approve what one needs and how to stop it.
 
+import { post, hasBridge } from './api.js'
 import { nodes } from './model.js'
 import { escapeHtml, ago } from './words.js'
 import { roomKey } from './table.js'
@@ -15,7 +16,6 @@ import { demoJob } from '../../agent-office/server/demo.mjs'
 import { KINDS, titleOf, matchJob } from './jobcards.js'
 import { projectName, projectIcon } from './names.js'
 
-const token = document.querySelector('meta[name="agent-office-token"]')?.content || ''
 
 // Line icons, drawn in currentColor.
 const ICON = {
@@ -36,6 +36,7 @@ const STATE = {
   done: ['Done', 'done'],
   stopped: ['Stopped', 'failed'],
   failed: ['Didn’t start', 'failed'],
+  lost: ['Lost track', 'failed'],
 }
 const LIVE = new Set(['starting', 'working', 'blocked'])
 
@@ -154,7 +155,8 @@ function ticket(job) {
     ? `<p class="jhelp">It stopped to ask for your OK. To see what and answer, open a terminal and run <code>${escapeHtml(attach)}</code><button type="button" class="jcopy" data-copy="${escapeHtml(attach)}">Copy</button></p>`
     : job.state === 'failed' && job.error ? `<p class="jhelp bad">${escapeHtml(job.error)}</p>`
       : live && attach ? `<p class="jhelp muted">Running in the background. To watch it or step in: <code>${escapeHtml(attach)}</code></p>`
-        : job.state === 'done' && attach ? `<p class="jhelp muted">To read its answer or ask for more: <code>${escapeHtml(attach)}</code></p>` : ''
+        : job.state === 'done' && attach ? `<p class="jhelp muted">To read its answer or ask for more: <code>${escapeHtml(attach)}</code></p>`
+          : job.state === 'lost' ? '<p class="jhelp muted">Claude Code no longer lists it, so the office stopped following it. <code>claude agents</code> shows the background sessions it knows.</p>' : ''
   const session = job.session && nodes.get(`s:${job.session}`) ? `s:${job.session}` : [...nodes.values()].find(n => n.kind === 'session' && jobFor(n) === job)?.id
   return `
     <li class="jticket ${job.state}">
@@ -171,7 +173,7 @@ function ticket(job) {
 
 function sheet() {
   const list = [...jobs.values()].reverse()
-  const canStart = token || opts.isDemo() || opts.bridgeDemo()
+  const canStart = hasBridge() || opts.isDemo() || opts.bridgeDemo()
   return `
     <form method="dialog" class="jform">
       <header class="jhead">
@@ -286,11 +288,7 @@ async function submit() {
     }
     if (opts.isDemo()) ok = startLocalDemo({ dir: where, prompt, title, kind })
     else {
-      const res = await fetch('/jobs', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-agent-office-token': token },
-        body: JSON.stringify({ dir: where, prompt, title, kind }),
-      })
+      const res = await post('/jobs', { dir: where, prompt, title, kind })
       const body = await res.json().catch(() => ({}))
       ok = res.ok
       if (!ok) note = body.error ? `Couldn’t start it: ${body.error}` : 'Couldn’t start it.'
@@ -321,11 +319,7 @@ async function openFolder() {
     note = 'The demo can’t make folders. In your own office this opens (or makes) it and starts the job there.'
     return undefined
   }
-  const res = await fetch('/projects', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-agent-office-token': token },
-    body: JSON.stringify({ path: fresh.path.trim(), create: fresh.create }),
-  })
+  const res = await post('/projects', { path: fresh.path.trim(), create: fresh.create })
   const body = await res.json().catch(() => ({}))
   if (!res.ok) { note = body.error ? `Couldn’t open it: ${body.error}` : 'Couldn’t open that folder.'; return undefined }
   fresh = { ...fresh, dir: body.dir, trusted: body.trusted, created: fresh.created || body.created }
@@ -339,11 +333,7 @@ async function stop(id) {
   // Demo only: the hosted preview has no session to stop; the ticket says so.
   if (opts.isDemo()) { job.state = 'stopped'; changed(); return }
   try {
-    const res = await fetch('/jobs/stop', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-agent-office-token': token },
-      body: JSON.stringify({ id }),
-    })
+    const res = await post('/jobs/stop', { id })
     if (!res.ok) toast(`Couldn’t stop it: ${(await res.json().catch(() => ({}))).error ?? 'the bridge said no'}`, job, true)
   } catch {
     toast('Couldn’t reach the bridge to stop it.', job, true)

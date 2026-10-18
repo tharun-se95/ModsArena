@@ -24,7 +24,6 @@ export const ORANGE = '#ef6a2e'
 const UNDER = '#e6cdb0'
 const SEAM = '#cfb193'
 const RUBBER = '#26221f'
-const INK = '#0b0c10'
 const GLOW = '#dff3ff'
 const HALO = '#5cb6ff'
 

@@ -1,0 +1,20 @@
+# Keeps the pinned actions and the build/test packages current; each update
+# is a PR that CI checks like any other.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /visualizer
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /e2e
+    schedule:
+      interval: weekly

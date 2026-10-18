@@ -11,7 +11,7 @@
 
 import { markdown, plain } from './markdown.js'
 import { nodes, outputs, fill, warnings, sid, WARN_AT, threadState, agentState, teamOf, lineage, mailOf } from './model.js'
-import { moments, activity, escapeHtml, quote, ago, say, doingNow, momentText } from './words.js'
+import { moments, activity, escapeHtml, quote, ago, say, momentText } from './words.js'
 import { pct, level, tintOf, sessionTint, roomKey } from './table.js'
 import * as transcript from './transcript.js'
 import * as assets from './assets.js'

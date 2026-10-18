@@ -7,6 +7,137 @@ git tag (`v0.2.1`) with a GitHub Release, and the same version is in
 modsarena (`/plugin` → Marketplaces), a new one arrives on its own;
 otherwise `claude plugin update agent-office@modsarena` fetches it.
 
+## 1.0.0
+
+Agent Office 1.0. Nothing changes in how it works from 0.15; what changes is
+the promise:
+
+- **A stable surface.** These change only in a new major version, with
+  anything going away marked deprecated here at least one minor release
+  before:
+  - the event schema producers send;
+  - how a producer talks to the bridge (its secret and its proof);
+  - the plugin's options (`port`, `autoStart`);
+  - `/office` and the CLI's commands;
+  - where Agent Office keeps its files.
+
+  The full list is in the
+  [stability policy](docs/compatibility.md#stability).
+- **What it runs on, and how that's checked.** Every change is tested:
+  - on Linux, macOS and Windows;
+  - on Node 20, 22 and 24;
+  - in a real browser;
+  - against a pinned Claude Code.
+
+  A daily canary also tests the newest Claude Code. See
+  [compatibility](docs/compatibility.md).
+- **Fixes go to the latest release.** Keep `/office auto-update` on to
+  always have them. To report a vulnerability, see
+  [SECURITY.md](SECURITY.md).
+
+If you're coming from before 0.13, run `/office` once after updating: it
+restarts the office's bridge from the new version.
+
+## 0.15.0
+
+The release candidate for 1.0: nothing new to learn, fewer ways to lose
+what you were doing.
+
+- **Updates keep your jobs and messages.** When a new version's bridge
+  takes over, it now also takes the jobs the old one was following (their
+  cards keep updating, and **Stop** still works) and any message you sent
+  that a session hadn't picked up yet. Before, those were lost in the swap.
+- **A swap can't be cut short.** If a session started its own bridge on the
+  port in the moment between the old one stepping down and the new one
+  starting, the new one now asks that one to step down too, instead of
+  giving up and losing what it was handed.
+- **Folders reached through a link.** A project whose folder is a symlink
+  (or, on a Mac, anything under `/var`, which is really `/private/var`)
+  could be refused when you resumed one of its sessions ("the office only
+  resumes sessions in projects it knows"), and a new project in a trusted
+  folder could still ask you to trust it. Both now go by either spelling.
+- **Settings hooks checked on Windows.** CI now runs the settings hooks'
+  exact command through bash against a real bridge on Linux, macOS and
+  Windows (Git Bash, which Claude Code runs hooks with there), with and
+  without your secret.
+
+## 0.14.0
+
+Ready for people who've never seen it. Agent Office now needs **Node 20 or
+newer** (Node 18 is past its end of life).
+
+- **The demo never shows your sessions.** `npx github:tharun-se95/ModsArena
+  demo` opens without signing in, but it also listed your own past sessions
+  (their titles and projects) next to the sample ones. It now shows sample
+  activity only.
+- **`doctor`.** `npx github:tharun-se95/ModsArena doctor` checks what Agent
+  Office needs, one line each: Node, Claude Code, the bridge (and that it's
+  yours), your secret, and the hooks. It says what to fix, and prints a
+  report to paste into a bug report.
+- **Easier on your laptop.** The office draws at most 60 frames a second.
+  When nothing has happened for 30 seconds, or you're in another window, it
+  idles at 15. **Save battery** turns itself on while a laptop runs on
+  battery (in Chrome and Edge), until you choose in Settings.
+- **Windows.** `/office` can now find and restart an old bridge on Windows
+  too.
+- **A new README.** It covers what the office is, what it needs, how to
+  install it (with what you should see at each step), and what you can do
+  with it. It adds what it reads and what it never sends anywhere,
+  updating, troubleshooting, and how to uninstall, with what's left
+  behind. The full tour moved to [docs/guide.md](docs/guide.md), which now
+  covers running work and deleting conversations.
+- **[Compatibility and stability](docs/compatibility.md):** what Agent
+  Office runs on, and what won't change without a major version.
+- **For contributors:**
+  - [CONTRIBUTING.md](CONTRIBUTING.md) and issue templates (a bug report
+    asks for doctor's output).
+  - Every pull request now runs:
+    - the office end to end in a real browser;
+    - the bridge tests on Linux, macOS and Windows, and on Node 20, 22
+      and 24;
+    - lint;
+    - a check that changes users install bump the version.
+  - The demo site publishes only after CI passes.
+  - Actions are pinned to commits, with Dependabot keeping them current.
+  - A daily canary checks the plugin against the newest Claude Code.
+
+## 0.13.0
+
+Trust and stability. After updating, run `/office` once: it restarts the
+office and opens it signed in.
+
+- **The office is yours alone.** On a shared computer every account can
+  reach 127.0.0.1, so the bridge now keeps a secret in
+  `~/.claude/agent-office/` that only your account can read. Your sessions
+  send it with everything they report, and they send nothing until the
+  bridge on the port has proved it knows it, so another account's program
+  there gets nothing. The page opens with a key made from it (`/office` and
+  the CLI put it in the address) and the browser then stays signed in; any
+  other browser gets a page saying how to open it.
+- **The office no longer resets when a session ends.** The bridge used to
+  stop with whichever session happened to start it. It now runs on its
+  own, keeps a log (`~/.claude/agent-office/bridge.log`), and stops by
+  itself after 30 minutes with nobody watching and nothing reporting.
+- **An open office survives a restart.** After the bridge restarts, the page
+  picks up the new connection and keeps sending; after an update it reloads
+  to match the new version.
+- **No WebGL, no problem.** Where the browser can't draw 3D (switched off,
+  a VM, remote desktop), the office says so and everything else works: the
+  inbox, your projects and threads, every conversation.
+- **Everything that reaches the page is checked.** The bridge keeps only
+  plain, well-formed fields from each event (web links only, ids that are
+  ids, capped lengths), and the page escapes every one it shows.
+- **Steadier under load.** One `claude agents` check at a time, jobs Claude
+  Code no longer lists are marked lost instead of polled forever, history
+  scans are shared between pages and capped at a year, huge transcripts are
+  read in 2 MB steps, and a page that stops reading is let go.
+- **Nothing loads from elsewhere.** The fonts ship with the office.
+- **Easier to diagnose.** `/office status` reports errors and where the log
+  is; `AGENT_OFFICE_DEBUG=1` logs every request.
+- Smaller hardening: resumed session ids and job titles can never be read as
+  options, a symlinked `.claude/agents` can't redirect a new agent file,
+  and a restart stops only the process that actually holds the port.
+
 ## 0.12.2
 
 A safety patch. Please update.

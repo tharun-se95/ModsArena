@@ -5,7 +5,9 @@
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { credentials } from './test-support.mjs'
 import { join } from 'node:path'
 
 const PORT = 7800 + Math.floor(Math.random() * 400)
@@ -13,9 +15,12 @@ const base = `http://127.0.0.1:${PORT}`
 const SERVER = join(import.meta.dirname, 'server.mjs')
 const VERSION = JSON.parse(readFileSync(join(import.meta.dirname, '..', '.claude-plugin', 'plugin.json'), 'utf8')).version
 const started = []
+// Its own config folder: never the real ~/.claude.
+const CONFIG = mkdtempSync(join(tmpdir(), 'office-takeover-'))
+const auth = credentials(CONFIG).session
 
 function start(...flags) {
-  const child = spawn(process.execPath, [SERVER, '--port', String(PORT), ...flags], { stdio: 'ignore' })
+  const child = spawn(process.execPath, [SERVER, '--port', String(PORT), ...flags], { stdio: 'ignore', env: { ...process.env, CLAUDE_CONFIG_DIR: CONFIG } })
   started.push(child)
   return child
 }
@@ -39,7 +44,7 @@ test('a bridge you started yourself refuses to step down', async () => {
   const seen = await until(health)
   assert.equal(seen.version, VERSION)
   assert.equal(seen.managed, false)
-  const stop = headers => fetch(`${base}/shutdown`, { method: 'POST', headers }).then(r => r.status)
+  const stop = headers => fetch(`${base}/shutdown`, { method: 'POST', headers: { ...auth(), ...headers } }).then(r => r.status)
   assert.equal(await stop({}), 403, 'no control header')
   assert.equal(await stop({ 'x-agent-office-control': '1' }), 409, 'not managed')
   mine.kill()
@@ -49,7 +54,7 @@ test('a bridge you started yourself refuses to step down', async () => {
 test('--replace takes the port from a managed bridge', async () => {
   const old = start('--managed')
   await until(async () => (await health())?.managed)
-  await fetch(`${base}/event`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind: 'turn.start', session: 's' }) })
+  await fetch(`${base}/event`, { method: 'POST', headers: { 'content-type': 'application/json', ...auth() }, body: JSON.stringify({ kind: 'turn.start', session: 's' }) })
   assert.equal((await health()).events, 1)
 
   const replacement = start('--managed', '--replace')
@@ -66,7 +71,7 @@ test('--replace takes the port from a managed bridge', async () => {
 test('/office run again restarts a bridge you started yourself, keeping its events', async () => {
   const mine = start()
   await until(async () => (await health())?.pid === mine.pid)
-  await fetch(`${base}/event`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify([{ kind: 'turn.start', session: 's' }, { kind: 'turn.start', session: 't' }]) })
+  await fetch(`${base}/event`, { method: 'POST', headers: { 'content-type': 'application/json', ...auth() }, body: JSON.stringify([{ kind: 'turn.start', session: 's' }, { kind: 'turn.start', session: 't' }]) })
 
   const fresh = start('--managed', '--replace', '--restart')
   assert.equal(await exited(mine), 0, 'it steps down when asked for a restart')
@@ -111,4 +116,40 @@ createServer((req, res) => res.writeHead(404).end()).listen(${PORT}, '127.0.0.1'
   assert.equal(app.exitCode, null, 'the other server is untouched')
   app.kill()
   await exited(app)
+})
+
+test('--background hands the office to a detached bridge, which stops once idle', async () => {
+  const { existsSync } = await import('node:fs')
+  const port = PORT + 7
+  const url = `http://127.0.0.1:${port}`
+  const launcher = spawn(process.execPath, [SERVER, '--port', String(port), '--managed', '--background'], {
+    stdio: 'ignore', env: { ...process.env, CLAUDE_CONFIG_DIR: CONFIG, AGENT_OFFICE_IDLE_MS: '1500' },
+  })
+  assert.equal(await exited(launcher), 0, 'the launcher hands over and exits')
+  const seen = await until(() => fetch(`${url}/healthz`).then(r => r.json(), () => undefined))
+  assert.notEqual(seen.pid, launcher.pid, 'a detached process serves the office')
+  assert.ok(existsSync(join(CONFIG, 'agent-office', 'bridge.log')))
+  // Nobody watching, nothing reporting: it stops on its own.
+  await until(() => fetch(`${url}/healthz`).then(() => false, () => true))
+})
+
+test('a message not yet picked up survives the swap to a newer bridge', async () => {
+  const both = credentials(CONFIG).both
+  const old = start('--managed')
+  await until(async () => (await health())?.pid === old.pid)
+  const page = await (await fetch(`${base}/`, { headers: both() })).text()
+  const token = /name="agent-office-token" content="([0-9a-f]{48})"/.exec(page)?.[1]
+  const sent = await fetch(`${base}/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json', origin: base, 'x-agent-office-token': token, ...both() },
+    body: JSON.stringify({ session: 'sess-9', text: 'still there after the update?' }),
+  })
+  assert.equal(sent.status, 200)
+
+  const replacement = start('--managed', '--replace')
+  assert.equal(await exited(old), 0)
+  await until(async () => (await health())?.pid === replacement.pid)
+  const inbox = await (await fetch(`${base}/inbox?session=sess-9`, { headers: { 'x-agent-office-inbox': '1', ...auth() } })).json()
+  assert.deepEqual(inbox.messages.map(m => m.text), ['still there after the update?'])
+  replacement.kill()
+  await exited(replacement)
 })

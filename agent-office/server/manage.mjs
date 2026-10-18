@@ -81,8 +81,11 @@ export async function openProject({ path, create = false } = {}, { home = homedi
     await mkdir(dir, { recursive: true })
     created = true
   }
-  dir = await realpath(dir)
-  return { dir, created, trusted: isTrusted(dir, config ?? readConfig()) }
+  // Trusted under either spelling: the one you gave, or where it really is
+  // (a symlinked folder, macOS's /var → /private/var, Windows' short names).
+  const settings = config ?? readConfig()
+  const real = await realpath(dir)
+  return { dir: real, created, trusted: isTrusted(real, settings) || isTrusted(dir, settings) }
 }
 
 // ---------------------------------------------------------------------------
@@ -122,8 +125,13 @@ export async function writeAgent(body, { dir } = {}) {
   const scope = body?.scope === 'user' ? 'user' : 'project'
   if (scope === 'project' && !dir) return { status: 400, error: 'pick a project' }
   const folder = agentsDir(scope, dir)
-  const path = join(folder, `${made.name}.md`)
   await mkdir(folder, { recursive: true })
+  // A symlinked .claude/agents (a cloned repo can carry one) must not send
+  // the file somewhere else: the real folder has to be where it says.
+  const base = await realpath(scope === 'user' ? configDir() : dir)
+  const real = await realpath(folder)
+  if (!inside(base, real)) return { status: 400, error: 'that agents folder points somewhere outside the project' }
+  const path = join(real, `${made.name}.md`)
   try {
     await writeFile(path, made.text, { flag: 'wx' })
   } catch (err) {

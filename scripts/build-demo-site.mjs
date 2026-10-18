@@ -5,7 +5,7 @@
 //
 //   node scripts/build-demo-site.mjs [out dir, default: site]
 
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, cpSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -25,4 +25,6 @@ if (!page.includes(app)) throw new Error('the bundle did not land in the page ve
 mkdirSync(out, { recursive: true })
 writeFileSync(join(out, 'index.html'), page)
 writeFileSync(join(out, '.nojekyll'), '')
+// The page's fonts, beside it (offline, the page falls back to system fonts).
+cpSync(join(pub, 'fonts'), join(out, 'fonts'), { recursive: true })
 console.log(`Wrote ${join(out, 'index.html')} (${Math.round(page.length / 1024)} kB)`)

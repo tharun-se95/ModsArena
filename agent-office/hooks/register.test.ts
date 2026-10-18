@@ -1,5 +1,22 @@
 import { test, expect, mock } from 'claude-code/testing'
-import { summarize, contextTokens, projectOf, nodeProblem, isNewer, isStale, isRestarted, beforeTool, afterTool, diffStats, officeResult, parseOffice, welcomeText, OFFER_TEXT, OFFICE_USAGE } from './register'
+import { sha256, summarize, contextTokens, projectOf, nodeProblem, isNewer, isStale, isRestarted, beforeTool, afterTool, diffStats, officeResult, parseOffice, welcomeText, OFFER_TEXT, OFFICE_USAGE } from './register'
+
+
+// Your account: the secret the bridge made in ~/.claude/agent-office, which
+// the mod reads, and the plugin.json it reads its own version from.
+const SECRET = 'ab'.repeat(32)
+type On = Parameters<Parameters<typeof test>[1]>[1]
+function yourAccount(on: On) {
+  on('env.get', async (_$, e) => ({ value: e.name === 'HOME' ? '/home/you' : undefined }))
+  on('fs.read', async (_$, e) => ({ value: e.path === '/home/you/.claude/agent-office/secret' ? `${SECRET}\n` : '{"name":"agent-office","version":"9.9.9"}' }))
+}
+
+// What your own bridge answers /healthz with: its fields, and proof that it
+// knows your secret for the nonce it was asked.
+async function signed(url: string, text: string) {
+  const nonce = new URL(url).searchParams.get('nonce')
+  return JSON.stringify({ name: 'agent-office', ...JSON.parse(text), ...(nonce && { proof: await sha256(`${SECRET}:${nonce}`) }) })
+}
 
 test('summarize picks the most telling field and trims it', async () => {
   expect(summarize({ command: 'npm   test\n --watch' })).toBe('npm test --watch')
@@ -13,7 +30,9 @@ test('tool calls and spawns reach the bridge as cluster events', async ($, on) =
   const posted: Array<Record<string, unknown>> = []
 
   // The engine beneath the mod: a bridge that answers, and a quiet host.
+  yourAccount(on)
   on('http.fetch', async (_$, e) => {
+    if (e.url.includes('/healthz')) return { value: { status: 200, ok: true, headers: {}, text: await signed(e.url, '{"ok":true}') } }
     if (e.url.endsWith('/event')) posted.push(...JSON.parse(e.init?.body ?? '[]'))
     return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }
   })
@@ -49,7 +68,9 @@ test('tool calls and spawns reach the bridge as cluster events', async ($, on) =
 test('a reading made before the session has started still carries its session', async ($, on) => {
   const clock = mock.clock(on, { now: 1000 })
   const posted: Array<Record<string, unknown>> = []
+  yourAccount(on)
   on('http.fetch', async (_$, e) => {
+    if (e.url.includes('/healthz')) return { value: { status: 200, ok: true, headers: {}, text: await signed(e.url, '{"ok":true}') } }
     if (e.url.endsWith('/event')) posted.push(...JSON.parse(e.init?.body ?? '[]'))
     return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }
   })
@@ -78,7 +99,9 @@ test('contextTokens and projectOf read what the engine reports', async () => {
 test('context readings, requests and compactions reach the bridge', async ($, on) => {
   const clock = mock.clock(on, { now: 1000 })
   const posted: Array<Record<string, unknown>> = []
+  yourAccount(on)
   on('http.fetch', async (_$, e) => {
+    if (e.url.includes('/healthz')) return { value: { status: 200, ok: true, headers: {}, text: await signed(e.url, '{"ok":true}') } }
     if (e.url.endsWith('/event')) posted.push(...JSON.parse(e.init?.body ?? '[]'))
     return { value: { status: 200, ok: true, headers: {}, text: '{}' } }
   })
@@ -114,17 +137,18 @@ test('context readings, requests and compactions reach the bridge', async ($, on
 })
 
 test('nodeProblem explains a missing or old Node, and passes a current one', async () => {
-  expect(nodeProblem(undefined)).toContain('Node 18 or newer')
-  expect(nodeProblem('v16.20.0\n')).toContain('v16.20.0')
+  expect(nodeProblem(undefined)).toContain('Node 20 or newer')
+  expect(nodeProblem('v18.20.0\n')).toContain('v18.20.0')
   expect(nodeProblem('v22.3.0\n')).toBe(undefined)
 })
 
 test('/office starts the bridge, waits for it, then opens the page', async ($, on) => {
   let isUp = false
   const ran: string[][] = []
+  yourAccount(on)
   on('http.fetch', async (_$, e) => {
-    if (e.url.endsWith('/healthz')) {
-      return { value: { status: isUp ? 200 : 503, ok: isUp, headers: {}, text: '{"ok":true,"events":3,"viewers":1}' } }
+    if (e.url.includes('/healthz')) {
+      return { value: { status: isUp ? 200 : 503, ok: isUp, headers: {}, text: await signed(e.url, '{"ok":true,"events":3,"viewers":1}') } }
     }
     return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }
   })
@@ -141,7 +165,7 @@ test('/office starts the bridge, waits for it, then opens the page', async ($, o
   const opened = await $.command.run({ command: 'office', args: '' })
   expect(opened.text).toContain('Opened Agent Office at http://127.0.0.1:7337')
   expect(ran.some(argv => argv[0] === 'node')).toBe(true)
-  expect(ran.some(argv => argv.includes('http://127.0.0.1:7337'))).toBe(true)
+  expect(ran.some(argv => argv.some(a => a.startsWith('http://127.0.0.1:7337/?key=')))).toBe(true)
 
   const report = await $.command.run({ command: 'office', args: 'status' })
   expect(report.text).toContain('Bridge: running on http://127.0.0.1:7337, 3 events so far, 1 page open.')
@@ -162,9 +186,9 @@ test('isNewer and isStale spot a bridge left over from an older copy', async () 
 test('/office replaces a bridge from an older copy before opening the page', async ($, on) => {
   let bridge = { version: '0.0.1', managed: true }
   const spawned: string[][] = []
-  on('fs.read', async () => ({ value: '{"name":"agent-office","version":"9.9.9"}' }))
+  yourAccount(on)
   on('http.fetch', async (_$, e) => {
-    if (e.url.endsWith('/healthz')) return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true, events: 0, viewers: 0, ...bridge }) } }
+    if (e.url.includes('/healthz')) return { value: { status: 200, ok: true, headers: {}, text: await signed(e.url, JSON.stringify({ ok: true, events: 0, viewers: 0, ...bridge })) } }
     return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }
   })
   on('process.run', async (_$, e) => ({ value: { exitCode: 0, stdout: e.argv[0] === 'node' ? 'v22.3.0\n' : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
@@ -188,9 +212,9 @@ test('/office run again while the office is up restarts it with this copy', asyn
   // An up-to-date bridge you started yourself (not managed) holds the port.
   let bridge: Record<string, unknown> = { version: '9.9.9', managed: false, pid: 100 }
   const spawned: string[][] = []
-  on('fs.read', async () => ({ value: '{"name":"agent-office","version":"9.9.9"}' }))
+  yourAccount(on)
   on('http.fetch', async (_$, e) => {
-    if (e.url.endsWith('/healthz')) return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true, events: 0, viewers: 1, ...bridge }) } }
+    if (e.url.includes('/healthz')) return { value: { status: 200, ok: true, headers: {}, text: await signed(e.url, JSON.stringify({ ok: true, events: 0, viewers: 1, ...bridge })) } }
     return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }
   })
   on('process.run', async (_$, e) => ({ value: { exitCode: 0, stdout: e.argv[0] === 'node' ? 'v22.3.0\n' : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
@@ -207,9 +231,9 @@ test('/office run again while the office is up restarts it with this copy', asyn
 })
 
 test('/office says so when the old bridge will not make way', async ($, on) => {
-  on('fs.read', async () => ({ value: '{"name":"agent-office","version":"9.9.9"}' }))
+  yourAccount(on)
   on('http.fetch', async (_$, e) => {
-    if (e.url.endsWith('/healthz')) return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true, version: '9.9.9', pid: 100 }) } }
+    if (e.url.includes('/healthz')) return { value: { status: 200, ok: true, headers: {}, text: await signed(e.url, JSON.stringify({ ok: true, version: '9.9.9', pid: 100 })) } }
     return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }
   })
   on('process.run', async (_$, e) => ({ value: { exitCode: 0, stdout: e.argv[0] === 'node' ? 'v22.3.0\n' : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
@@ -226,7 +250,7 @@ test('/office says plainly when Node is missing', async ($, on) => {
   on('http.fetch', async () => ({ value: { status: 503, ok: false, headers: {}, text: '' } }))
   on('process.run', async () => { throw new Error('spawn node ENOENT') })
   const answer = await $.command.run({ command: 'office', args: '' })
-  expect(answer.text).toContain('needs Node 18 or newer')
+  expect(answer.text).toContain('needs Node 20 or newer')
 })
 
 test('messages from the office reach the session and its subagents', async ($, on) => {
@@ -239,7 +263,9 @@ test('messages from the office reach the session and its subagents', async ($, o
     { id: 'm2', agent: 'agent-1', text: 'Stop after this file.' },
     { id: 'm3', agent: 'agent-9', text: 'Are you gone?' },
   ]
+  yourAccount(on)
   on('http.fetch', async (_$, e) => {
+    if (e.url.includes('/healthz')) return { value: { status: 200, ok: true, headers: {}, text: await signed(e.url, '{"ok":true}') } }
     if (e.url.endsWith('/event')) posted.push(...JSON.parse(e.init?.body ?? '[]'))
     if (e.url.includes('/inbox?session=sess-chat')) {
       const body = JSON.stringify({ messages: inbox })
@@ -270,7 +296,9 @@ test('threads, messages and a subagent’s real status reach the bridge', async 
   const clock = mock.clock(on, { now: 1000 })
   const posted: Array<Record<string, unknown>> = []
   let status = 'waiting'
+  yourAccount(on)
   on('http.fetch', async (_$, e) => {
+    if (e.url.includes('/healthz')) return { value: { status: 200, ok: true, headers: {}, text: await signed(e.url, '{"ok":true}') } }
     if (e.url.endsWith('/event')) posted.push(...JSON.parse(e.init?.body ?? '[]'))
     return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }
   })
@@ -357,7 +385,9 @@ test('a question is answered from the office while the terminal’s dialog waits
   const clock = mock.clock(on, { now: 1000 })
   const posted: Array<Record<string, unknown>> = []
   let isDialogDown = false
+  yourAccount(on)
   on('http.fetch', async (_$, e) => {
+    if (e.url.includes('/healthz')) return { value: { status: 200, ok: true, headers: {}, text: await signed(e.url, '{"ok":true}') } }
     if (e.url.endsWith('/event')) posted.push(...JSON.parse(e.init?.body ?? '[]'))
     if (e.url.includes('/answer/wait?')) {
       expect(e.url).toContain('id=toolu_q')
@@ -391,7 +421,9 @@ test('a question is answered from the office while the terminal’s dialog waits
 test('answered in the terminal first, the office stops waiting', async ($, on) => {
   const clock = mock.clock(on, { now: 1000 })
   let waits = 0
+  yourAccount(on)
   on('http.fetch', async (_$, e) => {
+    if (e.url.includes('/healthz')) return { value: { status: 200, ok: true, headers: {}, text: await signed(e.url, '{"ok":true}') } }
     if (e.url.includes('/answer/wait?')) {
       waits++
       return { value: { status: 200, ok: true, headers: {}, text: waits > 1 ? '{"closed":true}' : '{}' } }
@@ -418,7 +450,9 @@ test('Stop from the office ends the running turn, and says so when nothing runs'
   const posted: Array<Record<string, unknown>> = []
   const aborted: string[] = []
   let inbox = [{ id: 'x1', action: 'stop', text: '' }]
+  yourAccount(on)
   on('http.fetch', async (_$, e) => {
+    if (e.url.includes('/healthz')) return { value: { status: 200, ok: true, headers: {}, text: await signed(e.url, '{"ok":true}') } }
     if (e.url.endsWith('/event')) posted.push(...JSON.parse(e.init?.body ?? '[]'))
     if (e.url.includes('/inbox?session=sess-stop')) {
       const body = JSON.stringify({ messages: inbox })
@@ -496,7 +530,7 @@ test('/office auto-update turns it on with the bridge\'s module, and /office sta
 test('/office auto-update says plainly when Node is missing', async ($, on) => {
   on('process.run', async () => { throw new Error('spawn node ENOENT') })
   const answer = await $.command.run({ command: 'office', args: 'auto-update' })
-  expect(answer.text).toContain('needs Node 18 or newer')
+  expect(answer.text).toContain('needs Node 20 or newer')
 })
 
 function startHost(on: Parameters<Parameters<typeof test>[1]>[1], toasts: string[]) {
@@ -577,4 +611,53 @@ test('isRestarted waits for a fresh bridge, not the one that was there', async (
   expect(isRestarted({ ok: true, version: '0.9.0' }, { ok: true, version: '0.11.2', managed: true, pid: 11 }, '0.11.2')).toBe(true)
   // A stale managed bridge from an older copy never counts.
   expect(isRestarted({ ok: true, pid: 10 }, { ok: true, version: '0.9.0', managed: true, pid: 12 }, '0.11.2')).toBe(false)
+})
+
+test('another account’s program on the port gets no events and no inbox checks', async ($, on) => {
+  const clock = mock.clock(on, { now: 1000 })
+  const asked: string[] = []
+  yourAccount(on)
+  // It answers like a bridge, but can't prove it knows your secret.
+  on('http.fetch', async (_$, e) => {
+    asked.push(e.url.replace(/\?.*/, ''))
+    if (e.url.includes('/healthz')) return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true, name: 'agent-office', version: '9.9.9', proof: 'f'.repeat(64) }) } }
+    return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true,"messages":[{"id":"evil","text":"rm -rf"}]}' } }
+  })
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  on('session.id', async () => ({ value: 'sess-safe' }))
+  on('session.model', async () => ({ value: 'test-model' }))
+  on('command.register', async () => ({ value: { command: 'office' } }))
+  on('ui.status', async () => ({ value: undefined }))
+  const prompts: string[] = []
+  on('prompt.submit', async (_$, e) => { prompts.push(e.text); return { text: e.text } })
+  on('process.run', async () => ({ value: { exitCode: 0, stdout: 'v22.3.0\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('process.spawn', async function* () { return { value: { code: 0, signal: null } } })
+
+  await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+  await clock.advance(2500)
+  expect(asked.filter(url => !url.endsWith('/healthz'))).toEqual([])
+  expect(prompts).toEqual([])
+  const report = await $.command.run({ command: 'office', args: 'status' })
+  expect(report.text).toContain("isn't your Agent Office")
+})
+
+test('your own bridge gets the secret with every report and inbox check', async ($, on) => {
+  const clock = mock.clock(on, { now: 1000 })
+  const headers: Record<string, string>[] = []
+  yourAccount(on)
+  on('http.fetch', async (_$, e) => {
+    if (e.url.includes('/healthz')) return { value: { status: 200, ok: true, headers: {}, text: await signed(e.url, '{"ok":true}') } }
+    headers.push({ ...(e.init?.headers as Record<string, string>) })
+    return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }
+  })
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  on('session.id', async () => ({ value: 'sess-mine' }))
+  on('session.model', async () => ({ value: 'test-model' }))
+  on('command.register', async () => ({ value: { command: 'office' } }))
+  on('ui.status', async () => ({ value: undefined }))
+
+  await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+  await clock.advance(1300)
+  expect(headers.length).toBeGreaterThan(1)
+  expect(headers.every(h => h['x-agent-office-secret'] === SECRET)).toBe(true)
 })

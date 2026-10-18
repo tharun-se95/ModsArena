@@ -23,8 +23,11 @@ const MAX_PROMPT = 8000
 const MAX_TITLE = 80
 const KINDS = new Set(['write', 'research', 'fix', 'review', 'plan', 'other'])
 const POLL_MS = 3000
+const LOST_AFTER = 20 // polls without a sign of it (about a minute)
 const RUN_MS = 60000
 const KEEP = 50
+// What `claude stop` gets: a job's short id, as `claude --bg` printed it.
+const SHORT = /^\w[\w-]{0,99}$/
 
 // What `claude` to run: AGENT_OFFICE_CLAUDE for tests and unusual installs.
 //
@@ -85,8 +88,9 @@ export function childEnv(env = process.env) {
 
 // The command that starts a job. Never a permission mode, never a bypass:
 // the session asks you the way it always does.
+// The title can't start with a dash, or claude would read it as an option.
 export function startArgs({ title, prompt }) {
-  return ['--bg', '-n', title, '--', prompt]
+  return ['--bg', '-n', title.replace(/^-+\s*/, '') || 'job', '--', prompt]
 }
 
 // Talking to a session that has ended: the same session, picked up again in
@@ -95,7 +99,8 @@ export function resumeArgs({ session, text }) {
   return ['--bg', '--resume', session, '--', text]
 }
 
-const SESSION_ID = /^[\w-]{1,100}$/
+// A session id never starts with a dash (it goes after --resume).
+const SESSION_ID = /^\w[\w-]{0,99}$/
 
 // A request to resume a session, checked, or the reason it can't be.
 export function checkResume(body) {
@@ -168,8 +173,20 @@ export function createJobs({ publish, isKnown, demo }) {
 
   const emit = (kind, job, extra = {}) => publish([{ t: Date.now(), kind, job: job.id, ...extra }])
 
+  // One `claude agents` at a time: a slow one never piles up behind the timer.
+  let isPolling = false
   async function poll() {
-    const live = [...jobs.values()].filter(j => j.short && !['done', 'stopped', 'failed'].includes(j.state))
+    if (isPolling) return
+    isPolling = true
+    try {
+      await pollOnce()
+    } finally {
+      isPolling = false
+    }
+  }
+
+  async function pollOnce() {
+    const live = [...jobs.values()].filter(j => j.short && !['done', 'stopped', 'failed', 'lost'].includes(j.state))
     if (!live.length) { clearInterval(poller); poller = null; return }
     const { code, out } = await run(['agents', '--json', '--all'], { timeout: 15000 })
     if (code !== 0) return
@@ -178,6 +195,14 @@ export function createJobs({ publish, isKnown, demo }) {
     for (const job of live) {
       const say = (...events) => publish(events.map(ev => ({ t: Date.now(), session: job.session, ...ev })))
       const entry = list.find(e => e.id === job.short || e.sessionId?.startsWith(job.short))
+      // Not listed for a minute: Claude Code no longer knows it (or lists it
+      // in a way this can't read). Stop asking, and say so on its ticket.
+      job.misses = entry ? 0 : (job.misses ?? 0) + 1
+      if (job.misses >= LOST_AFTER) {
+        job.state = 'lost'
+        emit('job.update', job, { state: 'lost' })
+        continue
+      }
       const state = stateOf(entry)
       if (entry?.sessionId && !job.session) {
         job.session = entry.sessionId
@@ -264,13 +289,15 @@ export function createJobs({ publish, isKnown, demo }) {
     let dir = demo ? body?.dir : await where(req.session)
     if (!demo) {
       if (!dir) return { status: 404, error: 'couldn’t find that session’s transcript' }
+      const said = dir
       try {
         dir = await realpath(resolve(dir))
         if (!(await stat(dir)).isDirectory()) throw new Error()
       } catch {
         return { status: 400, error: 'that session’s project folder isn’t there any more' }
       }
-      if (!(await isKnown(dir))) return { status: 403, error: 'the office only resumes sessions in projects it knows' }
+      // Known under either spelling, as for a new job.
+      if (!(await isKnown(said)) && !(await isKnown(dir))) return { status: 403, error: 'the office only resumes sessions in projects it knows' }
     }
     const title = req.text.replace(/\s+/g, ' ').slice(0, MAX_TITLE)
     const job = { id: randomUUID(), dir: dir ?? '', title, kind: 'resume', prompt: req.text, session: req.session, turnId: `front-desk-${Date.now()}`, state: 'starting', t: Date.now() }
@@ -309,5 +336,23 @@ export function createJobs({ publish, isKnown, demo }) {
     return { status: 200 }
   }
 
-  return { start, resume, stop, jobOf, jobs }
+  // Whether any job the office started is still running (the bridge stays up for it).
+  const anyLive = () => [...jobs.values()].some(j => ['starting', 'working', 'blocked'].includes(j.state))
+
+  // Handing over to a newer bridge: what it needs to keep following them
+  // and to stop one on request.
+  const handOver = () => [...jobs.values()].map(j => ({ ...j }))
+
+  function adopt(list) {
+    if (!Array.isArray(list)) return
+    for (const j of list.slice(-KEEP)) {
+      if (typeof j?.id !== 'string' || jobs.has(j.id)) continue
+      if (j.short !== undefined && !SHORT.test(j.short)) continue
+      jobs.set(j.id, { ...j })
+    }
+    while (jobs.size > KEEP) jobs.delete(jobs.keys().next().value)
+    if ([...jobs.values()].some(j => j.short && ['starting', 'working', 'blocked'].includes(j.state))) watch()
+  }
+
+  return { start, resume, stop, jobOf, anyLive, handOver, adopt, jobs }
 }

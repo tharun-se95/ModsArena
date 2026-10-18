@@ -22,6 +22,7 @@ import { engineError } from './engine-errors.mjs'
 
 const ID = /^[\w-]{1,100}$/
 const FIRST_READ = 512 * 1024 // a long session opens at its last half megabyte
+const READ_MAX = 2 * 1024 * 1024
 const TEXT_LIMIT = 4000
 const RESULT_LIMIT = 800
 
@@ -35,7 +36,7 @@ export async function findTranscript(session, agent, root = projectsDir()) {
   if (!ID.test(session ?? '') || (agent !== undefined && !ID.test(agent))) return null
   let path = found.get(session)
   if (!path) {
-    let dirs = []
+    let dirs
     try { dirs = await readdir(root) } catch { return null }
     for (const dir of dirs) {
       const candidate = join(root, dir, `${session}.jsonl`)
@@ -112,7 +113,8 @@ export async function readTranscript(path, after) {
     let start = Number.isFinite(after) && after >= 0 && after <= size ? after : Math.max(0, size - FIRST_READ)
     const fresh = !(Number.isFinite(after) && after >= 0 && after <= size)
     if (start >= size) return { entries: [], next: size, reset: fresh && after !== undefined }
-    const buffer = Buffer.alloc(size - start)
+    // At most a couple of megabytes a read: the page asks again from `next`.
+    const buffer = Buffer.alloc(Math.min(size - start, READ_MAX))
     await file.read(buffer, 0, buffer.length, start)
     let text = buffer.toString('utf8')
     let skipped = 0

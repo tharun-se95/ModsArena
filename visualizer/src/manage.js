@@ -11,13 +11,13 @@
 // Removing is the default and can always be undone; deleting can't, so it
 // says exactly what goes and asks once more.
 
+import { post, hasBridge } from './api.js'
 import { nodes, sid } from './model.js'
 import { escapeHtml } from './words.js'
 import { projectName } from './names.js'
 import * as transcript from './transcript.js'
 import { toast } from './toast.js'
 
-const token = document.querySelector('meta[name="agent-office-token"]')?.content || ''
 let opts = null
 let dialog = null
 // The menu that's open, so the panel's redraws keep it open.
@@ -153,7 +153,7 @@ async function helperSheet(t) {
 
 // The custom agent types a project can use (the bridge reads them).
 async function agentTypes(dir) {
-  if (!token || !dir) return []
+  if (!hasBridge() || !dir) return []
   try {
     const res = await fetch(`/agent-types?${new URLSearchParams({ dir })}`)
     return res.ok ? (await res.json()).types ?? [] : []
@@ -184,10 +184,10 @@ function agentTypeSheet(t) {
       name: form.querySelector('#aname').value, description: form.querySelector('#adesc').value,
       instructions: form.querySelector('#abody').value, tools: form.querySelector('#atools').value,
     }
-    if (!token) return setNote(form, transcript.isDemo() ? 'The demo can’t save files. In your own office this writes the agent’s file.' : 'Saving needs the office opened from its bridge (run /office).')
+    if (!hasBridge()) return setNote(form, transcript.isDemo() ? 'The demo can’t save files. In your own office this writes the agent’s file.' : 'Saving needs the office opened from its bridge (run /office).')
     setNote(form, 'Saving…', false)
     try {
-      const res = await fetch('/agent-types', { method: 'POST', headers: { 'content-type': 'application/json', 'x-agent-office-token': token }, body: JSON.stringify(body) })
+      const res = await post('/agent-types', body)
       const got = await res.json().catch(() => ({}))
       if (!res.ok) return setNote(form, `Couldn’t save it: ${got.error ?? res.status}`)
       dialog.close()
@@ -230,14 +230,14 @@ function deleteSheet(t) {
 // Through the bridge; the demo only pretends, in this page.
 async function erase(t) {
   const body = t.kind === 'project' ? { project: t.project } : { session: t.session, ...(t.agent && { agent: t.agent }) }
-  if (!token) {
+  if (!hasBridge()) {
     if (!transcript.isDemo()) return { ok: false, status: 'Deleting needs the office opened from its bridge (run /office).' }
     const sessions = t.kind === 'project' ? [...nodes.values()].filter(x => x.kind === 'session' && x.project === t.project).map(x => x.session) : [t.session]
     for (const session of sessions) opts.ingest({ t: Date.now(), kind: t.agent ? 'agent.removed' : 'session.removed', session, agent: t.agent })
     return { ok: true, status: 'It was only the demo, so nothing was on disk.' }
   }
   try {
-    const res = await fetch('/delete', { method: 'POST', headers: { 'content-type': 'application/json', 'x-agent-office-token': token }, body: JSON.stringify(body) })
+    const res = await post('/delete', body)
     const got = await res.json().catch(() => ({}))
     if (!res.ok) return { ok: false, status: `Couldn’t delete it: ${got.error ?? res.status}` }
     opts.forget(t)

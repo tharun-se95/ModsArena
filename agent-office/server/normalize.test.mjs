@@ -46,3 +46,29 @@ test('threads, messages and waiting subagents pass through', () => {
   ], 1)
   assert.deepEqual(out.map(ev => ev.kind), ['session.thread', 'agent.message', 'agent.waiting'])
 })
+
+test('whatever is posted, the bridge keeps only plain, well-formed fields', () => {
+  const [ev] = normalize({
+    kind: 'asset.add', session: 's1', id: 'o1', type: 'pr', title: 'x'.repeat(30000),
+    url: 'javascript:alert(1)', src: 'https://tracker.example/pixel.png', path: 'relative/file',
+    meta: { additions: '<img src=x onerror=alert(1)>', deep: { a: { b: { c: { d: { e: { f: 1 } } } } } } },
+    agent: 'a b"<>', t: 'soon', __proto__: { polluted: true },
+  }, 5)
+  assert.equal(ev.title.length, 20000)
+  assert.equal(ev.url, undefined)
+  assert.equal(ev.src, undefined)
+  assert.equal(ev.path, undefined)
+  assert.equal(ev.agent, undefined)
+  assert.equal(ev.t, 5)
+  assert.equal({}.polluted, undefined)
+  assert.equal(ev.meta.deep.a.b.c.d, undefined, 'nesting is bounded')
+  // An unknown type, kind or session id is dropped whole.
+  assert.deepEqual(normalize({ kind: 'asset.add', session: 's1', type: 'script' }), [])
+  assert.deepEqual(normalize({ kind: 'ask.open', session: 's1', type: '"><img onerror=x>' }), [])
+  assert.deepEqual(normalize({ kind: 'evil', session: 's1' }), [])
+  assert.deepEqual(normalize({ kind: 'turn.start', session: '../../etc' }), [])
+  // A real link and an absolute path stay.
+  const [ok] = normalize({ kind: 'asset.add', session: 's1', id: 'o2', type: 'link', url: 'https://github.com/a/b/pull/1', path: '/w/a.png' })
+  assert.equal(ok.url, 'https://github.com/a/b/pull/1')
+  assert.equal(ok.path, '/w/a.png')
+})

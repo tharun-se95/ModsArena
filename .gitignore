@@ -2,3 +2,4 @@ node_modules/
 .claude-plugin/types/
 site/
 visualizer/studio/dist/
+e2e/failures/

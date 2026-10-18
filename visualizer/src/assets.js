@@ -22,7 +22,11 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 
 // How a picture gets to the page: the demo carries its own; a real one is
 // served by the bridge from the path the session wrote or read.
-export const srcOf = o => o.src ?? (o.path ? `/asset?${new URLSearchParams({ session: o.session, id: o.id })}` : '')
+// Only the demo's own pictures (data: or the page's) or the bridge's /asset.
+const isOwnPicture = src => typeof src === 'string' && /^(data:image\/|\/|blob:)/.test(src)
+export const srcOf = o => (isOwnPicture(o.src) ? o.src : o.path ? `/asset?${new URLSearchParams({ session: o.session, id: o.id })}` : '')
+// A link out of the office: web links only.
+export const webUrl = url => (typeof url === 'string' && /^https?:\/\//i.test(url) ? url : '')
 
 // ---------------------------------------------------------------------------
 // Questions
@@ -84,7 +88,7 @@ export function askCard(ask, { answerable, compact = false } = {}) {
   }
   const status = sent?.status ? `<p class="ask-status ${sent.ok === false ? 'bad' : ''}" role="status">${escapeHtml(sent.status)}</p>` : ''
   return `
-    <div class="ask ${ask.type} ${answerable ? 'live' : ''}">
+    <div class="ask ${escapeHtml(ask.type)} ${answerable ? 'live' : ''}">
       <p class="ask-eyebrow"><i class="ask-icon">${ask.type === 'permission' ? '>_' : ask.type === 'plan' ? '✎' : '?'}</i>${ASK_EYEBROW[ask.type] ?? 'Asks you'}${who}<time>${ago(ask.t)}</time></p>
       ${body}
       ${foot}
@@ -140,11 +144,12 @@ export function outputCard(o, { withThread = false } = {}) {
       <img alt="${escapeHtml(o.title)}" src="${escapeHtml(srcOf(o))}" loading="lazy">
       <span>${escapeHtml(o.title)}</span>${where ? `<small>${escapeHtml(where)}</small>` : ''}</button>`
   }
-  const stats = o.meta?.additions !== undefined ? `<span class="diff"><ins>+${o.meta.additions}</ins> <del>−${o.meta.deletions ?? 0}</del></span>` : ''
-  const sub = [o.type === 'file' ? o.path : o.url ? hostOf(o.url) : '', where].filter(Boolean).join(' · ')
-  const tag = o.url ? 'a' : o.type === 'plan' ? 'button' : 'div'
-  const attrs = o.url ? `href="${escapeHtml(o.url)}" target="_blank" rel="noopener"` : o.type === 'plan' ? `type="button" data-zoom="${escapeHtml(o.session)}|${escapeHtml(o.id)}"` : ''
-  return `<${tag} class="out ${o.type}" ${attrs} ${pass}${tag === 'div' ? ' tabindex="0"' : ''} title="${escapeHtml(o.title)}. Drag it onto a critter (or press H) to hand it over">
+  const stats = o.meta?.additions !== undefined ? `<span class="diff"><ins>+${Number(o.meta.additions) || 0}</ins> <del>−${Number(o.meta.deletions) || 0}</del></span>` : ''
+  const url = webUrl(o.url)
+  const sub = [o.type === 'file' ? o.path : url ? hostOf(url) : '', where].filter(Boolean).join(' · ')
+  const tag = url ? 'a' : o.type === 'plan' ? 'button' : 'div'
+  const attrs = url ? `href="${escapeHtml(url)}" target="_blank" rel="noopener"` : o.type === 'plan' ? `type="button" data-zoom="${escapeHtml(o.session)}|${escapeHtml(o.id)}"` : ''
+  return `<${tag} class="out ${escapeHtml(o.type)}" ${attrs} ${pass}${tag === 'div' ? ' tabindex="0"' : ''} title="${escapeHtml(o.title)}. Drag it onto a critter (or press H) to hand it over">
     <i class="out-icon">${icon}</i>
     <span class="out-main"><b>${escapeHtml(o.title)}</b><small>${escapeHtml(kind)}${o.meta?.state ? ` · ${escapeHtml(o.meta.state)}` : ''}${sub ? ` · ${escapeHtml(sub)}` : ''}</small></span>
     ${stats || `<time>${ago(o.t)}</time>`}

@@ -137,7 +137,16 @@ async function cachedSummary(path) {
 
 // Recent sessions, newest first: at most `perProject` per project folder,
 // none older than `days`.
-export async function readHistory({ days = 14, perProject = 12 } = {}) {
+// Callers at the same moment (every open page, every minute) share one
+// scan rather than each reading every transcript again.
+const inFlight = new Map()
+export function readHistory({ days = 14, perProject = 12 } = {}) {
+  const key = `${days}|${perProject}`
+  if (!inFlight.has(key)) inFlight.set(key, scan({ days, perProject }).finally(() => inFlight.delete(key)))
+  return inFlight.get(key)
+}
+
+async function scan({ days, perProject }) {
   const root = projectsDir()
   const since = Date.now() - days * 86400000
   const dirs = await readdir(root, { withFileTypes: true }).catch(() => [])

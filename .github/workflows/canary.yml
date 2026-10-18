@@ -1,0 +1,27 @@
+name: Canary
+
+# CI checks the plugin against a pinned Claude Code. This checks it every day
+# against the newest release, so a change on Claude Code's side shows up here
+# (and in the owner's notifications) before users run into it.
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  latest:
+    name: Plugin against the newest Claude Code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - run: npm install -g @anthropic-ai/claude-code@latest
+      - run: claude --version
+      - run: claude plugin validate --strict .
+      - run: claude plugin validate --strict agent-office
+      - run: claude plugin test agent-office

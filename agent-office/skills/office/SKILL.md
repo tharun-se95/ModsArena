@@ -7,7 +7,7 @@ description: Open Agent Office, the live view of your Claude Code sessions and s
 
 Agent Office is a page served by a small local bridge at http://127.0.0.1:7337 (another port if the person set the plugin's `port` option). In a Claude Code session where the plugin's hooks run, the `/office` command does all of this by itself; this skill is the way in from anywhere the command isn't listed.
 
-1. Check Node first with `node --version`. If `node` is missing or older than 18, don't go on: say Agent Office needs Node 18 or newer, a free program it runs on, and that they can install the LTS version from https://nodejs.org, then restart Claude Code and ask again.
+1. Check Node first with `node --version`. If `node` is missing or older than 20, don't go on: say Agent Office needs Node 20 or newer, a free program it runs on, and that they can install the LTS version from https://nodejs.org, then restart Claude Code and ask again.
 2. If the person said `status`, run `node "${CLAUDE_PLUGIN_ROOT}/server/cli.mjs" status` and report what it prints. Stop there.
 3. If the person asked for auto-update (new versions arriving on their own), run `node "${CLAUDE_PLUGIN_ROOT}/server/cli.mjs" auto-update` (add `off` if they want it off) and pass on what it prints. Stop there.
 4. Otherwise start the bridge and open the page with `node "${CLAUDE_PLUGIN_ROOT}/server/cli.mjs"`. Run it in the background: it starts the bridge in that process, which has to keep running for the office to stay up. When one is already running, it restarts the office with this copy: the old bridge hands over what it shows and steps down.

@@ -15,8 +15,12 @@ export const EVENTS = [
   ['PostToolUseFailure', true], ['PreCompact', false],
 ]
 
+// The header file holds this account's secret (secret.mjs), so the bridge
+// knows the events are from your own sessions.
+export const HEADERS_FILE = '"@${CLAUDE_CONFIG_DIR:-$HOME/.claude}/agent-office/headers"'
+
 export const hookCommand = port =>
-  `curl -s --max-time 1 -X POST http://127.0.0.1:${port}/event -H 'content-type: application/json' --data-binary @- >/dev/null 2>&1 || true ${MARK}`
+  `curl -s --max-time 1 -X POST http://127.0.0.1:${port}/event -H 'content-type: application/json' -H ${HEADERS_FILE} --data-binary @- >/dev/null 2>&1 || true ${MARK}`
 
 // The hooks block on its own, as fallback/settings.json holds it.
 export function fallbackHooks(port = 7337) {

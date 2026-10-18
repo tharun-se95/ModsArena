@@ -8,6 +8,10 @@
 //   --replace   take over the port from a managed bridge already holding it
 //   --restart   with --replace: take over from whatever Agent Office bridge
 //               holds it, however it was started (/office run again)
+//   --background  run detached from whatever started it (the plugin's mod,
+//               whose children end with the session), logging to
+//               ~/.claude/agent-office/bridge.log, and stop after a while
+//               with nobody watching and nothing reporting
 //
 //   POST /event    one event or an array (mod schema or classic hook stdin)
 //   GET  /stream   SSE: replays what places each thread, the recent log and
@@ -43,14 +47,15 @@
 // token only the office page gets (guard.mjs says why), and so do jobs.
 
 import { createServer } from 'node:http'
-import { readFileSync } from 'node:fs'
-import { readFile, stat } from 'node:fs/promises'
-import { extname, join, dirname, isAbsolute } from 'node:path'
+import { readFileSync, openSync, statSync, renameSync, mkdirSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { readFile, stat, realpath } from 'node:fs/promises'
+import { extname, join, dirname, isAbsolute, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { normalize, GAUGES, gaugeKey } from './normalize.mjs'
 import { findProject } from './projects.mjs'
-import { readHistory, tailContext, summarizeTranscript } from './history.mjs'
-import { startDemo, demoJob, answerDemo, stopDemo } from './demo.mjs'
+import { readHistory, tailContext, summarizeTranscript, projectsDir } from './history.mjs'
+import { startDemo, demoJob, answerDemo, stopDemo, demoHistory } from './demo.mjs'
 import { refusal, newToken, tokenMatches, TOKEN_HEADER, INBOX_HEADER, CONTROL_HEADER } from './guard.mjs'
 import * as chat from './chat.mjs'
 import { createJobs } from './jobs.mjs'
@@ -60,6 +65,7 @@ import { openProject, writeAgent, listAgents, removeTranscript } from './manage.
 import { isEngineNote } from './prompts.mjs'
 import * as autoUpdate from './autoupdate.mjs'
 import { RESTART_HEADER, stopOldBridge } from './restart.mjs'
+import { loadSecret, proof, openKey, cookieValue, cookieOf, same, SECRET_HEADER, COOKIE, officeDir } from './secret.mjs'
 
 const args = process.argv.slice(2)
 const flag = name => args.includes(`--${name}`)
@@ -79,8 +85,14 @@ if (!LOOPBACK.has(HOST)) {
 }
 const HISTORY_DAYS = Number(option('history-days', 14))
 const LOG_LIMIT = 8000
+const CLIENT_BUFFER_MAX = 8 * 1024 * 1024
 // A fresh secret each run, handed to the office page in its HTML.
 const TOKEN = newToken()
+// This account's secret (secret.mjs): your sessions send it, the bridge
+// proves it knows it, and the office page opens with a key made from it.
+const SECRET = loadSecret()
+const OPEN_KEY = openKey(SECRET)
+const COOKIE_VALUE = cookieValue(SECRET)
 const MAX_BODY = 1024 * 1024
 const HERE = dirname(fileURLToPath(import.meta.url))
 const PUBLIC = join(HERE, 'public')
@@ -95,12 +107,15 @@ const VERSION = (() => {
   }
 })()
 const MANAGED = flag('managed')
+// AGENT_OFFICE_DEBUG=1: a log line per request (keys and nonces left out).
+const DEBUG = process.env.AGENT_OFFICE_DEBUG === '1'
 const REPLACE_MS = 5000
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
+  '.woff2': 'font/woff2',
 }
 
 // Pictures sessions made or read: `${session}|${id}` -> the file. Only
@@ -177,6 +192,23 @@ function replay() {
   return [...kept, ...log, ...gauges.values()]
 }
 
+// The replay as a page receives it, kept under REPLAY_MAX bytes: the oldest
+// of the log goes first (what places each thread, and the gauges, stay).
+const REPLAY_MAX = 16 * 1024 * 1024
+function replayText() {
+  let text = JSON.stringify(replay())
+  for (let drop = Math.ceil(log.length / 4); text.length > REPLAY_MAX && drop <= log.length; drop *= 2) {
+    const inLog = new Set(log)
+    const kept = [...anchors.values()].flatMap(a => [...a.events.values()]).filter(ev => !inLog.has(ev)).sort((a, b) => a.t - b.t)
+    text = JSON.stringify([...kept, ...log.slice(drop), ...gauges.values()])
+  }
+  return text
+}
+
+// What /healthz reports about how the bridge is doing, for /office status
+// and bug reports.
+const stats = { startedAt: Date.now(), errors: 0, dropped: 0, badPosts: 0, slowPages: 0 }
+
 // The bridge names projects itself, so live and past sessions of one
 // repository land in one room whatever the producer called it.
 function enrich(ev) {
@@ -196,6 +228,7 @@ const newDirs = new Set()
 async function isKnown(dir) {
   if (knownDirs.has(dir) || newDirs.has(dir)) return true
   // Past sessions count too; read them once, on demand.
+  if (flag('demo')) return knownDirs.has(dir)
   try {
     for (const s of await readHistory({ days: HISTORY_DAYS })) know(s.cwd, s.project?.id)
   } catch {}
@@ -278,6 +311,7 @@ async function deleteForGood(body) {
 }
 
 function publish(events) {
+  busy()
   for (const raw of events) {
     const ev = enrich(raw)
     if (ev.kind === 'session.start') know(ev.cwd, ev.project?.id)
@@ -293,17 +327,43 @@ function publish(events) {
     // A finished agent's last reading has nothing left to show.
     if (ev.kind === 'agent.end') gauges.delete(gaugeKey({ kind: 'agent.context', session: ev.session, agent: ev.agent }))
     const frame = `data: ${JSON.stringify(ev)}\n\n`
-    for (const res of clients) res.write(frame)
+    for (const res of clients) {
+      // A page that stopped reading (asleep, frozen) isn't buffered forever;
+      // it reconnects and gets a fresh replay.
+      if (res.writableLength > CLIENT_BUFFER_MAX) {
+        stats.slowPages++
+        clients.delete(res)
+        res.end()
+      } else res.write(frame)
+    }
   }
   if (log.length > LOG_LIMIT) log.splice(0, log.length - LOG_LIMIT)
   pruneAnchors()
 }
 
+// Classic hook payloads often make no event (tools the office doesn't
+// show), so they don't count as dropped.
+const hasClassic = payload => (Array.isArray(payload) ? payload : [payload]).some(p => typeof p?.hook_event_name === 'string')
+
+async function ownTranscript(path) {
+  try {
+    const [root, real] = await Promise.all([realpath(projectsDir()), realpath(path)])
+    const rel = relative(root, real)
+    if (!real.endsWith('.jsonl') || rel.startsWith('..') || isAbsolute(rel)) return undefined
+    return (await stat(real)).isFile() ? real : undefined
+  } catch {
+    return undefined
+  }
+}
+
 // Settings hooks carry no context figures, but they name the transcript.
 async function contextFromTranscript(payloads) {
   for (const p of Array.isArray(payloads) ? payloads : [payloads]) {
-    if (p?.hook_event_name !== 'Stop' || !p.transcript_path) continue
-    const context = await tailContext(p.transcript_path)
+    if (p?.hook_event_name !== 'Stop' || typeof p.transcript_path !== 'string') continue
+    // Only a transcript Claude Code keeps, never any file a post names.
+    const path = await ownTranscript(p.transcript_path)
+    if (!path) continue
+    const context = await tailContext(path)
     if (context) publish([{ t: Date.now(), kind: 'agent.context', session: String(p.session_id), ...context }])
   }
 }
@@ -330,8 +390,8 @@ function readBody(req) {
 const CSP = [
   "default-src 'self'",
   "script-src 'self'",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src 'self' https://fonts.gstatic.com",
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self'",
   "img-src 'self' data: blob:",
   "connect-src 'self'",
   "frame-ancestors 'none'",
@@ -344,6 +404,42 @@ const PAGE_HEADERS = {
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'no-referrer',
 }
+
+const SESSION_ROUTES = new Set(['POST /event', 'GET /inbox', 'GET /answer/wait', 'POST /shutdown'])
+const OPEN_ROUTES = new Set(['GET /healthz'])
+const STATIC = /^\/(fonts\/)?[\w.-]+\.(js|css|svg|png|ico|woff2?)$/
+
+export function routeOwner(method, pathname) {
+  const route = `${method} ${pathname}`
+  if (SESSION_ROUTES.has(route)) return 'session'
+  if (OPEN_ROUTES.has(route) || (method === 'GET' && STATIC.test(pathname))) return 'anyone'
+  return 'page'
+}
+
+// The demo has nothing of yours in it, so it needs no key.
+const isSignedIn = req => flag('demo') || same(cookieOf(req.headers.cookie), COOKIE_VALUE)
+
+// Opening the office: with the key (/office and the CLI put it in the URL)
+// the browser gets a cookie only this bridge reads, then the plain address;
+// without it, a page saying how to open it.
+function signIn(req, res, searchParams) {
+  if (same(searchParams.get('key'), OPEN_KEY)) {
+    res.writeHead(303, {
+      location: '/',
+      'set-cookie': `${COOKIE}=${COOKIE_VALUE}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000`,
+      'cache-control': 'no-store',
+    })
+    return res.end()
+  }
+  res.writeHead(401, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...PAGE_HEADERS })
+  res.end(LOCKED_PAGE)
+}
+
+const LOCKED_PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Agent Office</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:34em;margin:12vh auto;padding:0 20px;color:#2b2a2e;background:#f6f1e8}h1{font-size:22px}code{background:#e9e2d4;padding:2px 6px;border-radius:5px}</style>
+<h1>Open the office from Claude Code</h1>
+<p>Agent Office shows your own sessions, so it opens with a key only your account has. Run <code>/office</code> in Claude Code (or <code>npx github:tharun-se95/ModsArena</code>) and it opens here, signed in.</p>
+<p>After that, this browser stays signed in.</p>`
 
 async function serveStatic(res, pathname) {
   const rel = pathname === '/' ? 'index.html' : pathname.slice(1)
@@ -368,7 +464,9 @@ const json = (res, status, body) => {
 // One bad request never takes the office down: anything a route throws is
 // answered with an error, and the bridge keeps serving.
 const server = createServer((req, res) => {
+  if (DEBUG) res.on('finish', () => console.log(`[agent-office] ${req.method} ${req.url.replace(/([?&](key|nonce)=)[^&]*/g, '$1…')} ${res.statusCode}`))
   handle(req, res).catch(err => {
+    stats.errors++
     console.error('[agent-office] request failed:', err?.message ?? err)
     if (!res.headersSent) json(res, 500, { error: 'something went wrong in the bridge' })
     else res.end()
@@ -385,6 +483,26 @@ async function handle(req, res) {
   const { pathname, searchParams } = url
   const refused = refusal(req, PORT)
   if (refused) return json(res, 403, { error: refused })
+
+  // Who may use this route (one place, so it can be checked at a glance):
+  //   your sessions (the secret, as a header): reporting and their inbox;
+  //   the office page (its cookie): the page itself and everything it reads
+  //     and does; what it changes also needs this run's token (each route);
+  //   anyone on this computer: /healthz, and the page's script and images.
+  const who = routeOwner(req.method, pathname)
+  if (who === 'session' && !same(req.headers[SECRET_HEADER], SECRET)) return json(res, 401, { error: 'not one of your sessions' })
+  if (who === 'page' && !isSignedIn(req)) {
+    if (req.method === 'GET' && (pathname === '/' || pathname === '/index.html')) return signIn(req, res, searchParams)
+    return json(res, 401, { error: 'open the office with /office (or the CLI) to sign in' })
+  }
+
+  // The office page asks again for this run's token after the bridge
+  // restarted (api.js). Only a signed-in page reaches here, and only the
+  // page's own origin can read the answer.
+  if (req.method === 'GET' && pathname === '/token') {
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+    return res.end(JSON.stringify({ token: TOKEN }))
+  }
 
   if (req.method === 'POST' && pathname === '/chat') {
     if (!tokenMatches(req.headers[TOKEN_HEADER], TOKEN)) return json(res, 403, { error: 'missing or wrong token' })
@@ -577,10 +695,13 @@ async function handle(req, res) {
     try {
       const payload = JSON.parse(await readBody(req))
       const events = normalize(payload)
+      const sent = Array.isArray(payload) ? payload.length : 1
+      if (!hasClassic(payload)) stats.dropped += Math.max(0, sent - events.length)
       publish(events)
       json(res, 200, { accepted: events.length })
       void contextFromTranscript(payload)
     } catch (err) {
+      stats.badPosts++
       res.writeHead(400).end(String(err.message ?? err))
     }
     return
@@ -592,8 +713,9 @@ async function handle(req, res) {
       'cache-control': 'no-cache',
       connection: 'keep-alive',
     })
-    res.write(`event: replay\ndata: ${JSON.stringify(replay())}\n\n`)
+    res.write(`event: replay\ndata: ${replayText()}\n\n`)
     clients.add(res)
+    busy()
     const ping = setInterval(() => res.write(': ping\n\n'), 15000)
     req.on('close', () => {
       clearInterval(ping)
@@ -604,8 +726,10 @@ async function handle(req, res) {
 
   if (req.method === 'GET' && pathname === '/history') {
     try {
-      const days = Number(searchParams.get('days') ?? HISTORY_DAYS)
-      json(res, 200, { sessions: await readHistory({ days }) })
+      // A year at most: every transcript in range is read.
+      const days = Math.min(365, Math.max(1, Number(searchParams.get('days') ?? HISTORY_DAYS) || HISTORY_DAYS))
+      // The demo opens without signing in, so it never reads your transcripts.
+      json(res, 200, { sessions: flag('demo') ? demoHistory() : await readHistory({ days }) })
     } catch (err) {
       json(res, 500, { error: String(err.message ?? err) })
     }
@@ -613,7 +737,10 @@ async function handle(req, res) {
   }
 
   if (pathname === '/healthz') {
-    json(res, 200, { ok: true, name: 'agent-office', version: VERSION, managed: MANAGED, pid: process.pid, demo: flag('demo'), chat: true, jobs: true, answers: true, resume: true, manage: true, autoUpdate: updates(), events: log.length, viewers: clients.size })
+    const nonce = searchParams.get('nonce')
+    // Proof it knows this account's secret, so a session never reports to
+    // another account's program on the port.
+    json(res, 200, { ok: true, name: 'agent-office', ...(nonce && nonce.length <= 200 && { proof: proof(SECRET, nonce) }), version: VERSION, managed: MANAGED, pid: process.pid, demo: flag('demo'), chat: true, jobs: true, answers: true, resume: true, manage: true, autoUpdate: updates(), events: log.length, viewers: clients.size, uptimeS: Math.round((Date.now() - stats.startedAt) / 1000), node: process.version, platform: process.platform, errors: stats.errors, dropped: stats.dropped, badPosts: stats.badPosts, slowPages: stats.slowPages })
     return
   }
 
@@ -623,8 +750,9 @@ async function handle(req, res) {
     // One you started yourself (npx, node server.mjs) stays yours to stop,
     // unless you ran /office again, which asks for a restart.
     if (!MANAGED && req.headers[RESTART_HEADER] !== '1') return json(res, 409, { error: 'not started by the plugin' })
-    // The live picture goes to the bridge taking over, so nothing resets.
-    json(res, 200, { ok: true, events: replay() })
+    // The live picture goes to the bridge taking over, so nothing resets:
+    // the events, the jobs it follows and messages not yet delivered.
+    json(res, 200, { ok: true, events: replay(), jobs: jobs.handOver(), chat: chat.handOver() })
     console.log('[agent-office] stepping down for a newer bridge')
     for (const client of clients) client.end()
     // Closing stops listening at once; open connections get a moment to end.
@@ -642,11 +770,18 @@ process.on('unhandledRejection', err => console.error('[agent-office] unhandled:
 process.on('uncaughtException', err => console.error('[agent-office] uncaught:', err?.stack ?? err))
 
 let replaceUntil = 0
+let askedAgain = false
 
 server.on('error', err => {
   if (err.code === 'EADDRINUSE') {
     // Taking over: the old bridge is stepping down, so try again shortly.
     if (Date.now() < replaceUntil) return void setTimeout(() => server.listen(PORT, HOST), 50)
+    // A session that saw no bridge mid-swap may have started its own on the
+    // port first: ask that one to step down too, once, rather than give up.
+    if (flag('replace') && !askedAgain) {
+      askedAgain = true
+      return void askToStepDown().then(takeOver).then(() => server.listen(PORT, HOST))
+    }
     // Another session's bridge already holds the port: that one serves us too.
     console.error(`[agent-office] port ${PORT} in use, assuming a bridge is already running`)
     process.exit(0)
@@ -667,18 +802,19 @@ server.on('listening', () => {
 // again.
 // With --restart it takes over from any Agent Office bridge: one that
 // can't step down (an older version, or one you started yourself before
-// this could ask) is stopped (restart.mjs). Returns the events it hands over.
+// this could ask) is stopped (restart.mjs). Returns what it hands over:
+// { events, jobs, chat }.
 async function askToStepDown() {
   const restart = flag('restart')
   let pid
   try {
     const was = await fetch(`http://127.0.0.1:${PORT}/healthz`, { signal: AbortSignal.timeout(1500) }).then(r => r.json()).catch(() => null)
     pid = was?.pid
-    const res = await fetch(`http://127.0.0.1:${PORT}/shutdown`, { method: 'POST', headers: { [CONTROL_HEADER]: '1', ...(restart && { [RESTART_HEADER]: '1' }) } })
+    const res = await fetch(`http://127.0.0.1:${PORT}/shutdown`, { method: 'POST', headers: { [CONTROL_HEADER]: '1', [SECRET_HEADER]: SECRET, ...(restart && { [RESTART_HEADER]: '1' }) } })
     if (res.ok) {
       replaceUntil = Date.now() + REPLACE_MS
       const body = await res.json().catch(() => ({}))
-      return Array.isArray(body.events) ? body.events : []
+      return { events: Array.isArray(body.events) ? body.events : [], jobs: body.jobs, chat: body.chat }
     }
   } catch {
     // Nothing answers: the port is free, or held by something that isn't a bridge.
@@ -687,11 +823,54 @@ async function askToStepDown() {
     console.log('[agent-office] stopped the older bridge on the port')
     replaceUntil = Date.now() + REPLACE_MS
   }
-  return []
+  return { events: [] }
 }
 
-if (flag('replace')) {
-  const handed = await askToStepDown()
-  if (handed.length) publish(handed)
+// Carry on from where the old bridge stopped.
+function takeOver(handed) {
+  if (handed.events.length) publish(handed.events)
+  jobs.adopt(handed.jobs)
+  chat.adopt(handed.chat)
 }
+
+// ---------------------------------------------------------------------------
+// Running in the background. The mod's children end when its session does,
+// which took the office down with whichever session happened to start it.
+// With --background this process starts the real bridge detached, its
+// output in a log, and exits; that bridge runs until it's been idle a while.
+
+const LOG_LIMIT_BYTES = 1024 * 1024
+const IDLE_MS = Number(process.env.AGENT_OFFICE_IDLE_MS ?? 30 * 60 * 1000)
+
+function logFile() {
+  const dir = officeDir()
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  const file = join(dir, 'bridge.log')
+  // One older log is kept, so it never grows past about 2 MB.
+  try { if (statSync(file).size > LOG_LIMIT_BYTES) renameSync(file, `${file}.1`) } catch {}
+  return file
+}
+
+if (flag('background') && !flag('detached')) {
+  const file = logFile()
+  const out = openSync(file, 'a', 0o600)
+  const argv = process.argv.slice(1).filter(a => a !== '--background')
+  const child = spawn(process.execPath, [...argv, '--detached'], { detached: true, stdio: ['ignore', out, out], windowsHide: true, env: process.env })
+  child.unref()
+  console.log(`[agent-office] the office runs in the background (pid ${child.pid}); its log is ${file}`)
+  process.exit(0)
+}
+
+let lastActivity = Date.now()
+const busy = () => { lastActivity = Date.now() }
+if (flag('detached')) {
+  setInterval(() => {
+    if (clients.size === 0 && Date.now() - lastActivity > IDLE_MS && !jobs.anyLive()) {
+      console.log(`[agent-office] nobody watching and nothing reporting for ${Math.round(IDLE_MS / 60000)} minutes; stopping`)
+      process.exit(0)
+    }
+  }, Math.min(60000, IDLE_MS)).unref()
+}
+
+if (flag('replace')) takeOver(await askToStepDown())
 server.listen(PORT, HOST)

@@ -3,10 +3,11 @@
 //
 // With a bridge behind the page, the conversation comes from GET
 // /transcript (the session's own .jsonl file, read by the bridge) and a
-// message goes to POST /chat with the token the page was served with; the
+// message goes to POST /chat with the token the page was served with (api.js); the
 // session's mod delivers it. In the demo there's no bridge: the transcript
 // is drawn from the sample activity and messages get a sample reply.
 
+import { post, hasBridge } from './api.js'
 import { nodes, sid, outputs } from './model.js'
 import { activity, escapeHtml, ago } from './words.js'
 import { markdown } from './markdown.js'
@@ -19,7 +20,6 @@ import { who } from './critters.js'
 
 const POLL_MS = 1500
 const KEEP = 600
-const token = document.querySelector('meta[name="agent-office-token"]')?.content || ''
 let demo = false
 
 // main.js says whether this page plays sample activity.
@@ -54,7 +54,7 @@ function bubble(entry, results) {
       return `<div class="tx problem" role="alert"><b>${escapeHtml(entry.title)}</b><p>${escapeHtml(entry.fix)}</p><small>Claude Code said: ${escapeHtml(entry.line)}</small>${time}</div>`
     // What the work made, as the card the Outputs tab shows.
     case 'output':
-      return `<div class="tx made ${entry.output.type}">${outputCard(entry.output)}</div>`
+      return `<div class="tx made ${escapeHtml(entry.output.type)}">${outputCard(entry.output)}</div>`
     // A checklist update (TodoWrite): where it stands, folded.
     case 'todo': {
       const done = entry.items.filter(i => i.status === 'completed').length
@@ -283,7 +283,7 @@ async function send(text) {
     pending.ok = result.ok
     pending.status = result.status
     // The demo has it in its own conversation already.
-    if (result.ok && !token && view) {
+    if (result.ok && !hasBridge() && view) {
       view.pending = view.pending.filter(p => p !== pending)
       view.entries = demoEntries(n)
     }
@@ -319,11 +319,7 @@ async function send(text) {
     return
   }
   try {
-    const res = await fetch('/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-agent-office-token': token },
-      body: JSON.stringify({ ...view.target, text: pending.text }),
-    })
+    const res = await post('/chat', { ...view.target, text: pending.text })
     const body = await res.json().catch(() => ({}))
     if (!res.ok) throw new Error(body.error ?? `the bridge answered ${res.status}`)
     pending.id = body.id
@@ -358,13 +354,9 @@ export async function sendTo(n, text) {
     demoReplies.set(n.id, list)
     return { ok: true, status: 'Queued as the next prompt' }
   }
-  if (!token) return { ok: false, status: 'Messaging needs the office opened from its bridge (run /office)' }
+  if (!hasBridge()) return { ok: false, status: 'Messaging needs the office opened from its bridge (run /office)' }
   try {
-    const res = await fetch('/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-agent-office-token': token },
-      body: JSON.stringify({ ...target(n), text: text.trim() }),
-    })
+    const res = await post('/chat', { ...target(n), text: text.trim() })
     const body = await res.json().catch(() => ({}))
     if (!res.ok) throw new Error(body.error ?? `the bridge answered ${res.status}`)
     return { ok: true, status: 'Sent. It arrives as the next prompt' }
@@ -385,7 +377,7 @@ export async function say(n, text) {
   return sendTo(n, text)
 }
 
-export const canMessage = () => demo || Boolean(token)
+export const canMessage = () => demo || hasBridge()
 
 // Whether a thread has ended: a message to it picks it up again (resume).
 export const hasEnded = n => n?.kind === 'session' && (n.past || n.status === 'done')
@@ -396,7 +388,7 @@ export const hasEnded = n => n?.kind === 'session' && (n.past || n.status === 'd
 // Resolves to { ok, status }.
 export async function resume(n, text) {
   if (!n || !text.trim()) return { ok: false, status: 'Nothing to send' }
-  if (!token) {
+  if (!hasBridge()) {
     if (!demo) return { ok: false, status: 'Picking it up again needs the office opened from its bridge (run /office)' }
     // Demo only, with no bridge: the front desk plays it (desk.js).
     document.dispatchEvent(new CustomEvent('office:resume-demo', { detail: { session: n.session, dir: n.project ?? n.cwd, text: text.trim() } }))
@@ -406,12 +398,8 @@ export async function resume(n, text) {
     return { ok: true, status: 'Picked up again in the background. It answers here.' }
   }
   try {
-    const res = await fetch('/resume', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-agent-office-token': token },
-      // `dir` only for a demo bridge, which has no transcript to read it from.
-      body: JSON.stringify({ session: n.session, text: text.trim(), dir: n.project ?? n.cwd }),
-    })
+    // `dir` only for a demo bridge, which has no transcript to read it from.
+    const res = await post('/resume', { session: n.session, text: text.trim(), dir: n.project ?? n.cwd })
     const body = await res.json().catch(() => ({}))
     if (!res.ok) throw new Error(body.error ?? `the bridge answered ${res.status}`)
     return { ok: true, status: 'Picked up again in the background. It answers here.' }
@@ -436,7 +424,7 @@ export function focusComposer() {
 
 // What the message box says, or why there isn't one.
 function composer(n) {
-  if (!demo && !token) return { off: 'Messaging needs the office opened from its bridge (run /office).' }
+  if (!demo && !hasBridge()) return { off: 'Messaging needs the office opened from its bridge (run /office).' }
   if (hasEnded(n)) {
     return { resume: true, state: 'Ended · picks up again', placeholder: 'Message it to pick it up again…', hint: 'Picks it up again in the background · uses tokens', more: 'It has ended: this picks it up again in the background, in its own folder, and it answers here. That uses tokens.' }
   }

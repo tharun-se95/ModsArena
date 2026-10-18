@@ -19,12 +19,14 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadSecret, openKey } from './secret.mjs'
 import { addHooks, removeHooks, hasHooks } from './settings-hooks.mjs'
 import * as autoUpdate from './autoupdate.mjs'
+import { diagnose, report, gather, MIN_NODE } from './doctor.mjs'
 
-// Node 18 or newer, said plainly (older ones fail with a cryptic error).
-if (Number(process.versions.node.split('.')[0]) < 18) {
-  console.error(`Agent Office needs Node 18 or newer, a free program it runs on; this computer has an older one (v${process.versions.node}). Install the LTS version from https://nodejs.org, then try again.`)
+// Node 20 or newer, said plainly (older ones fail with a cryptic error).
+if (Number(process.versions.node.split('.')[0]) < MIN_NODE) {
+  console.error(`Agent Office needs Node ${MIN_NODE} or newer, a free program it runs on; this computer has an older one (v${process.versions.node}). Install the LTS version from https://nodejs.org, then try again.`)
   process.exit(1)
 }
 
@@ -79,7 +81,8 @@ async function serve() {
   console.log(isDemo
     ? `Playing sample activity at ${url} (Ctrl+C to stop)`
     : `Agent Office is ${running ? 'restarted' : 'open'} at ${url}. Leave this running; Ctrl+C stops it.`)
-  openBrowser(url)
+  // Your own office opens signed in (secret.mjs); the demo needs no key.
+  openBrowser(isDemo ? url : `${url}/?key=${openKey(loadSecret())}`)
 }
 
 async function status() {
@@ -166,13 +169,22 @@ function uninstallHooks() {
   console.log(`Removed Agent Office's hooks from your ${where} settings (${file}). Nothing else changed.`)
 }
 
+async function doctor() {
+  const version = JSON.parse(readFileSync(join(here, '..', '.claude-plugin', 'plugin.json'), 'utf8')).version
+  const checks = diagnose(await gather({ port, settingsFiles, hasHooks }))
+  console.log(report(checks, version))
+  if (checks.some(c => c.ok === false)) process.exitCode = 1
+}
+
 function usage() {
-  console.log(`Usage: agent-office [open | demo | status | auto-update | install-hooks | uninstall-hooks] [--port N] [--project] [--no-open]
+  console.log(`Usage: agent-office [open | demo | status | doctor | auto-update | install-hooks | uninstall-hooks] [--port N] [--project] [--no-open]
 
   open             start the bridge (if it isn't running) and open the office
   demo             the same with sample activity, no Claude Code needed (port 7338)
   status           is a bridge running, are the settings hooks installed, and
                    does the plugin update on its own
+  doctor           check everything Agent Office needs, as a report to paste
+                   into a bug report (changes nothing)
   auto-update [on | off]
                    let new versions of the plugin arrive on their own (on
                    unless you say off; takes effect next time Claude Code starts)
@@ -184,7 +196,7 @@ function usage() {
                    instead of your user settings`)
 }
 
-const commands = { open: serve, demo: serve, status, 'auto-update': setAutoUpdate, 'install-hooks': installHooks, 'uninstall-hooks': uninstallHooks, help: usage }
+const commands = { open: serve, demo: serve, status, doctor, 'auto-update': setAutoUpdate, 'install-hooks': installHooks, 'uninstall-hooks': uninstallHooks, help: usage }
 if (flag('help') || flag('h')) usage()
 else if (commands[command]) await commands[command]()
 else { usage(); process.exit(1) }
