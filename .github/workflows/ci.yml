@@ -86,6 +86,13 @@ jobs:
         working-directory: e2e
       - run: npm test
         working-directory: e2e
+      - name: Screenshots of what failed
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: e2e-failures
+          path: e2e/failures/
+          if-no-files-found: ignore
 
   plugin:
     name: Plugin and marketplace validate, mod tests

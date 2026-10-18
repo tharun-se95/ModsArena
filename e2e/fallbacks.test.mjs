@@ -4,7 +4,7 @@ import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, extname } from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -12,6 +12,7 @@ import { chromium } from 'playwright'
 import { ARGS, makeAccount, startBridge, until } from './fixtures.mjs'
 
 const cleanup = []
+mkdirSync(join(import.meta.dirname, 'failures'), { recursive: true })
 after(async () => { for (const fn of cleanup.reverse()) await fn() })
 
 test('without WebGL the office says so, and everything else works', async () => {
@@ -51,10 +52,21 @@ test('the hosted demo plays without a bridge', async () => {
   const page = await browser.newPage({ viewport: { width: 1280, height: 820 }, reducedMotion: 'reduce' })
   const errors = []
   page.on('pageerror', e => errors.push(e.message))
-  await page.goto(`http://127.0.0.1:${server.address().port}/`)
+  await page.goto(`http://127.0.0.1:${server.address().port}/`, { timeout: 60000 })
   await page.waitForSelector('section.project', { timeout: 30000 })
-  await page.locator('.thread .entry', { hasText: 'Dark mode for the charts' }).first().click()
-  await page.waitForSelector('.tx-compose.resume textarea')
+  // The demo keeps working while you click, so the list can shift under the
+  // pointer on a slow machine; like a person, click again if the wrong
+  // thread opened.
+  const opened = () => page.locator('.tx-compose .tx-what').first().textContent({ timeout: 5000 }).catch(() => '')
+  for (let i = 0; i < 3 && !/Dark mode for the charts/.test(await opened()); i++) {
+    await page.locator('.thread .entry', { hasText: 'Dark mode for the charts' }).first().click()
+  }
+  try {
+    await page.waitForSelector('.tx-compose.resume textarea')
+  } catch (err) {
+    await page.screenshot({ path: join(import.meta.dirname, 'failures', 'hosted-demo.png') }).catch(() => {})
+    throw new Error(`${err.message}\nopen: ${await opened() || 'nothing'}`, { cause: err })
+  }
   await page.locator('.tx-compose textarea').fill('Demo: pick it up again')
   await page.locator('.tx-compose textarea').press('Enter')
   assert.ok(await until(() => page.locator('.tx.you', { hasText: 'Demo: pick it up again' }).count()))
