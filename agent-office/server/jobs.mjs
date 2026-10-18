@@ -26,6 +26,8 @@ const POLL_MS = 3000
 const LOST_AFTER = 20 // polls without a sign of it (about a minute)
 const RUN_MS = 60000
 const KEEP = 50
+// What `claude stop` gets: a job's short id, as `claude --bg` printed it.
+const SHORT = /^\w[\w-]{0,99}$/
 
 // What `claude` to run: AGENT_OFFICE_CLAUDE for tests and unusual installs.
 //
@@ -335,5 +337,20 @@ export function createJobs({ publish, isKnown, demo }) {
   // Whether any job the office started is still running (the bridge stays up for it).
   const anyLive = () => [...jobs.values()].some(j => ['starting', 'working', 'blocked'].includes(j.state))
 
-  return { start, resume, stop, jobOf, anyLive, jobs }
+  // Handing over to a newer bridge: what it needs to keep following them
+  // and to stop one on request.
+  const handOver = () => [...jobs.values()].map(j => ({ ...j }))
+
+  function adopt(list) {
+    if (!Array.isArray(list)) return
+    for (const j of list.slice(-KEEP)) {
+      if (typeof j?.id !== 'string' || jobs.has(j.id)) continue
+      if (j.short !== undefined && !SHORT.test(j.short)) continue
+      jobs.set(j.id, { ...j })
+    }
+    while (jobs.size > KEEP) jobs.delete(jobs.keys().next().value)
+    if ([...jobs.values()].some(j => j.short && ['starting', 'working', 'blocked'].includes(j.state))) watch()
+  }
+
+  return { start, resume, stop, jobOf, anyLive, handOver, adopt, jobs }
 }

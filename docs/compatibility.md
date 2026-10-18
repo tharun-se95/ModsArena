@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | **Claude Code** | Builds with mods (plugins with hooks). Older builds: the [settings hooks](../README.md#settings-hooks) fallback. | CI validates and tests the plugin against a pinned Claude Code on every change, and a daily canary does the same against the newest release, so a change on Claude Code's side shows up within a day. |
 | **Node** | 20, 22 and 24 (current LTS lines). Older ones are refused with a message saying what to install. | The bridge tests run on each in CI. |
-| **Operating system** | macOS, Linux and Windows. | The bridge tests run on all three in CI. On Windows, the settings-hooks fallback runs through the shell Claude Code uses for hooks (Git Bash); the plugin itself needs no shell. |
+| **Operating system** | macOS, Linux and Windows. | The bridge tests run on all three in CI, including the settings hooks' command run through bash against a real bridge: on Windows that's Git Bash, the shell Claude Code runs hooks with there. The plugin itself needs no shell. |
 | **Browser** | Current Chrome, Edge, Firefox and Safari. Without WebGL the rooms don't draw; everything else works. | The office is tested end to end in Chromium in CI, with and without WebGL. |
 
 Agent Office runs on the computer whose sessions it shows. Sessions running in the cloud never touch your computer, so it can't see them.

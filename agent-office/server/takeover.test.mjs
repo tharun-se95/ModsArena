@@ -132,3 +132,24 @@ test('--background hands the office to a detached bridge, which stops once idle'
   // Nobody watching, nothing reporting: it stops on its own.
   await until(() => fetch(`${url}/healthz`).then(() => false, () => true))
 })
+
+test('a message not yet picked up survives the swap to a newer bridge', async () => {
+  const both = credentials(CONFIG).both
+  const old = start('--managed')
+  await until(async () => (await health())?.pid === old.pid)
+  const page = await (await fetch(`${base}/`, { headers: both() })).text()
+  const token = /name="agent-office-token" content="([0-9a-f]{48})"/.exec(page)?.[1]
+  const sent = await fetch(`${base}/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json', origin: base, 'x-agent-office-token': token, ...both() },
+    body: JSON.stringify({ session: 'sess-9', text: 'still there after the update?' }),
+  })
+  assert.equal(sent.status, 200)
+
+  const replacement = start('--managed', '--replace')
+  assert.equal(await exited(old), 0)
+  await until(async () => (await health())?.pid === replacement.pid)
+  const inbox = await (await fetch(`${base}/inbox?session=sess-9`, { headers: { 'x-agent-office-inbox': '1', ...auth() } })).json()
+  assert.deepEqual(inbox.messages.map(m => m.text), ['still there after the update?'])
+  replacement.kill()
+  await exited(replacement)
+})

@@ -750,8 +750,9 @@ async function handle(req, res) {
     // One you started yourself (npx, node server.mjs) stays yours to stop,
     // unless you ran /office again, which asks for a restart.
     if (!MANAGED && req.headers[RESTART_HEADER] !== '1') return json(res, 409, { error: 'not started by the plugin' })
-    // The live picture goes to the bridge taking over, so nothing resets.
-    json(res, 200, { ok: true, events: replay() })
+    // The live picture goes to the bridge taking over, so nothing resets:
+    // the events, the jobs it follows and messages not yet delivered.
+    json(res, 200, { ok: true, events: replay(), jobs: jobs.handOver(), chat: chat.handOver() })
     console.log('[agent-office] stepping down for a newer bridge')
     for (const client of clients) client.end()
     // Closing stops listening at once; open connections get a moment to end.
@@ -769,11 +770,18 @@ process.on('unhandledRejection', err => console.error('[agent-office] unhandled:
 process.on('uncaughtException', err => console.error('[agent-office] uncaught:', err?.stack ?? err))
 
 let replaceUntil = 0
+let askedAgain = false
 
 server.on('error', err => {
   if (err.code === 'EADDRINUSE') {
     // Taking over: the old bridge is stepping down, so try again shortly.
     if (Date.now() < replaceUntil) return void setTimeout(() => server.listen(PORT, HOST), 50)
+    // A session that saw no bridge mid-swap may have started its own on the
+    // port first: ask that one to step down too, once, rather than give up.
+    if (flag('replace') && !askedAgain) {
+      askedAgain = true
+      return void askToStepDown().then(takeOver).then(() => server.listen(PORT, HOST))
+    }
     // Another session's bridge already holds the port: that one serves us too.
     console.error(`[agent-office] port ${PORT} in use, assuming a bridge is already running`)
     process.exit(0)
@@ -794,7 +802,8 @@ server.on('listening', () => {
 // again.
 // With --restart it takes over from any Agent Office bridge: one that
 // can't step down (an older version, or one you started yourself before
-// this could ask) is stopped (restart.mjs). Returns the events it hands over.
+// this could ask) is stopped (restart.mjs). Returns what it hands over:
+// { events, jobs, chat }.
 async function askToStepDown() {
   const restart = flag('restart')
   let pid
@@ -805,7 +814,7 @@ async function askToStepDown() {
     if (res.ok) {
       replaceUntil = Date.now() + REPLACE_MS
       const body = await res.json().catch(() => ({}))
-      return Array.isArray(body.events) ? body.events : []
+      return { events: Array.isArray(body.events) ? body.events : [], jobs: body.jobs, chat: body.chat }
     }
   } catch {
     // Nothing answers: the port is free, or held by something that isn't a bridge.
@@ -814,7 +823,14 @@ async function askToStepDown() {
     console.log('[agent-office] stopped the older bridge on the port')
     replaceUntil = Date.now() + REPLACE_MS
   }
-  return []
+  return { events: [] }
+}
+
+// Carry on from where the old bridge stopped.
+function takeOver(handed) {
+  if (handed.events.length) publish(handed.events)
+  jobs.adopt(handed.jobs)
+  chat.adopt(handed.chat)
 }
 
 // ---------------------------------------------------------------------------
@@ -856,8 +872,5 @@ if (flag('detached')) {
   }, Math.min(60000, IDLE_MS)).unref()
 }
 
-if (flag('replace')) {
-  const handed = await askToStepDown()
-  if (handed.length) publish(handed)
-}
+if (flag('replace')) takeOver(await askToStepDown())
 server.listen(PORT, HOST)

@@ -7,6 +7,24 @@ git tag (`v0.2.1`) with a GitHub Release, and the same version is in
 modsarena (`/plugin` → Marketplaces), a new one arrives on its own;
 otherwise `claude plugin update agent-office@modsarena` fetches it.
 
+## 0.15.0
+
+The release candidate for 1.0: nothing new to learn, fewer ways to lose
+what you were doing.
+
+- **Updates keep your jobs and messages.** When a new version's bridge
+  takes over, it now also takes the jobs the old one was following (their
+  cards keep updating, and **Stop** still works) and any message you sent
+  that a session hadn't picked up yet. Before, those were lost in the swap.
+- **A swap can't be cut short.** If a session started its own bridge on the
+  port in the moment between the old one stepping down and the new one
+  starting, the new one now asks that one to step down too, instead of
+  giving up and losing what it was handed.
+- **Settings hooks checked on Windows.** CI now runs the settings hooks'
+  exact command through bash against a real bridge on Linux, macOS and
+  Windows (Git Bash, which Claude Code runs hooks with there), with and
+  without your secret.
+
 ## 0.14.0
 
 Ready for people who've never seen it. Agent Office now needs **Node 20 or

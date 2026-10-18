@@ -2,7 +2,7 @@
 // Starts a real bridge on a spare port and talks to it over HTTP.
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises'
 import { request } from 'node:http'
 import { connect } from 'node:net'
@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { credentials } from './test-support.mjs'
+import { hookCommand } from './settings-hooks.mjs'
 
 const PORT = 7400 + Math.floor(Math.random() * 400)
 const base = `http://127.0.0.1:${PORT}`
@@ -291,4 +292,24 @@ test('the demo, which opens without signing in, never shows your own sessions', 
   } finally {
     child.kill()
   }
+})
+
+// The settings hooks' command, exactly as installed, run the way Claude Code
+// runs hooks: through bash (Git Bash on Windows, which CI runs this on too).
+const hasShell = ['bash', 'curl'].every(cmd => spawnSync(cmd, ['--version'], { stdio: 'ignore' }).status === 0)
+test('a settings hook reaches the bridge with your secret', { skip: !hasShell && 'needs bash and curl' }, async () => {
+  const seen = async session => JSON.stringify(await firstReplay()).includes(session)
+  const hook = (session, configDir) => spawnSync('bash', ['-c', hookCommand(PORT)], {
+    input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: session, cwd: config, prompt: 'from a settings hook' }),
+    env: { ...process.env, CLAUDE_CONFIG_DIR: configDir }, encoding: 'utf8',
+  })
+  assert.equal(hook('hook-sess-1', config).status, 0, 'a hook never fails')
+  let arrived = false
+  for (let i = 0; i < 20 && !arrived; i++) arrived = await seen('hook-sess-1') || (await new Promise(r => setTimeout(r, 100)), false)
+  assert.ok(arrived, 'the event arrived')
+
+  // Without the secret (another account's hook), it's refused, and still exits 0.
+  assert.equal(hook('hook-sess-2', await mkdtemp(join(tmpdir(), 'office-other-'))).status, 0)
+  await new Promise(r => setTimeout(r, 300))
+  assert.ok(!(await seen('hook-sess-2')), 'nothing arrived')
 })

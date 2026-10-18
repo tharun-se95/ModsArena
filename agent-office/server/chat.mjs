@@ -50,4 +50,20 @@ export function settle(id, ok) {
   return m
 }
 
+// Handing over to a newer bridge: messages not yet delivered, so a session
+// still picks up what you sent, and reports how it went, after the swap.
+export const handOver = () => [...messages.values()].filter(m => m.status === 'queued' || m.status === 'taken').map(m => ({ ...m }))
+
+export function adopt(list) {
+  if (!Array.isArray(list)) return
+  for (const m of list.slice(-KEEP)) {
+    if (typeof m?.id !== 'string' || !ID.test(m.id) || messages.has(m.id)) continue
+    if (typeof m.session !== 'string' || !ID.test(m.session) || typeof m.text !== 'string' || m.text.length > MAX_TEXT) continue
+    if (m.agent !== undefined && (typeof m.agent !== 'string' || !ID.test(m.agent))) continue
+    if (m.action !== undefined && m.action !== 'stop') continue
+    messages.set(m.id, { id: m.id, session: m.session, ...(m.agent && { agent: m.agent }), ...(m.action && { action: m.action }), text: m.text, t: Number(m.t) || Date.now(), status: m.status === 'taken' ? 'taken' : 'queued' })
+  }
+  while (messages.size > KEEP) messages.delete(messages.keys().next().value)
+}
+
 export const reset = () => messages.clear()
