@@ -11,7 +11,7 @@
     "studio": "esbuild studio/crab-studio.js --bundle --format=iife --outfile=studio/dist/crab-studio.js"
   },
   "dependencies": {
-    "three": "^0.180.0"
+    "three": "^0.186.1"
   },
   "devDependencies": {
     "esbuild": "^0.25.0"
